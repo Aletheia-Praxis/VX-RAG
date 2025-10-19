@@ -209,3 +209,6 @@ __marimo__/
 # Internal chaos files
 *-SEC.md
 .github/instructions/*.md
+
+# Local binary files
+bin/
