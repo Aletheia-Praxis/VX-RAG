@@ -8,7 +8,7 @@ Indexing PDFs from vx-underground.org using Selenium.
 import json
 import os
 import logging
-from typing import List, Set, Optional, Dict, Any
+from typing import List, Set, Optional, Dict
 from urllib.parse import urljoin, quote
 from selenium.webdriver.remote.webdriver import WebDriver
 from seleniumwire import webdriver
