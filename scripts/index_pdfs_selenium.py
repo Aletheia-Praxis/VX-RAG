@@ -171,7 +171,7 @@ def main():
     # Add specific paths to folders with PDFs
     start_urls = []
     # Archive/The Old New Thing: years 2003–2025
-    for year in range(2003, 2025):
+    for year in range(2003, 2026):
         start_urls.append(f"https://vx-underground.org/Archive/The%20Old%20New%20Thing/{year}")
     # Other specific folders
     start_urls.extend([
