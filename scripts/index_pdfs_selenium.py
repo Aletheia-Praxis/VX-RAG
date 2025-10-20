@@ -305,7 +305,7 @@ def main():
         "https://vx-underground.org/Papers/Windows/System%20Components%20and%20Abuse",
         "https://vx-underground.org/Papers/Windows/Windows%20COM"
     ] + [
-        f"https://vx-underground.org/Malware%20Analysis/2025/{quote(item.split(' - ')[0].strip())}%20-%20{quote(item.split(' - ')[1].strip())}/Paper"
+        urljoin("https://vx-underground.org/Malware%20Analysis/2025/", quote(f"{item.split(' - ')[0].strip()} - {item.split(' - ')[1].strip()}/Paper"))
         for item in [
             "2025-01-02 - NonEuclid RAT",
             "2025-01-03 - RATs on the island (Remote Access Trojans in Sri Lanka's Cybersecurity Landscape)",
