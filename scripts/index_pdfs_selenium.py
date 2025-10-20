@@ -42,9 +42,11 @@ def get_all_pdf_links(driver, base_url: str, visited: Optional[Set[str]] = None)
         print(f"Error loading {base_url}: {e}")
         return []
 
+    import time
     pdf_links = []
     # 1. Find all PDF files in the current folder
     pdf_spans = soup.find_all("span", class_="truncate")
+    found_pdfs = 0
     for span in pdf_spans:
         name = span.get_text(strip=True)
         if name.lower().endswith(".pdf"):
@@ -53,17 +55,23 @@ def get_all_pdf_links(driver, base_url: str, visited: Optional[Set[str]] = None)
                 "url": base_url,
                 "path": base_url
             })
+            found_pdfs += 1
             print(f"[FOUND] PDF: {name} @ {base_url}")
+    print(f"[INFO] {found_pdfs} PDF(s) found in {base_url}")
 
     # 2. Find all subfolders for recursion
     folder_spans = soup.find_all("span", class_="truncate")
+    found_folders = 0
     for span in folder_spans:
         folder_name = span.get_text(strip=True)
         if folder_name.endswith("/"):
+            found_folders += 1
+            print(f"[INFO] Entering folder: {folder_name} from {base_url}")
             try:
                 folder_elem = driver.find_element(By.XPATH, f"//span[contains(@class, 'truncate') and text()='{folder_name}']")
                 folder_elem.click()
-                WebDriverWait(driver, 5).until(EC.presence_of_element_located((By.TAG_NAME, "body")))
+                time.sleep(1.5)  # Add a pause for loading
+                WebDriverWait(driver, 7).until(EC.presence_of_element_located((By.TAG_NAME, "body")))
                 new_url = driver.current_url
                 # If there is a subfolder named Paper — go into it
                 sub_soup = BeautifulSoup(driver.page_source, "html.parser")
@@ -71,10 +79,12 @@ def get_all_pdf_links(driver, base_url: str, visited: Optional[Set[str]] = None)
                 for sub_span in sub_folder_spans:
                     sub_folder_name = sub_span.get_text(strip=True)
                     if sub_folder_name.lower() == "paper":
+                        print(f"[INFO] Entering Paper folder in {new_url}")
                         try:
                             paper_elem = driver.find_element(By.XPATH, f"//span[contains(@class, 'truncate') and text()='Paper']")
                             paper_elem.click()
-                            WebDriverWait(driver, 5).until(EC.presence_of_element_located((By.TAG_NAME, "body")))
+                            time.sleep(1.5)
+                            WebDriverWait(driver, 7).until(EC.presence_of_element_located((By.TAG_NAME, "body")))
                             paper_url = driver.current_url
                             pdf_links.extend(get_all_pdf_links(driver, paper_url, visited))
                             driver.back()
@@ -86,6 +96,7 @@ def get_all_pdf_links(driver, base_url: str, visited: Optional[Set[str]] = None)
                 driver.back()
             except Exception as e:
                 print(f"Could not click folder {folder_name}: {e}")
+    print(f"[INFO] {found_folders} folder(s) found in {base_url}")
 
     return pdf_links
 
