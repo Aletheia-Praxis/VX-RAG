@@ -212,3 +212,9 @@ __marimo__/
 
 # Local binary files
 bin/
+
+# Local JSON index files
+*_index.json
+
+# Local debug log files
+debug_logs/
