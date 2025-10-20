@@ -7,6 +7,7 @@ Indexing PDFs from vx-underground.org using Selenium.
 
 import json
 import os
+import logging
 from typing import List, Dict, Set, Optional
 from urllib.parse import urljoin
 from seleniumwire import webdriver
@@ -36,11 +37,11 @@ def get_all_pdf_links(driver, base_url: str, visited: Optional[Set[str]] = None)
         WebDriverWait(driver, 10).until(EC.presence_of_element_located((By.TAG_NAME, "body")))
         html = driver.page_source
         safe_url = base_url.replace('https://', '').replace('/', '_').replace(':', '')
-        with open(f"debug_{safe_url}.html", "w", encoding="utf-8") as f:
+        with open(f"scripts/debug_log/debug_{safe_url}.html", "w", encoding="utf-8") as f:
             f.write(html)
         soup = BeautifulSoup(html, "html.parser")
     except Exception as e:
-        print(f"Error loading {base_url}: {e}")
+        logging.info(f"Error loading {base_url}: {e}")
         return []
 
     pdf_links = []
@@ -55,8 +56,8 @@ def get_all_pdf_links(driver, base_url: str, visited: Optional[Set[str]] = None)
                 "path": base_url
             })
             found_pdfs += 1
-            print(f"[FOUND] PDF: {name} @ {base_url}")
-    print(f"[INFO] {found_pdfs} PDF(s) found in {base_url}")
+            logging.info(f"[FOUND] PDF: {name} @ {base_url}")
+    logging.info(f"[INFO] {found_pdfs} PDF(s) found in {base_url}")
 
     # Pattern for Malware Analysis: /Malware Analysis/{year}/{subfolder}/Paper
     if "Malware%20Analysis" in base_url:
@@ -96,13 +97,13 @@ def get_all_pdf_links(driver, base_url: str, visited: Optional[Set[str]] = None)
                                             pdf_links.extend(get_all_pdf_links(driver, paper_url, visited))
                                             driver.back()
                                         except Exception as e:
-                                            print(f"[WARN] Could not click Paper folder: {e}")
+                                            logging.info(f"[WARN] Could not click Paper folder: {e}")
                                 driver.back()
                             except Exception as e:
-                                print(f"Could not click subfolder {subfolder_name}: {e}")
+                                logging.info(f"Could not click subfolder {subfolder_name}: {e}")
                     driver.back()
                 except Exception as e:
-                    print(f"Could not click year folder {folder_name}: {e}")
+                    logging.info(f"Could not click year folder {folder_name}: {e}")
         return pdf_links
 
     # For Papers: recursively traverse all nested folders
@@ -120,7 +121,7 @@ def get_all_pdf_links(driver, base_url: str, visited: Optional[Set[str]] = None)
                     pdf_links.extend(get_all_pdf_links(driver, new_url, visited))
                     driver.back()
                 except Exception as e:
-                    print(f"Could not click folder {folder_name}: {e}")
+                    logging.info(f"Could not click folder {folder_name}: {e}")
         return pdf_links
 
     # For Archive/The Old New Thing: PDFs are in yearly folders
@@ -138,7 +139,7 @@ def get_all_pdf_links(driver, base_url: str, visited: Optional[Set[str]] = None)
                     pdf_links.extend(get_all_pdf_links(driver, year_url, visited))
                     driver.back()
                 except Exception as e:
-                    print(f"Could not click year folder {folder_name}: {e}")
+                    logging.info(f"Could not click year folder {folder_name}: {e}")
         return pdf_links
 
     # For tmp: PDFs are located directly
@@ -159,12 +160,14 @@ def get_all_pdf_links(driver, base_url: str, visited: Optional[Set[str]] = None)
                 pdf_links.extend(get_all_pdf_links(driver, new_url, visited))
                 driver.back()
             except Exception as e:
-                print(f"Could not click folder {folder_name}: {e}")
+                logging.info(f"Could not click folder {folder_name}: {e}")
     return pdf_links
 
 
 def main():
     load_dotenv()
+    os.makedirs('scripts/debug_log', exist_ok=True)
+    logging.basicConfig(filename='scripts/debug_log/debug.log', level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
     # Add specific paths to folders with PDFs
     start_urls = []
     # Archive/The Old New Thing: years 2003–2025
@@ -672,6 +675,14 @@ def main():
     output_file = "pdf_index.json"
     chrome_options = Options()
     chrome_options.add_argument("--window-size=1200,800")
+    chrome_options.add_argument("--no-sandbox")
+    chrome_options.add_argument("--disable-dev-shm-usage")
+    chrome_options.add_argument("--disable-gpu")
+    chrome_options.add_argument("--remote-debugging-port=9222")
+    chrome_options.add_argument("--disable-extensions")
+    chrome_options.add_argument("--disable-background-timer-throttling")
+    chrome_options.add_argument("--disable-backgrounding-occluded-windows")
+    chrome_options.add_argument("--disable-renderer-backgrounding")
     user_data_dir = os.getenv("CHROME_USER_DATA_DIR")
     profile = os.getenv("CHROME_PROFILE")
     if user_data_dir:
@@ -688,7 +699,7 @@ def main():
         driver = webdriver.Chrome(service=service, options=chrome_options)
     else:
         driver = webdriver.Chrome(options=chrome_options)
-    print("Open the browser, pass the CAPTCHA, then press Enter in the console...")
+    logging.info("Open the browser, pass the CAPTCHA, then press Enter in the console...")
     driver.get(start_urls[0])
     input("After passing the CAPTCHA, press Enter...")
     all_pdfs = []
@@ -696,7 +707,12 @@ def main():
         all_pdfs.extend(get_all_pdf_links(driver, url))
     with open(output_file, 'w', encoding='utf-8') as f:
         json.dump(all_pdfs, f, ensure_ascii=False, indent=4)
-    print(f"Found {len(all_pdfs)} PDF files. Index saved to {output_file}")
+    message = f"Found {len(all_pdfs)} PDF files. Index saved to {output_file}"
+    print(message)
+    logging.info(message)
+    completion_message = "Script completed successfully."
+    print(completion_message)
+    logging.info(completion_message)
 
 
 if __name__ == "__main__":
