@@ -8,7 +8,7 @@ Indexing PDFs from vx-underground.org using Selenium.
 import json
 import os
 import logging
-from typing import List, Dict, Set, Optional
+from typing import List, Set, Optional
 from urllib.parse import urljoin, quote
 from seleniumwire import webdriver
 from selenium.webdriver.chrome.options import Options
@@ -82,14 +82,13 @@ def get_all_pdf_links(driver, base_url: str, visited: Optional[Set[str]] = None)
                                 sub_elem.click()
                                 time.sleep(1.5)
                                 WebDriverWait(driver, 7).until(EC.presence_of_element_located((By.TAG_NAME, "body")))
-                                sub_url = driver.current_url
                                 # Look for Paper folder
                                 sub_soup = BeautifulSoup(driver.page_source, "html.parser")
                                 sub_spans = sub_soup.find_all("span", class_="truncate")
                                 for paper_span in sub_spans:
                                     if paper_span.get_text(strip=True) == "Paper":
                                         try:
-                                            paper_elem = driver.find_element(By.XPATH, f"//span[contains(@class, 'truncate') and text()='Paper']")
+                                            paper_elem = driver.find_element(By.XPATH, "//span[contains(@class, 'truncate') and text()='Paper']")
                                             paper_elem.click()
                                             time.sleep(1.5)
                                             WebDriverWait(driver, 7).until(EC.presence_of_element_located((By.TAG_NAME, "body")))
