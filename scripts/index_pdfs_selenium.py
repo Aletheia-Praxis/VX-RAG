@@ -152,7 +152,9 @@ def get_all_pdf_links(driver, base_url: str, visited: Optional[Set[str]] = None)
         folder_name = span.get_text(strip=True)
         if folder_name.endswith("/"):
             try:
-                folder_elem = driver.find_element(By.XPATH, f"//span[contains(@class, 'truncate') and text()='{folder_name}']")
+                # Escape quotes
+                safe_folder_name = folder_name.replace("'", "\\'").replace('"', '\\"')
+                folder_elem = driver.find_element(By.XPATH, f"//span[contains(@class, 'truncate') and text()='{safe_folder_name}']")
                 folder_elem.click()
                 time.sleep(1.5)
                 WebDriverWait(driver, 7).until(EC.presence_of_element_located((By.TAG_NAME, "body")))
