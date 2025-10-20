@@ -10,6 +10,7 @@ import os
 import logging
 from typing import List, Set, Optional, Dict, Any
 from urllib.parse import urljoin, quote
+from selenium.webdriver.remote.webdriver import WebDriver
 from seleniumwire import webdriver
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.common.by import By
@@ -21,7 +22,7 @@ from dotenv import load_dotenv
 PDF_LIMIT = 100
 
 
-def get_all_pdf_links(driver, base_url: str, visited: Optional[Set[str]] = None) -> List[Dict[str, str]]:
+def get_all_pdf_links(driver: WebDriver, base_url: str, visited: Optional[Set[str]] = None) -> List[Dict[str, str]]:
     """
     Recursively retrieves all PDF links from the site using Selenium, considering patterns.
     """
