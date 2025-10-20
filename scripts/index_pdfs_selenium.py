@@ -37,7 +37,7 @@ def get_all_pdf_links(driver, base_url: str, visited: Optional[Set[str]] = None)
         WebDriverWait(driver, 10).until(EC.presence_of_element_located((By.TAG_NAME, "body")))
         html = driver.page_source
         safe_url = base_url.replace('https://', '').replace('/', '_').replace(':', '')
-        with open(f"scripts/debug_log/debug_{safe_url}.html", "w", encoding="utf-8") as f:
+        with open(f"scripts/debug_logs/debug_{safe_url}.html", "w", encoding="utf-8") as f:
             f.write(html)
         soup = BeautifulSoup(html, "html.parser")
     except Exception as e:
@@ -166,8 +166,8 @@ def get_all_pdf_links(driver, base_url: str, visited: Optional[Set[str]] = None)
 
 def main():
     load_dotenv()
-    os.makedirs('scripts/debug_log', exist_ok=True)
-    logging.basicConfig(filename='scripts/debug_log/debug.log', level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+    os.makedirs('scripts/debug_logs', exist_ok=True)
+    logging.basicConfig(filename='scripts/debug_logs/debug.log', level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
     # Add specific paths to folders with PDFs
     start_urls = []
     # Archive/The Old New Thing: years 2003–2025
