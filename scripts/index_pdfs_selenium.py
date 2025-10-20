@@ -8,7 +8,7 @@ Indexing PDFs from vx-underground.org using Selenium.
 import json
 import os
 import logging
-from typing import List, Set, Optional
+from typing import List, Set, Optional, Dict, Any
 from urllib.parse import urljoin, quote
 from seleniumwire import webdriver
 from selenium.webdriver.chrome.options import Options
@@ -21,7 +21,7 @@ from dotenv import load_dotenv
 PDF_LIMIT = 100
 
 
-def get_all_pdf_links(driver, base_url: str, visited: Optional[Set[str]] = None) -> List[str]:
+def get_all_pdf_links(driver, base_url: str, visited: Optional[Set[str]] = None) -> List[Dict[str, str]]:
     """
     Recursively retrieves all PDF links from the site using Selenium, considering patterns.
     """
@@ -44,7 +44,7 @@ def get_all_pdf_links(driver, base_url: str, visited: Optional[Set[str]] = None)
         logging.info(f"Error loading {base_url}: {e}")
         return []
 
-    pdf_links = []
+    pdf_links: List[Dict[str, str]] = []
     pdf_spans = soup.find_all("span", class_="truncate")
     found_pdfs = 0
     for span in pdf_spans:
@@ -165,7 +165,7 @@ def get_all_pdf_links(driver, base_url: str, visited: Optional[Set[str]] = None)
     return pdf_links
 
 
-def main():
+def main() -> None:
     load_dotenv()
     os.makedirs('scripts/debug_logs', exist_ok=True)
     logging.basicConfig(filename='scripts/debug_logs/debug.log', level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
