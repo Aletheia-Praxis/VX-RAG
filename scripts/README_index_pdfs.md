@@ -39,7 +39,13 @@ Variables:
 
 ## Usage
 
-Run the script:
+Before running the script:
+
+1. Open Chrome with the profile configured for Selenium.
+2. Visit <https://vx-underground.org> and solve the CAPTCHA if prompted.
+3. Close all Chrome windows.
+
+Then run the script:
 
 ```bash
 python scripts/index_pdfs_selenium.py
