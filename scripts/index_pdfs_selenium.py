@@ -215,8 +215,8 @@ def download_pdfs(pdf_links: List[Dict[str, str]], driver: Optional[WebDriver] =
                 ua = driver.execute_script('return navigator.userAgent')
                 if ua:
                     session.headers.update({'User-Agent': ua})
-            except Exception:
-                pass
+            except Exception as e:
+                logging.info(f"Could not set User-Agent from Selenium driver: {e}")
     except Exception as e:
         logging.info(f"Could not copy cookies from Selenium driver: {e}")
 
