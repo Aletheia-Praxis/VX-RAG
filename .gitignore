@@ -218,3 +218,6 @@ bin/
 
 # Local debug log files
 debug_logs/
+
+# Downloaded PDFs
+downloaded_pdfs/
