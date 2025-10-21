@@ -221,3 +221,6 @@ debug_logs/
 
 # Downloaded PDFs
 downloaded_pdfs/
+
+# Image files
+*.png
