@@ -70,7 +70,7 @@ def get_all_pdf_links(driver: WebDriver, base_url: str, visited: Optional[Set[st
                     if href and name.replace(" ", "%20") in str(href) and "X-Amz-Algorithm" in str(href):
                         s3_link = str(href)
                         break
-            url = urljoin(base_url, name)
+            url = base_url
             pdf_links.append({
                 "name": str(name),
                 "url": str(url),
