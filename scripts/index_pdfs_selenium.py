@@ -50,24 +50,40 @@ def get_all_pdf_links(driver: WebDriver, base_url: str, visited: Optional[Set[st
         return []
 
     pdf_links: List[Dict[str, str]] = []
-    pdf_spans = soup.find_all("span", class_="truncate")
     found_pdfs = 0
-    for span in pdf_spans:
+    for span in soup.find_all("span", class_="truncate"):
         name = span.get_text(strip=True)
         if name.lower().endswith(".pdf"):
+            s3_link = None
+            parent = span.parent
+            # Search for <a> with X-Amz-Algorithm near the PDF
+            if parent is not None:
+                for a in parent.find_all("a", href=True):
+                    href = a.get("href")
+                    if href and "X-Amz-Algorithm" in str(href):
+                        s3_link = str(href)
+                        break
+            # If not found — search across the entire page
+            if not s3_link:
+                for a in soup.find_all("a", href=True):
+                    href = a.get("href")
+                    if href and name.replace(" ", "%20") in str(href) and "X-Amz-Algorithm" in str(href):
+                        s3_link = str(href)
+                        break
+            url = urljoin(base_url, name)
             pdf_links.append({
-                "name": name,
-                "url": urljoin(base_url, name),
-                "path": base_url
+                "name": str(name),
+                "url": str(url),
+                "path": str(s3_link) if s3_link else ""
             })
             found_pdfs += 1
-            logging.info(f"[FOUND] PDF: {name} @ {base_url}")
+            logging.info(f"[FOUND] PDF: {name} @ {base_url} S3: {s3_link}")
     logging.info(f"[INFO] {found_pdfs} PDF(s) found in {base_url}")
 
     # Pattern for Malware Analysis: /Malware Analysis/{year}/{subfolder}/Paper
     if "Malware%20Analysis" in base_url:
         # If this is a yearly folder, look for subfolders
-        for span in pdf_spans:
+        for span in soup.find_all("span", class_="truncate"):
             folder_name = span.get_text(strip=True)
             if folder_name.endswith("/") and folder_name[:4].isdigit():
                 try:
@@ -112,8 +128,7 @@ def get_all_pdf_links(driver: WebDriver, base_url: str, visited: Optional[Set[st
 
     # For Papers: recursively traverse all nested folders
     if "Papers" in base_url:
-        folder_spans = soup.find_all("span", class_="truncate")
-        for span in folder_spans:
+        for span in soup.find_all("span", class_="truncate"):
             folder_name = span.get_text(strip=True)
             if folder_name.endswith("/"):
                 try:
@@ -130,8 +145,7 @@ def get_all_pdf_links(driver: WebDriver, base_url: str, visited: Optional[Set[st
 
     # For Archive/The Old New Thing: PDFs are in yearly folders
     if "Archive/The%20Old%20New%20Thing" in base_url:
-        folder_spans = soup.find_all("span", class_="truncate")
-        for span in folder_spans:
+        for span in soup.find_all("span", class_="truncate"):
             folder_name = span.get_text(strip=True)
             if folder_name.endswith("/") and folder_name[:4].isdigit():
                 try:
@@ -151,13 +165,12 @@ def get_all_pdf_links(driver: WebDriver, base_url: str, visited: Optional[Set[st
         return pdf_links
 
     # For others — standard recursion
-    folder_spans = soup.find_all("span", class_="truncate")
-    for span in folder_spans:
+    for span in soup.find_all("span", class_="truncate"):
         folder_name = span.get_text(strip=True)
         if folder_name.endswith("/"):
             try:
                 # Escape quotes
-                safe_folder_name = folder_name.replace("'", "\\'").replace('"', '\\"')
+                safe_folder_name = folder_name.replace("'", "\\'").replace('"', '\"')
                 folder_elem = driver.find_element(By.XPATH, f"//span[contains(@class, 'truncate') and text()='{safe_folder_name}']")
                 folder_elem.click()
                 time.sleep(1.5)
