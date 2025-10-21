@@ -21,21 +21,31 @@ pip install selenium cloudscraper beautifulsoup4 requests
 
 ## Environment Configuration
 
-Create a `.env` file in the project root. Example:
+Create a `.env` file in the project root. Example (you can also view `.env.example`):
 
 ```text
-BASE_URL=https://vx-underground.org
-DOWNLOAD_DIR=downloaded_pdfs
-SELENIUM_DRIVER_PATH=bin/chromedriver/chromedriver.exe
-MAX_PAGES=100
+CHROMIUM_PATH=/path/to/chrome.exe
+CHROMEDRIVER_PATH=/path/to/chromedriver.exe
+CHROME_USER_DATA_DIR=/path/to/chrome/user/data
+CHROME_PROFILE=Profile 1
+PDF_LIMIT=100
+DEBUG_LOGS_DIR=scripts/debug_logs
+DEBUG_LOG_FILE=scripts/debug.log
+SELENIUM_TIMEOUT=10
+OUTPUT_FILE=pdf_index.json
 ```
 
 Variables:
 
-- `BASE_URL`: Target site URL
-- `DOWNLOAD_DIR`: Local directory for PDFs
-- `SELENIUM_DRIVER_PATH`: Path to ChromeDriver
-- `MAX_PAGES`: Limit for recursive crawling
+- `CHROMIUM_PATH`: Absolute path to your Chrome or Chromium browser executable
+- `CHROMEDRIVER_PATH`: Absolute path to ChromeDriver executable
+- `CHROME_USER_DATA_DIR`: Path to Chrome user data directory (for profile management)
+- `CHROME_PROFILE`: Name of the Chrome profile to use (e.g., "Profile 1")
+- `PDF_LIMIT`: Maximum number of PDFs to download
+- `DEBUG_LOGS_DIR`: Directory for debug logs
+- `DEBUG_LOG_FILE`: Path to debug log file
+- `SELENIUM_TIMEOUT`: Timeout (in seconds) for Selenium operations
+- `OUTPUT_FILE`: Name of the output index file (default: pdf_index.json)
 
 ## Usage
 
