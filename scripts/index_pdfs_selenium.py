@@ -19,7 +19,7 @@ from selenium.webdriver.support import expected_conditions as EC
 from bs4 import BeautifulSoup
 from dotenv import load_dotenv
 
-PDF_LIMIT = 100
+PDF_LIMIT = int(os.getenv('PDF_LIMIT', 100))
 
 
 def get_all_pdf_links(driver: WebDriver, base_url: str, visited: Optional[Set[str]] = None) -> List[Dict[str, str]]:
@@ -35,10 +35,11 @@ def get_all_pdf_links(driver: WebDriver, base_url: str, visited: Optional[Set[st
 
     try:
         driver.get(base_url)
-        WebDriverWait(driver, 10).until(EC.presence_of_element_located((By.TAG_NAME, "body")))
+        WebDriverWait(driver, int(os.getenv('SELENIUM_TIMEOUT', 10))).until(EC.presence_of_element_located((By.TAG_NAME, "body")))
         html = driver.page_source
         safe_url = base_url.replace('https://', '').replace('/', '_').replace(':', '')
-        with open(f"scripts/debug_logs/debug_{safe_url}.html", "w", encoding="utf-8") as f:
+        debug_logs_dir = os.getenv('DEBUG_LOGS_DIR', 'scripts/debug_logs')
+        with open(f"{debug_logs_dir}/debug_{safe_url}.html", "w", encoding="utf-8") as f:
             f.write(html)
         soup = BeautifulSoup(html, "html.parser")
     except Exception as e:
@@ -168,8 +169,10 @@ def get_all_pdf_links(driver: WebDriver, base_url: str, visited: Optional[Set[st
 
 def main() -> None:
     load_dotenv()
-    os.makedirs('scripts/debug_logs', exist_ok=True)
-    logging.basicConfig(filename='scripts/debug_logs/debug.log', level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+    debug_logs_dir = os.getenv('DEBUG_LOGS_DIR', 'scripts/debug_logs')
+    debug_log_file = os.getenv('DEBUG_LOG_FILE', 'scripts/debug_logs/debug.log')
+    os.makedirs(debug_logs_dir, exist_ok=True)
+    logging.basicConfig(filename=debug_log_file, level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
     # Add specific paths to folders with PDFs
     start_urls = []
     # Archive/The Old New Thing: years 2003–2025
@@ -683,7 +686,7 @@ def main() -> None:
             "2025-10-09 - Inside a Crypto Scam Nexus"
         ]
     ])
-    output_file = "pdf_index.json"
+    output_file = os.getenv('OUTPUT_FILE', 'pdf_index.json')
     chrome_options = Options()
     chrome_options.add_argument("--window-size=1200,800")
     chrome_options.add_argument("--no-sandbox")
