@@ -8,6 +8,7 @@ Indexing PDFs from vx-underground.org using Selenium.
 import json
 import os
 import logging
+import time
 from typing import List, Set, Optional, Dict
 from urllib.parse import urljoin, quote
 from selenium.webdriver.remote.webdriver import WebDriver
@@ -18,6 +19,8 @@ from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from bs4 import BeautifulSoup
 from dotenv import load_dotenv
+import requests
+import concurrent.futures
 
 PDF_LIMIT = int(os.getenv('PDF_LIMIT', 100))
 
@@ -54,7 +57,7 @@ def get_all_pdf_links(driver: WebDriver, base_url: str, visited: Optional[Set[st
         if name.lower().endswith(".pdf"):
             pdf_links.append({
                 "name": name,
-                "url": base_url,
+                "url": urljoin(base_url, name),
                 "path": base_url
             })
             found_pdfs += 1
@@ -165,6 +168,109 @@ def get_all_pdf_links(driver: WebDriver, base_url: str, visited: Optional[Set[st
             except Exception as e:
                 logging.info(f"Could not click folder {folder_name}: {e}")
     return pdf_links
+
+
+def download_pdfs(pdf_links: List[Dict[str, str]], driver: Optional[WebDriver] = None) -> None:
+    """
+    Downloads PDF files from the provided links to the 'downloaded_pdfs' directory.
+    """
+    download_dir = 'downloaded_pdfs'
+    os.makedirs(download_dir, exist_ok=True)
+    # Prepare requests session with retries
+    session = requests.Session()
+    # Use cookies from Selenium driver if available (helps after CAPTCHA)
+    try:
+        if driver is not None:
+            selenium_cookies = driver.get_cookies() or []
+            for c in selenium_cookies:
+                name = c.get('name')
+                value = c.get('value')
+                domain = c.get('domain')
+                if name is None or value is None:
+                    continue
+                # requests' cookiejar expects string names/values
+                try:
+                    session.cookies.set(str(name), str(value), domain=str(domain) if domain is not None else None)
+                except Exception:
+                    # fallback: set without domain
+                    try:
+                        session.cookies.set(str(name), str(value))
+                    except Exception:
+                        logging.info(f"Could not set cookie {name}")
+            # Try to mirror browser User-Agent
+            try:
+                ua = driver.execute_script('return navigator.userAgent')
+                if ua:
+                    session.headers.update({'User-Agent': ua})
+            except Exception:
+                pass
+    except Exception as e:
+        logging.info(f"Could not copy cookies from Selenium driver: {e}")
+
+    # Retry strategy
+    from requests.adapters import HTTPAdapter
+    from urllib3.util.retry import Retry
+
+    retries = Retry(total=3, backoff_factor=1, status_forcelist=(429, 500, 502, 503, 504))
+    adapter = HTTPAdapter(max_retries=retries)
+    session.mount('https://', adapter)
+    session.mount('http://', adapter)
+
+    # Parallel download with configurable workers
+    import time
+    from concurrent.futures import ThreadPoolExecutor
+
+    workers = int(os.getenv('DOWNLOAD_WORKERS', '4'))
+
+    def download_single(link):
+        url = link.get('url')
+        path = link.get('path', '')
+        name = link.get('name') or os.path.basename(str(url))
+        # Basic sanitization: allow alnum, space, dash, underscore and dot
+        safe_name = "".join(c for c in name if c.isalnum() or c in (' ', '-', '_', '.')).strip()
+        if not safe_name.lower().endswith('.pdf'):
+            safe_name += '.pdf'
+        # Ensure filename safe for filesystem
+        safe_name = safe_name.replace('/', '_').replace('\\', '_')
+
+        # Create subfolder based on path (extract relative path after domain)
+        subfolder = ''
+        if path:
+            from urllib.parse import urlparse
+            parsed = urlparse(path)
+            subfolder = parsed.path.strip('/').replace('/', os.sep)
+        full_dir = os.path.join(download_dir, subfolder)
+        os.makedirs(full_dir, exist_ok=True)
+
+        # Avoid overwriting: add suffix if exists
+        filepath = os.path.join(full_dir, safe_name)
+        base, ext = os.path.splitext(filepath)
+        counter = 1
+        while os.path.exists(filepath):
+            filepath = f"{base}({counter}){ext}"
+            counter += 1
+
+        if not url:
+            logging.warning(f"Skipping entry without URL: {link}")
+            return
+
+        start_time = time.time()
+        try:
+            with session.get(str(url), stream=True, timeout=60) as resp:
+                resp.raise_for_status()
+                # Write in chunks
+                with open(filepath, 'wb') as f:
+                    for chunk in resp.iter_content(chunk_size=8192):
+                        if chunk:
+                            f.write(chunk)
+            download_time = time.time() - start_time
+            file_size = os.path.getsize(filepath)
+            logging.info(f"Downloaded: {safe_name} from {url} (size: {file_size} bytes, time: {download_time:.2f}s)")
+        except Exception as e:
+            logging.error(f"Failed to download {url}: {e}")
+
+    with ThreadPoolExecutor(max_workers=workers) as executor:
+        executor.map(download_single, pdf_links)
 
 
 def main() -> None:
@@ -724,6 +830,8 @@ def main() -> None:
     message = f"Found {len(all_pdfs)} PDF files. Index saved to {output_file}"
     print(message)
     logging.info(message)
+    # Download the PDFs (pass driver so cookies/User-Agent can be reused)
+    download_pdfs(all_pdfs, driver)
     completion_message = "Script completed successfully."
     print(completion_message)
     logging.info(completion_message)
