@@ -8,7 +8,6 @@ Indexing PDFs from vx-underground.org using Selenium.
 import json
 import os
 import logging
-import time
 from typing import List, Set, Optional, Dict
 from urllib.parse import urljoin, quote
 from selenium.webdriver.remote.webdriver import WebDriver
@@ -20,7 +19,6 @@ from selenium.webdriver.support import expected_conditions as EC
 from bs4 import BeautifulSoup
 from dotenv import load_dotenv
 import requests
-import concurrent.futures
 
 PDF_LIMIT = int(os.getenv('PDF_LIMIT', 100))
 
