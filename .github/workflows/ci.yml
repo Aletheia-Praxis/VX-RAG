@@ -95,7 +95,7 @@ jobs:
   codeql:
     name: CodeQL (Python)
     runs-on: ubuntu-latest
-    needs: [pycodestyle]
+    needs: [ruff]
     permissions:
       actions: read
       contents: read
