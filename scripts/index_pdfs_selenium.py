@@ -261,13 +261,15 @@ def download_pdfs(pdf_links: List[Dict[str, str]], driver: Optional[WebDriver] =
             filepath = f"{base}({counter}){ext}"
             counter += 1
 
-        if not url:
-            logging.warning(f"Skipping entry without URL: {link}")
+        # Use path (S3 link) for download, skip if empty
+        download_url = path
+        if not download_url:
+            logging.warning(f"Skipping entry without S3 path: {link}")
             return
 
         start_time = time.time()
         try:
-            with session.get(str(url), stream=True, timeout=60) as resp:
+            with session.get(str(download_url), stream=True, timeout=60) as resp:
                 resp.raise_for_status()
                 # Write in chunks
                 with open(filepath, 'wb') as f:
@@ -276,9 +278,13 @@ def download_pdfs(pdf_links: List[Dict[str, str]], driver: Optional[WebDriver] =
                             f.write(chunk)
             download_time = time.time() - start_time
             file_size = os.path.getsize(filepath)
-            logging.info(f"Downloaded: {safe_name} from {url} (size: {file_size} bytes, time: {download_time:.2f}s)")
+            logging.info(f"Downloaded: {safe_name} from {download_url} (size: {file_size} bytes, time: {download_time:.2f}s)")
         except Exception as e:
-            logging.error(f"Failed to download {url}: {e}")
+            error_msg = str(e).lower()
+            if "expired" in error_msg or "timestamp" in error_msg:
+                logging.warning(f"S3 link expired, skipping: {download_url} - {e}")
+            else:
+                logging.error(f"Failed to download {download_url}: {e}")
 
     with ThreadPoolExecutor(max_workers=workers) as executor:
         executor.map(download_single, pdf_links)
