@@ -26,7 +26,7 @@ PDF_LIMIT = int(os.getenv('PDF_LIMIT', 100))
 
 def get_all_pdf_links(driver: WebDriver, base_url: str, visited: Optional[Set[str]] = None) -> List[Dict[str, str]]:
     """
-    Recursively retrieves all PDF links from the site using Selenium, considering patterns.
+    Universal recursive parser: traverses all nested folders, searches for PDF files, does not use patterns.
     """
     import time
     if visited is None:
@@ -50,6 +50,7 @@ def get_all_pdf_links(driver: WebDriver, base_url: str, visited: Optional[Set[st
 
     pdf_links: List[Dict[str, str]] = []
     found_pdfs = 0
+    # Collect PDF files
     for span in soup.find_all("span", class_="truncate"):
         name = span.get_text(strip=True)
         if name.lower().endswith(".pdf"):
@@ -79,91 +80,7 @@ def get_all_pdf_links(driver: WebDriver, base_url: str, visited: Optional[Set[st
             logging.info(f"[FOUND] PDF: {name} @ {base_url} S3: {s3_link}")
     logging.info(f"[INFO] {found_pdfs} PDF(s) found in {base_url}")
 
-    # Pattern for Malware Analysis: /Malware Analysis/{year}/{subfolder}/Paper
-    if "Malware%20Analysis" in base_url:
-        # If this is a yearly folder, look for subfolders
-        for span in soup.find_all("span", class_="truncate"):
-            folder_name = span.get_text(strip=True)
-            if folder_name.endswith("/") and folder_name[:4].isdigit():
-                try:
-                    folder_elem = driver.find_element(By.XPATH, f"//span[contains(@class, 'truncate') and text()='{folder_name}']")
-                    folder_elem.click()
-                    time.sleep(1.5)
-                    WebDriverWait(driver, 7).until(EC.presence_of_element_located((By.TAG_NAME, "body")))
-                    year_url = driver.current_url
-                    # In yearly folders, look for subfolders with Paper
-                    year_soup = BeautifulSoup(driver.page_source, "html.parser")
-                    year_spans = year_soup.find_all("span", class_="truncate")
-                    for sub_span in year_spans:
-                        subfolder_name = sub_span.get_text(strip=True)
-                        if subfolder_name.endswith("/") and not subfolder_name[:4].isdigit():
-                            try:
-                                sub_elem = driver.find_element(By.XPATH, f"//span[contains(@class, 'truncate') and text()='{subfolder_name}']")
-                                sub_elem.click()
-                                time.sleep(1.5)
-                                WebDriverWait(driver, 7).until(EC.presence_of_element_located((By.TAG_NAME, "body")))
-                                # Look for Paper folder
-                                sub_soup = BeautifulSoup(driver.page_source, "html.parser")
-                                sub_spans = sub_soup.find_all("span", class_="truncate")
-                                for paper_span in sub_spans:
-                                    if paper_span.get_text(strip=True) == "Paper":
-                                        try:
-                                            paper_elem = driver.find_element(By.XPATH, "//span[contains(@class, 'truncate') and text()='Paper']")
-                                            paper_elem.click()
-                                            time.sleep(1.5)
-                                            WebDriverWait(driver, 7).until(EC.presence_of_element_located((By.TAG_NAME, "body")))
-                                            paper_url = driver.current_url
-                                            pdf_links.extend(get_all_pdf_links(driver, paper_url, visited))
-                                            driver.back()
-                                        except Exception as e:
-                                            logging.info(f"[WARN] Could not click Paper folder: {e}")
-                                driver.back()
-                            except Exception as e:
-                                logging.info(f"Could not click subfolder {subfolder_name}: {e}")
-                    driver.back()
-                except Exception as e:
-                    logging.info(f"Could not click year folder {folder_name}: {e}")
-        return pdf_links
-
-    # For Papers: recursively traverse all nested folders
-    if "Papers" in base_url:
-        for span in soup.find_all("span", class_="truncate"):
-            folder_name = span.get_text(strip=True)
-            if folder_name.endswith("/"):
-                try:
-                    folder_elem = driver.find_element(By.XPATH, f"//span[contains(@class, 'truncate') and text()='{folder_name}']")
-                    folder_elem.click()
-                    time.sleep(1.5)
-                    WebDriverWait(driver, 7).until(EC.presence_of_element_located((By.TAG_NAME, "body")))
-                    new_url = driver.current_url
-                    pdf_links.extend(get_all_pdf_links(driver, new_url, visited))
-                    driver.back()
-                except Exception as e:
-                    logging.info(f"Could not click folder {folder_name}: {e}")
-        return pdf_links
-
-    # For Archive/The Old New Thing: PDFs are in yearly folders
-    if "Archive/The%20Old%20New%20Thing" in base_url:
-        for span in soup.find_all("span", class_="truncate"):
-            folder_name = span.get_text(strip=True)
-            if folder_name.endswith("/") and folder_name[:4].isdigit():
-                try:
-                    folder_elem = driver.find_element(By.XPATH, f"//span[contains(@class, 'truncate') and text()='{folder_name}']")
-                    folder_elem.click()
-                    time.sleep(1.5)
-                    WebDriverWait(driver, 7).until(EC.presence_of_element_located((By.TAG_NAME, "body")))
-                    year_url = driver.current_url
-                    pdf_links.extend(get_all_pdf_links(driver, year_url, visited))
-                    driver.back()
-                except Exception as e:
-                    logging.info(f"Could not click year folder {folder_name}: {e}")
-        return pdf_links
-
-    # For tmp: PDFs are located directly
-    if "tmp" in base_url:
-        return pdf_links
-
-    # For others — standard recursion
+    # Recursively go into all nested folders
     for span in soup.find_all("span", class_="truncate"):
         folder_name = span.get_text(strip=True)
         if folder_name.endswith("/"):
