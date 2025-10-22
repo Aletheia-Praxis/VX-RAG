@@ -298,7 +298,7 @@ def main() -> None:
     os.makedirs(debug_logs_dir, exist_ok=True)
     logging.basicConfig(filename=debug_log_file, level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
     # Dynamically retrieve start URLs from the main page
-    def get_start_urls_from_main_page(driver: WebDriver, main_url: str = "https://vx-underground.org/") -> list:
+    def get_start_urls_from_main_page(driver: WebDriver, main_url: str = "https://vx-underground.org/") -> List[str]:
         driver.get(main_url)
         WebDriverWait(driver, int(os.getenv('SELENIUM_TIMEOUT', 10))).until(EC.presence_of_element_located((By.ID, "file-display")))
         soup = BeautifulSoup(driver.page_source, "html.parser")
