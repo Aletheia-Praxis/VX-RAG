@@ -181,7 +181,7 @@ def get_all_pdf_links(driver: WebDriver, base_url: str, visited: Optional[Set[st
     return pdf_links
 
 
-def download_pdfs(pdf_links: List[Dict[str, str]], driver: Optional[WebDriver] = None) -> None:
+def download_pdfs(pdf_links: List[Dict[str, str]], driver: Optional[WebDriver] = None) -> int:
     """
     Downloads PDF files from the provided links to the 'downloaded_pdfs' directory.
     """
@@ -233,7 +233,7 @@ def download_pdfs(pdf_links: List[Dict[str, str]], driver: Optional[WebDriver] =
 
     workers = int(os.getenv('DOWNLOAD_WORKERS', '4'))
 
-    def download_single(link: Dict[str, str]) -> None:
+    def download_single(link: Dict[str, str]) -> int:
         url = link.get('url')
         path = link.get('path', '')
         name = link.get('name') or os.path.basename(str(url))
@@ -244,13 +244,8 @@ def download_pdfs(pdf_links: List[Dict[str, str]], driver: Optional[WebDriver] =
         # Ensure filename safe for filesystem
         safe_name = safe_name.replace('/', '_').replace('\\', '_')
 
-        # Create subfolder based on path (extract relative path after domain)
-        subfolder = ''
-        if path:
-            from urllib.parse import urlparse
-            parsed = urlparse(path)
-            subfolder = parsed.path.strip('/').replace('/', os.sep)
-        full_dir = os.path.join(download_dir, subfolder)
+        # Always save directly in download_dir, no subfolders
+        full_dir = download_dir
         os.makedirs(full_dir, exist_ok=True)
 
         # Avoid overwriting: add suffix if exists
@@ -265,7 +260,7 @@ def download_pdfs(pdf_links: List[Dict[str, str]], driver: Optional[WebDriver] =
         download_url = path
         if not download_url:
             logging.warning(f"Skipping entry without S3 path: {link}")
-            return
+            return 0
 
         start_time = time.time()
         try:
@@ -279,15 +274,19 @@ def download_pdfs(pdf_links: List[Dict[str, str]], driver: Optional[WebDriver] =
             download_time = time.time() - start_time
             file_size = os.path.getsize(filepath)
             logging.info(f"Downloaded: {safe_name} from {download_url} (size: {file_size} bytes, time: {download_time:.2f}s)")
+            return 1
         except Exception as e:
             error_msg = str(e).lower()
             if "expired" in error_msg or "timestamp" in error_msg:
                 logging.warning(f"S3 link expired, skipping: {download_url} - {e}")
             else:
                 logging.error(f"Failed to download {download_url}: {e}")
+            return 0
 
     with ThreadPoolExecutor(max_workers=workers) as executor:
-        executor.map(download_single, pdf_links)
+        results = list(executor.map(download_single, pdf_links))
+        downloaded_count = sum(results)
+    return downloaded_count
 
 
 def main() -> None:
@@ -848,8 +847,8 @@ def main() -> None:
     print(message)
     logging.info(message)
     # Download the PDFs (pass driver so cookies/User-Agent can be reused)
-    download_pdfs(all_pdfs, driver)
-    completion_message = "Script completed successfully."
+    downloaded_count = download_pdfs(all_pdfs, driver)
+    completion_message = f"Script completed successfully. Downloaded {downloaded_count} PDF files."
     print(completion_message)
     logging.info(completion_message)
 
