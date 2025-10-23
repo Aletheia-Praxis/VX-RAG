@@ -80,22 +80,48 @@ def get_all_pdf_links(driver: WebDriver, base_url: str, visited: Optional[Set[st
             logging.info(f"[FOUND] PDF: {name} @ {base_url} S3: {s3_link}")
     logging.info(f"[INFO] {found_pdfs} PDF(s) found in {base_url}")
 
-    # Recursively go into all nested folders
-    for span in soup.find_all("span", class_="truncate"):
-        folder_name = span.get_text(strip=True)
-        if folder_name.endswith("/"):
+    # At the current level, search for all folders via <div.cursor-pointer> with text in <p>
+    try:
+        # Collect a list of folder names on the current page
+        folder_divs = driver.find_elements(By.CSS_SELECTOR, "#file-display > div.cursor-pointer")
+        folder_names = []
+        for div in folder_divs:
             try:
-                # Escape quotes
-                safe_folder_name = folder_name.replace("'", "\\'").replace('"', '\"')
-                folder_elem = driver.find_element(By.XPATH, f"//span[contains(@class, 'truncate') and text()='{safe_folder_name}']")
-                folder_elem.click()
+                p_elem = div.find_element(By.CSS_SELECTOR, "p.text-white.text-sm.truncate")
+                folder_name = p_elem.text.strip()
+                folder_names.append(folder_name)
+            except Exception:
+                continue
+        for folder_name in folder_names:
+            try:
+                # After each navigation, search for the element again by text
+                folder_divs_fresh = driver.find_elements(By.CSS_SELECTOR, "#file-display > div.cursor-pointer")
+                target_div = None
+                for div in folder_divs_fresh:
+                    try:
+                        p_elem = div.find_element(By.CSS_SELECTOR, "p.text-white.text-sm.truncate")
+                        if p_elem.text.strip() == folder_name:
+                            target_div = div
+                            break
+                    except Exception:
+                        continue
+                if not target_div:
+                    logging.info(f"[SKIP] Element for folder not found: {folder_name} at {driver.current_url}")
+                    continue
+                logging.info(f"[ENTER] Clicking folder: {folder_name} at {driver.current_url}")
+                target_div.click()
                 time.sleep(1.5)
-                WebDriverWait(driver, 7).until(EC.presence_of_element_located((By.TAG_NAME, "body")))
+                WebDriverWait(driver, 7).until(EC.presence_of_element_located((By.ID, "file-display")))
                 new_url = driver.current_url
+                logging.info(f"[RECURSE] Entering: {folder_name} -> {new_url}")
                 pdf_links.extend(get_all_pdf_links(driver, new_url, visited))
                 driver.back()
+                WebDriverWait(driver, 7).until(EC.presence_of_element_located((By.ID, "file-display")))
+                logging.info(f"[BACK] Returning back to: {driver.current_url}")
             except Exception as e:
                 logging.info(f"Could not click folder {folder_name}: {e}")
+    except Exception as e:
+        logging.info(f"Error finding folders: {e}")
     return pdf_links
 
 
