@@ -68,8 +68,8 @@ python scripts/index_pdfs_selenium.py
 - Downloads all found PDFs to `downloaded_pdfs`
 - Builds an index file `pdf_index.json` with:
   - `name`: PDF filename
-  - `local_path`: Local file path
   - `url`: Original source URL
+  - `path`: Local file path
 
 ## Output Structure
 
@@ -77,11 +77,15 @@ python scripts/index_pdfs_selenium.py
 
 ```json
 [
-  {
-    "name": "filename.pdf",
-    "local_path": "downloaded_pdfs/filename.pdf",
-    "url": "https://vx-underground.org/path/filename.pdf"
-  }
+    {
+        "name": "2025-10-23 - How to calm a ginger cat with a shotgun.pdf",
+        "url": "https://vx-underground.org/Archive/The%20Old%20New%20Thing/2025",
+        "path": "https://ass-east-005.blabla2.com/vx-underground-main/Archive/The%20Old%20New%20Thing/2025/2025-10-23%20-%20How%20to%20calm%20a%20ginger%20cat%20with%20a%20shotgun.pdf?    
+        X-Amz-Algorithm=256-TIMES-TO-PET-THE-CAT&
+        X-Amz-Credential=ass-east-aws4_request&
+        X-Amz-Date=every-day-is-a-good-day-to-pet-a-cat&
+        X-Amz-Signature=d435a1234304d0a98e8ce6f7e7ec9ddd0c69cc345711f566f90e23c46842d907"
+    }
 ]
 ```
 
