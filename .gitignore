@@ -224,3 +224,6 @@ downloaded_pdfs/
 
 # Image files
 *.png
+
+# VSCode JSON settings
+.vscode/*.json
