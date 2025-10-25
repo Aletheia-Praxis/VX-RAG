@@ -36,6 +36,16 @@ def load_pdfs(raw_pdf_dir: Path) -> List[Document]:
 
     try:
         logger.info(f"Scanning directory {raw_pdf_dir} for PDF files")
+        # List all files to log ignored ones
+        all_files = list(raw_pdf_dir.glob("*"))
+        pdf_files = [f for f in all_files if f.suffix.lower() == '.pdf']
+        other_files = [f for f in all_files if f.suffix.lower() != '.pdf' and f.is_file()]
+        
+        if other_files:
+            logger.info(f"Found {len(pdf_files)} PDF files and {len(other_files)} other files (ignored): {[f.name for f in other_files]}")
+        else:
+            logger.info(f"Found {len(pdf_files)} PDF files, no other files to ignore")
+        
         reader = SimpleDirectoryReader(
             input_dir=str(raw_pdf_dir),
             required_exts=[".pdf"],
