@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """
 FAISS index building module for VX-RAG system.
 
@@ -29,7 +28,7 @@ class IndexBuilder:
         self,
         processed_dir: str = "data/processed",
         index_dir: str = "data/index",
-        embedding_model: str = "..."
+        embedding_model: str = "sentence-transformers/all-MiniLM-L6-v2"
     ):
         """
         Initialize the index builder.
@@ -61,14 +60,15 @@ class IndexBuilder:
             return []
 
         try:
+            logger.info(f"Loading documents from {self.processed_dir}")
             documents = SimpleDirectoryReader(
                 input_dir=str(self.processed_dir),
                 required_exts=[".txt"]
             ).load_data()
-            logger.info(f"Loaded {len(documents)} documents from {self.processed_dir}")
+            logger.info(f"Successfully loaded {len(documents)} documents from {self.processed_dir}")
             return documents
         except Exception as e:
-            logger.error(f"Failed to load documents: {e}")
+            logger.error(f"Failed to load documents from {self.processed_dir}: {e}")
             return []
 
     def build_index(self, documents: List) -> VectorStoreIndex:
@@ -85,14 +85,16 @@ class IndexBuilder:
             raise ValueError("No documents provided for indexing")
 
         try:
+            logger.info(f"Initializing FAISS vector store with dimension {self.embed_model.embed_dim}")
             # Initialize FAISS vector store
-            d = 384  # Dimension for ...
+            d = self.embed_model.embed_dim  # Get dimension from embedding model
             faiss_index = faiss.IndexFlatL2(d)
             vector_store = FaissVectorStore(faiss_index=faiss_index)
 
             # Create storage context
             storage_context = StorageContext.from_defaults(vector_store=vector_store)
 
+            logger.info(f"Building index with {len(documents)} documents using {self.embedding_model}")
             # Build index with documents
             index = VectorStoreIndex.from_documents(
                 documents,
@@ -101,7 +103,7 @@ class IndexBuilder:
                 show_progress=True
             )
 
-            logger.info(f"Built index with {len(documents)} documents")
+            logger.info(f"Successfully built index with {len(documents)} documents")
             return index
 
         except Exception as e:
@@ -130,9 +132,12 @@ class IndexBuilder:
             True if successful, False otherwise
         """
         try:
+            logger.info("Starting index building process")
+            
             # Load documents
             documents = self.load_documents()
             if not documents:
+                logger.error("No documents to index. Run ingestion first.")
                 return False
 
             # Build index
