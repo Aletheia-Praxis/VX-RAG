@@ -30,17 +30,25 @@ def load_pdfs(raw_pdf_dir: Path) -> List[Document]:
         logger.error(f"Raw PDF directory does not exist: {raw_pdf_dir}")
         return []
 
+    if not raw_pdf_dir.is_dir():
+        logger.error(f"Raw PDF path is not a directory: {raw_pdf_dir}")
+        return []
+
     try:
+        logger.info(f"Scanning directory {raw_pdf_dir} for PDF files")
         reader = SimpleDirectoryReader(
             input_dir=str(raw_pdf_dir),
             required_exts=[".pdf"],
             recursive=False  # Only process files directly in the directory
         )
         documents = reader.load_data()
-        logger.info(f"Loaded {len(documents)} PDF documents from {raw_pdf_dir}")
+        logger.info(f"Successfully loaded {len(documents)} PDF documents from {raw_pdf_dir}")
+        for i, doc in enumerate(documents, 1):
+            file_path = doc.metadata.get('file_path', 'unknown')
+            logger.debug(f"Loaded document {i}/{len(documents)}: {file_path}")
         return documents
     except Exception as e:
-        logger.error(f"Failed to load PDF documents: {e}")
+        logger.error(f"Failed to load PDF documents from {raw_pdf_dir}: {e}")
         return []
 
 
@@ -57,22 +65,31 @@ def save_processed_text(documents: List[Document], processed_dir: Path) -> int:
     """
     processed_dir.mkdir(parents=True, exist_ok=True)
     saved_count = 0
+    total_docs = len(documents)
 
-    for doc in documents:
+    logger.info(f"Starting to save {total_docs} documents to {processed_dir}")
+
+    for i, doc in enumerate(documents, 1):
         try:
             # Extract filename from metadata or use a default
-            file_path = doc.metadata.get('file_path', 'unknown.pdf')
+            file_path = doc.metadata.get('file_path', f'document_{i}.pdf')
             filename = Path(file_path).stem + ".txt"
             output_path = processed_dir / filename
 
-            with open(output_path, 'w', encoding='utf-8') as f:
-                f.write(doc.text)
+            # Check if text is not empty
+            if not doc.text or not doc.text.strip():
+                logger.warning(f"Document {file_path} has no extractable text, skipping")
+                continue
 
-            logger.info(f"Saved processed text to {output_path}")
+            with open(output_path, 'w', encoding='utf-8') as f:
+                f.write(doc.text.strip())
+
+            logger.info(f"Saved processed text ({i}/{total_docs}) to {output_path}")
             saved_count += 1
         except Exception as e:
-            logger.error(f"Failed to save document {doc.metadata.get('file_path', 'unknown')}: {e}")
+            logger.error(f"Failed to save document {doc.metadata.get('file_path', f'document_{i}')}: {e}")
 
+    logger.info(f"Successfully saved {saved_count}/{total_docs} documents")
     return saved_count
 
 
