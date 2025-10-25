@@ -1,121 +1,112 @@
-#!/usr/bin/env python3
 """
 Document ingestion module for VX-RAG system.
 
-This module reads PDF files from data/raw/pdf/, extracts text content,
+This module reads PDF files from data/raw/pdf/, extracts text content using LlamaIndex,
 and stores processed text files in data/processed/ for indexing.
 """
 
-import os
 import logging
 from pathlib import Path
-from pypdf import PdfReader
-from typing import List, Optional
+from typing import List
+
+from llama_index.core import Document, SimpleDirectoryReader
 
 # Configure logging
-logging.basicConfig(level=logging.INFO)
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
 
-class DocumentIngester:
-    """Handles PDF document ingestion and text extraction."""
+def load_pdfs(raw_pdf_dir: Path) -> List[Document]:
+    """
+    Load PDF documents from the raw directory using LlamaIndex SimpleDirectoryReader.
 
-    def __init__(self, raw_dir: str = "data/raw/pdf", processed_dir: str = "data/processed"):
-        """
-        Initialize the document ingester.
+    Args:
+        raw_pdf_dir: Path to the directory containing raw PDF files
 
-        Args:
-            raw_dir: Directory containing raw PDF files
-            processed_dir: Directory to store processed text files
-        """
-        self.raw_dir = Path(raw_dir)
-        self.processed_dir = Path(processed_dir)
-        self.processed_dir.mkdir(parents=True, exist_ok=True)
+    Returns:
+        List of Document objects loaded from PDF files
+    """
+    if not raw_pdf_dir.exists():
+        logger.error(f"Raw PDF directory does not exist: {raw_pdf_dir}")
+        return []
 
-    def extract_text_from_pdf(self, pdf_path: Path) -> Optional[str]:
-        """
-        Extract text content from a PDF file.
+    try:
+        reader = SimpleDirectoryReader(
+            input_dir=str(raw_pdf_dir),
+            required_exts=[".pdf"],
+            recursive=False  # Only process files directly in the directory
+        )
+        documents = reader.load_data()
+        logger.info(f"Loaded {len(documents)} PDF documents from {raw_pdf_dir}")
+        return documents
+    except Exception as e:
+        logger.error(f"Failed to load PDF documents: {e}")
+        return []
 
-        Args:
-            pdf_path: Path to the PDF file
 
-        Returns:
-            Extracted text content or None if extraction fails
-        """
+def save_processed_text(documents: List[Document], processed_dir: Path) -> int:
+    """
+    Save the text content of documents to processed directory as .txt files.
+
+    Args:
+        documents: List of Document objects
+        processed_dir: Directory to save processed text files
+
+    Returns:
+        Number of successfully saved files
+    """
+    processed_dir.mkdir(parents=True, exist_ok=True)
+    saved_count = 0
+
+    for doc in documents:
         try:
-            reader = PdfReader(pdf_path)
-            text = ""
-            for page in reader.pages:
-                text += page.extract_text() + "\n"
-            return text.strip()
-        except Exception as e:
-            logger.error(f"Failed to extract text from {pdf_path}: {e}")
-            return None
+            # Extract filename from metadata or use a default
+            file_path = doc.metadata.get('file_path', 'unknown.pdf')
+            filename = Path(file_path).stem + ".txt"
+            output_path = processed_dir / filename
 
-    def process_pdf(self, pdf_path: Path) -> bool:
-        """
-        Process a single PDF file and save extracted text.
-
-        Args:
-            pdf_path: Path to the PDF file
-
-        Returns:
-            True if processing succeeded, False otherwise
-        """
-        text = self.extract_text_from_pdf(pdf_path)
-        if text is None:
-            return False
-
-        # Create output filename
-        output_filename = pdf_path.stem + ".txt"
-        output_path = self.processed_dir / output_filename
-
-        try:
             with open(output_path, 'w', encoding='utf-8') as f:
-                f.write(text)
-            logger.info(f"Processed {pdf_path} -> {output_path}")
-            return True
+                f.write(doc.text)
+
+            logger.info(f"Saved processed text to {output_path}")
+            saved_count += 1
         except Exception as e:
-            logger.error(f"Failed to save processed text for {pdf_path}: {e}")
-            return False
+            logger.error(f"Failed to save document {doc.metadata.get('file_path', 'unknown')}: {e}")
 
-    def ingest_all_pdfs(self) -> int:
-        """
-        Process all PDF files in the raw directory.
-
-        Returns:
-            Number of successfully processed files
-        """
-        if not self.raw_dir.exists():
-            logger.error(f"Raw directory does not exist: {self.raw_dir}")
-            return 0
-
-        pdf_files = list(self.raw_dir.glob("*.pdf"))
-        if not pdf_files:
-            logger.warning(f"No PDF files found in {self.raw_dir}")
-            return 0
-
-        logger.info(f"Found {len(pdf_files)} PDF files to process")
-
-        processed_count = 0
-        for pdf_file in pdf_files:
-            if self.process_pdf(pdf_file):
-                processed_count += 1
-
-        logger.info(f"Successfully processed {processed_count}/{len(pdf_files)} files")
-        return processed_count
+    return saved_count
 
 
-def main():
-    """Main entry point for document ingestion."""
-    ingester = DocumentIngester()
-    processed_count = ingester.ingest_all_pdfs()
+def main() -> int:
+    """
+    Main entry point for document ingestion pipeline.
 
-    if processed_count == 0:
-        logger.error("No files were processed. Check your data directory and PDF files.")
+    Returns:
+        Exit code: 0 for success, 1 for failure
+    """
+    logger.info("Starting document ingestion pipeline")
+
+    raw_pdf_dir = Path("data/raw/pdf")
+    processed_dir = Path("data/processed")
+
+    # TODO: Add support for TXT files here
+    # Use SimpleDirectoryReader with required_exts=[".txt"] or a custom text loader
+
+    # TODO: Add support for MD files here
+    # Use SimpleDirectoryReader with required_exts=[".md"] or a custom markdown loader
+
+    documents = load_pdfs(raw_pdf_dir)
+
+    if not documents:
+        logger.warning("No documents were loaded. Check the raw PDF directory.")
         return 1
 
-    logger.info(f"Ingestion complete. Processed {processed_count} documents.")
+    saved_count = save_processed_text(documents, processed_dir)
+
+    if saved_count == 0:
+        logger.error("No documents were successfully saved.")
+        return 1
+
+    logger.info(f"Ingestion complete. Processed {saved_count} documents.")
     return 0
 
 
