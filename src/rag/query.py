@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """
 Query module for VX-RAG system.
 
@@ -12,6 +11,7 @@ from typing import List, Tuple
 
 from llama_index.core import load_index_from_storage, StorageContext
 from llama_index.vector_stores.faiss import FaissVectorStore
+from llama_index.llms.ollama import Ollama
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -21,15 +21,18 @@ logger = logging.getLogger(__name__)
 class DocumentQuery:
     """Handles document querying against FAISS index."""
 
-    def __init__(self, index_dir: str = "data/index"):
+    def __init__(self, index_dir: str = "data/index", llm_model: str = "llama3"):
         """
         Initialize the document query handler.
 
         Args:
             index_dir: Directory containing the persisted FAISS index
+            llm_model: Name of the Ollama LLM model to use
         """
         self.index_dir = Path(index_dir)
+        self.llm_model = llm_model
         self.index = None
+        self.llm = Ollama(model=self.llm_model)
 
     def load_index(self) -> bool:
         """
@@ -55,29 +58,33 @@ class DocumentQuery:
             logger.error(f"Failed to load index: {e}")
             return False
 
-    def query_documents(self, query: str, top_k: int = 3) -> List[Tuple[str, float, dict]]:
+    def query_documents(self, query: str, top_k: int = 3) -> Tuple[str, List[Tuple[str, float, dict]]]:
         """
-        Query the index and retrieve top-k similar documents.
+        Query the index and retrieve top-k similar documents with generated response.
 
         Args:
             query: The search query
             top_k: Number of top results to return
 
         Returns:
-            List of tuples containing (text, score, metadata) for each result
+            Tuple of (generated_response, list of (text, score, metadata) for each result)
         """
         if self.index is None:
             if not self.load_index():
-                return []
+                return "", []
 
         try:
-            # Create query engine
-            query_engine = self.index.as_query_engine(similarity_top_k=top_k)
+            # Create query engine with LLM
+            query_engine = self.index.as_query_engine(
+                similarity_top_k=top_k,
+                llm=self.llm
+            )
 
-            # Perform query
+            # Perform query with response generation
             response = query_engine.query(query)
+            generated_response = str(response)
 
-            # Extract results with metadata
+            # Extract source nodes for detailed results
             results = []
             for node in response.source_nodes:
                 text = node.node.text[:500] + "..." if len(node.node.text) > 500 else node.node.text
@@ -85,34 +92,38 @@ class DocumentQuery:
                 metadata = node.node.metadata
                 results.append((text, score, metadata))
 
-            return results
+            return generated_response, results
 
         except Exception as e:
             logger.error(f"Query failed: {e}")
-            return []
+            return "", []
 
-    def print_results(self, query: str, results: List[Tuple[str, float, dict]]) -> None:
+    def print_results(self, query: str, response: str, results: List[Tuple[str, float, dict]]) -> None:
         """
-        Print query results in a readable format.
+        Print query results and generated response in a readable format.
 
         Args:
             query: The original query
+            response: The generated response from LLM
             results: List of query results
         """
         print(f"\nQuery: {query}")
         print("=" * 50)
+        print(f"Generated Response: {response}")
+        print("=" * 50)
 
         if not results:
-            print("No results found.")
+            print("No source documents found.")
             return
 
+        print(f"\nSource Documents (Top {len(results)}):")
         for i, (text, score, metadata) in enumerate(results, 1):
-            print(f"\nMatch #{i} (Score: {score:.4f})")
-            print("-" * 30)
+            print(f"\nDocument #{i} (Similarity Score: {score:.4f})")
+            print("-" * 40)
 
             # Print metadata if available
             if metadata:
-                source = metadata.get('file_name', 'Unknown')
+                source = metadata.get('file_name', metadata.get('file_path', 'Unknown'))
                 print(f"Source: {source}")
 
             print(f"Text: {text}")
@@ -123,16 +134,23 @@ def main():
     """Main entry point for testing document queries."""
     query_handler = DocumentQuery()
 
-    # Test query
-    test_query = "Example query: malware analysis dataset"
+    # Test queries
+    test_queries = [
+        "What is malware analysis?",
+        "What is the easiest way to transfer malware to the target system?",
+        "How to detect malicious code?"
+    ]
 
-    results = query_handler.query_documents(test_query)
+    for test_query in test_queries:
+        logger.info(f"Testing query: {test_query}")
+        response, results = query_handler.query_documents(test_query)
 
-    if not results:
-        logger.error("Failed to perform query. Check if index exists and is properly built.")
-        return 1
+        if not response and not results:
+            logger.error("Failed to perform query. Check if index exists and is properly built.")
+            return 1
 
-    query_handler.print_results(test_query, results)
+        query_handler.print_results(test_query, response, results)
+
     return 0
 
 
