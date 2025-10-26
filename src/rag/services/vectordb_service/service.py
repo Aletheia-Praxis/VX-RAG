@@ -126,7 +126,7 @@ class VectorStoreClient:
             if not self.load_index():
                 return []
         
-        assert self.index is not None
+        assert self.index is not None  # nosec B101
         try:
             # Use LlamaIndex query engine for search
             query_engine = self.index.as_query_engine(similarity_top_k=top_k)
