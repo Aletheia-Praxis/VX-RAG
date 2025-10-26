@@ -26,7 +26,7 @@ class MCPBridge:
     for querying documents, health checks, and system context.
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
         """
         Initialize the MCP bridge with RAG services.
         """
@@ -35,7 +35,7 @@ class MCPBridge:
         self.llm_proxy: Optional[LLMProxy] = None
         self._initialize_services()
 
-    def _initialize_services(self):
+    def _initialize_services(self) -> None:
         """Initialize the RAG services."""
         try:
             logger.info("Initializing VX-RAG services in MCP bridge")
