@@ -29,6 +29,6 @@ class ContextAssembler:
     def select_top_documents(self, documents: List[Dict[str, Any]], max_tokens: int) -> List[Dict[str, Any]]:
         """Select documents within token limit."""
         # TODO: Implement token-aware selection
-        pass
+        return documents[:10]  # Simple implementation: return first 10
 
 # TODO: Add provenance tracking, MCP schema validation

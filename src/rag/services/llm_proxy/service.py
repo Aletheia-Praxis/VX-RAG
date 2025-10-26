@@ -19,7 +19,7 @@ class LLMProxy:
         self.llm = Ollama(model=self.model_name)
         logger.info(f"Initialized LLM proxy with model: {self.model_name}")
     
-    def generate(self, prompt: str, context: Optional[List[Dict[str, Any]]] = None, **kwargs) -> str:
+    def generate(self, prompt: str, context: Optional[List[Dict[str, Any]]] = None, **kwargs: Any) -> str:
         """
         Generate response using LLM with optional context.
         
@@ -53,7 +53,7 @@ class LLMProxy:
             logger.error(f"Failed to generate response: {e}")
             return f"Error generating response: {e}"
     
-    def generate_with_sources(self, prompt: str, context: List[Dict[str, Any]], **kwargs) -> Dict[str, Any]:
+    def generate_with_sources(self, prompt: str, context: List[Dict[str, Any]], **kwargs: Any) -> Dict[str, Any]:
         """
         Generate response with source information.
         

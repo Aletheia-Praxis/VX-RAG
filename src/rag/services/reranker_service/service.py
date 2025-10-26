@@ -19,11 +19,11 @@ class RerankerService:
     def rerank(self, query: str, documents: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         """Re-rank documents based on query relevance."""
         # TODO: Implement cross-encoder reranking
-        pass
+        return documents
     
     def prioritize_by_metadata(self, documents: List[Dict[str, Any]], priority_rules: Dict[str, Any]) -> List[Dict[str, Any]]:
         """Prioritize documents based on metadata rules."""
         # TODO: Implement metadata-based prioritization
-        pass
+        return documents
 
 # TODO: Add multiple reranking strategies
