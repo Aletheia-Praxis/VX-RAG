@@ -11,7 +11,9 @@ from typing import Dict, Any, List, Tuple, Optional
 import json
 from datetime import datetime
 
-from ..rag.query import DocumentQuery
+from ..rag.services.vectordb_service.service import VectorStoreClient
+from ..rag.services.retriever_service.service import RetrieverService
+from ..rag.services.llm_proxy.service import LLMProxy
 
 logger = logging.getLogger(__name__)
 
@@ -26,19 +28,37 @@ class MCPBridge:
 
     def __init__(self):
         """
-        Initialize the MCP bridge with RAG query handler.
+        Initialize the MCP bridge with RAG services.
         """
-        self.query_handler: Optional[DocumentQuery] = None
-        self._initialize_query_handler()
+        self.vector_store: Optional[VectorStoreClient] = None
+        self.retriever: Optional[RetrieverService] = None
+        self.llm_proxy: Optional[LLMProxy] = None
+        self._initialize_services()
 
-    def _initialize_query_handler(self):
-        """Initialize the document query handler."""
-        if self.query_handler is None:
-            logger.info("Initializing VX-RAG query handler in MCP bridge")
-            self.query_handler = DocumentQuery()
-            if not self.query_handler.load_index():
-                logger.warning("Failed to load index in MCP bridge. Queries may not work.")
-                self.query_handler = None
+    def _initialize_services(self):
+        """Initialize the RAG services."""
+        try:
+            logger.info("Initializing VX-RAG services in MCP bridge")
+            
+            # Initialize vector store
+            self.vector_store = VectorStoreClient(store_type="faiss")
+            
+            # Load index
+            if self.vector_store.load_index():
+                # Initialize retriever with loaded index
+                if self.vector_store.index is not None:
+                    self.retriever = RetrieverService(self.vector_store.index)
+                    logger.info("Retriever service initialized with loaded index")
+                else:
+                    logger.warning("Index loaded but index object is None")
+            else:
+                logger.warning("Failed to load index. Retriever service not initialized.")
+            
+            # Initialize LLM proxy
+            self.llm_proxy = LLMProxy()
+            
+        except Exception as e:
+            logger.error(f"Failed to initialize RAG services: {e}")
 
     def query_documents(self, query: str, top_k: int = 3) -> str:
         """
@@ -51,30 +71,31 @@ class MCPBridge:
         Returns:
             Formatted response with query results and LLM-generated answer
         """
-        if self.query_handler is None:
-            self._initialize_query_handler()
-            if self.query_handler is None:
-                return "Error: Query service not initialized"
+        if self.retriever is None or self.llm_proxy is None:
+            return "Error: RAG services not initialized"
         
         try:
             logger.info(f"Processing query via MCP bridge: {query} (top_k={top_k})")
             
-            # Perform query
-            response, results = self.query_handler.query_documents(query, top_k)
+            # Retrieve relevant documents
+            retrieved_docs = self.retriever.retrieve(query, top_k)
             
-            if not response and not results:
-                return "Error: Query execution failed"
+            if not retrieved_docs:
+                return f"Query: {query}\n\nNo relevant documents found."
+            
+            # Generate response using LLM
+            llm_result = self.llm_proxy.generate_with_sources(query, retrieved_docs)
             
             # Format results
             formatted_results = []
-            for i, (text, score, metadata) in enumerate(results, 1):
-                formatted_results.append(f"Result {i} (score: {score:.3f}):\n{text[:500]}...")
+            for i, source in enumerate(llm_result['sources'], 1):
+                formatted_results.append(f"Result {i} (score: {source['score']:.3f}):\n{source['text']}")
             
             result_text = "\n\n".join(formatted_results)
             
-            full_response = f"Query: {query}\n\nLLM Response:\n{response}\n\nTop Results:\n{result_text}"
+            full_response = f"Query: {query}\n\nLLM Response:\n{llm_result['response']}\n\nTop Results:\n{result_text}"
             
-            logger.info(f"Query completed via MCP bridge: {len(results)} results returned")
+            logger.info(f"Query completed via MCP bridge: {len(retrieved_docs)} results returned")
             
             return full_response
             
@@ -87,17 +108,28 @@ class MCPBridge:
         Get the health status of the RAG system.
         
         Returns:
-            JSON-formatted health status including index load state
+            JSON-formatted health status including service states
         """
-        if self.query_handler is None:
-            self._initialize_query_handler()
+        index_loaded = self.vector_store is not None and self.vector_store.index is not None
+        retriever_ready = self.retriever is not None
+        llm_ready = self.llm_proxy is not None
         
-        index_loaded = self.query_handler is not None and self.query_handler.index is not None
-        status = "healthy" if index_loaded else "degraded"
+        status = "healthy" if (index_loaded and retriever_ready and llm_ready) else "degraded"
         
         health_data = {
             "status": status,
-            "index_loaded": index_loaded,
+            "services": {
+                "vector_store": {
+                    "initialized": self.vector_store is not None,
+                    "index_loaded": index_loaded
+                },
+                "retriever": {
+                    "initialized": retriever_ready
+                },
+                "llm_proxy": {
+                    "initialized": llm_ready
+                }
+            },
             "version": "1.0.0"
         }
         
@@ -118,7 +150,14 @@ class MCPBridge:
                 "LLM-powered response generation",
                 "MCP protocol integration for IDE/LLM access"
             ],
-            "supported_formats": ["PDF"]
+            "supported_formats": ["PDF"],
+            "services": {
+                "ingest": "Document loading and preprocessing",
+                "embedder": "Text embedding generation",
+                "vectordb": "Vector storage and retrieval",
+                "retriever": "Document retrieval",
+                "llm_proxy": "LLM interaction and response generation"
+            }
         }
         
         return json.dumps(context_data, indent=2)
