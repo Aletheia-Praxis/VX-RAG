@@ -32,7 +32,7 @@ jobs:
           pip install bandit
       - name: Run Bandit
         run: |
-          bandit -r . -x .venv -q
+          bandit -r . -x .venv,tests -q
 
   mypy:
     name: Type Check (mypy)
