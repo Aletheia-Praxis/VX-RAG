@@ -1,35 +1,84 @@
 """
-Vector Database Service implementation.
+LLM Proxy Service implementation.
 
-Provides classes for vector storage operations.
+Provides classes for LLM interaction and response generation.
 """
 
 from typing import List, Dict, Any, Optional
 import logging
 
+from llama_index.llms.ollama import Ollama
+
 logger = logging.getLogger(__name__)
 
-class VectorStoreClient:
-    """Client for vector database operations."""
+class LLMProxy:
+    """Service for LLM interaction and response generation."""
     
-    def __init__(self, store_type: str = "faiss", config: Dict[str, Any] = None):
-        self.store_type = store_type
-        self.config = config or {}
-        # TODO: Initialize vector store (FAISS, Milvus, etc.)
+    def __init__(self, model_name: str = "llama3"):
+        self.model_name = model_name
+        self.llm = Ollama(model=self.model_name)
+        logger.info(f"Initialized LLM proxy with model: {self.model_name}")
     
-    def store_vectors(self, vectors: List[List[float]], metadata: List[Dict[str, Any]] = None) -> bool:
-        """Store vectors with optional metadata."""
-        # TODO: Implement vector storage
-        pass
+    def generate(self, prompt: str, context: Optional[List[Dict[str, Any]]] = None, **kwargs) -> str:
+        """
+        Generate response using LLM with optional context.
+        
+        Args:
+            prompt: The query prompt
+            context: List of context documents
+            **kwargs: Additional parameters for LLM
+            
+        Returns:
+            Generated response string
+        """
+        try:
+            if context:
+                # Build context string from retrieved documents
+                context_str = "\n\n".join([
+                    f"Document {i+1}:\n{doc.get('text', '')}"
+                    for i, doc in enumerate(context)
+                ])
+                full_prompt = f"Context:\n{context_str}\n\nQuestion: {prompt}\n\nAnswer:"
+            else:
+                full_prompt = prompt
+            
+            # Generate response
+            response = self.llm.complete(full_prompt)
+            generated_text = str(response)
+            
+            logger.info(f"Generated response using {self.model_name}")
+            return generated_text
+            
+        except Exception as e:
+            logger.error(f"Failed to generate response: {e}")
+            return f"Error generating response: {e}"
     
-    def search_vectors(self, query_vector: List[float], top_k: int = 5) -> List[Dict[str, Any]]:
-        """Search for similar vectors."""
-        # TODO: Implement vector search
-        pass
-    
-    def delete_vectors(self, ids: List[str]) -> bool:
-        """Delete vectors by IDs."""
-        # TODO: Implement vector deletion
-        pass
+    def generate_with_sources(self, prompt: str, context: List[Dict[str, Any]], **kwargs) -> Dict[str, Any]:
+        """
+        Generate response with source information.
+        
+        Args:
+            prompt: The query prompt
+            context: List of context documents
+            **kwargs: Additional parameters
+            
+        Returns:
+            Dictionary with response and sources
+        """
+        response = self.generate(prompt, context, **kwargs)
+        
+        sources = []
+        for doc in context:
+            source = {
+                'text': doc.get('text', '')[:500] + "..." if len(doc.get('text', '')) > 500 else doc.get('text', ''),
+                'score': doc.get('score', 0.0),
+                'metadata': doc.get('metadata', {})
+            }
+            sources.append(source)
+        
+        return {
+            'response': response,
+            'sources': sources
+        }
 
-# TODO: Add persistence, snapshotting, replication
+# TODO: Add streaming, conversation history, model switching
