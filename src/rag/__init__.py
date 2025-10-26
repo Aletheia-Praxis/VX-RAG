@@ -6,7 +6,7 @@ the VX-RAG (Retrieval-Augmented Generation) system components.
 """
 
 import logging
-from typing import Optional
+from typing import Optional, Dict, Any
 
 from .services.ingest_service.service import PDFIngestAdapter
 from .services.embedder_service.service import EmbeddingService
@@ -19,7 +19,7 @@ logger = logging.getLogger(__name__)
 class RAGSystem:
     """Main RAG system orchestrator."""
     
-    def __init__(self):
+    def __init__(self) -> None:
         self.ingest_adapter: Optional[PDFIngestAdapter] = None
         self.embedding_service: Optional[EmbeddingService] = None
         self.vector_store: Optional[VectorStoreClient] = None
@@ -28,7 +28,7 @@ class RAGSystem:
         
         self._initialize_services()
     
-    def _initialize_services(self):
+    def _initialize_services(self) -> None:
         """Initialize all RAG services."""
         try:
             logger.info("Initializing VX-RAG system services")
@@ -95,7 +95,7 @@ class RAGSystem:
             logger.error(f"Failed to build index: {e}")
             return False
     
-    def query(self, query: str, top_k: int = 3) -> dict:
+    def query(self, query: str, top_k: int = 3) -> Dict[str, Any]:
         """
         Perform a RAG query.
         
