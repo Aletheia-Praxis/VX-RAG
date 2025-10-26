@@ -34,7 +34,7 @@ class QueryParams(BaseModel):
     top_k: int = Field(3, ge=1, le=10, description="Number of top results to return")
 
 
-@mcp.tool
+@mcp.tool  # type: ignore
 def query_documents(params: QueryParams) -> str:
     """
     Query the RAG system for relevant documents and generate a response.
@@ -63,7 +63,7 @@ def query_documents(params: QueryParams) -> str:
         return f"Error: Query processing failed: {str(e)}"
 
 
-@mcp.resource("health://status")
+@mcp.resource("health://status")  # type: ignore
 def get_health_status() -> str:
     """
     Get the health status of the RAG system.
@@ -79,7 +79,7 @@ def get_health_status() -> str:
         return json.dumps({"status": "error", "error": str(e)})
 
 
-@mcp.resource("context://system")
+@mcp.resource("context://system")  # type: ignore
 def get_system_context() -> str:
     """
     Get information about the RAG system's capabilities and context.
