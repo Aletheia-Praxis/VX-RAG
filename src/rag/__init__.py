@@ -59,6 +59,10 @@ class RAGSystem:
         Returns:
             True if successful
         """
+        if self.vector_store is None or self.embedding_service is None:
+            logger.error("Required services not initialized")
+            return False
+        
         try:
             from llama_index.core import SimpleDirectoryReader
             
