@@ -22,9 +22,9 @@ class TestMCPServer:
 
             result = query_documents(params)
 
-            assert "Query: test query" in result
-            assert "Test response" in result
-            assert "Result 1" in result
+            assert "Query: test query" in result  # nosec B101
+            assert "Test response" in result  # nosec B101
+            assert "Result 1" in result  # nosec B101
             mock_handler.query_documents.assert_called_once_with("test query", 3)
 
     def test_query_documents_tool_no_handler(self):
@@ -35,7 +35,7 @@ class TestMCPServer:
 
             result = query_documents(params)
 
-            assert "Error: Query service not initialized" in result
+            assert "Error: Query service not initialized" in result  # nosec B101
 
     def test_query_documents_tool_exception(self):
         """Test query tool when exception occurs."""
@@ -48,7 +48,7 @@ class TestMCPServer:
 
             result = query_documents(params)
 
-            assert "Error: Query processing failed: Test error" in result
+            assert "Error: Query processing failed: Test error" in result  # nosec B101
 
     def test_get_health_status_resource(self):
         """Test health status resource."""
@@ -58,9 +58,9 @@ class TestMCPServer:
         with patch('src.mcp.server.query_handler', mock_handler):
             result = get_health_status()
 
-            assert '"status": "healthy"' in result
-            assert '"index_loaded": true' in result
-            assert '"version": "1.0.0"' in result
+            assert '"status": "healthy"' in result  # nosec B101
+            assert '"index_loaded": true' in result  # nosec B101
+            assert '"version": "1.0.0"' in result  # nosec B101
 
     def test_get_health_status_no_index(self):
         """Test health status when index is not loaded."""
@@ -70,16 +70,16 @@ class TestMCPServer:
         with patch('src.mcp.server.query_handler', mock_handler):
             result = get_health_status()
 
-            assert '"status": "degraded"' in result
-            assert '"index_loaded": false' in result
+            assert '"status": "degraded"' in result  # nosec B101
+            assert '"index_loaded": false' in result  # nosec B101
 
     def test_get_system_context_resource(self):
         """Test system context resource."""
         result = get_system_context()
 
-        assert "VX-RAG is a Retrieval-Augmented Generation system" in result
-        assert "Semantic document search" in result
-        assert "PDF" in result
+        assert "VX-RAG is a Retrieval-Augmented Generation system" in result  # nosec B101
+        assert "Semantic document search" in result  # nosec B101
+        assert "PDF" in result  # nosec B101
 
     def test_initialize_query_handler(self):
         """Test query handler initialization."""
@@ -91,7 +91,7 @@ class TestMCPServer:
 
                 handler = initialize_query_handler()
 
-                assert handler is mock_instance
+                assert handler is mock_instance  # nosec B101
                 mock_doc_query.assert_called_once()
                 mock_instance.load_index.assert_called_once()
 
@@ -99,12 +99,12 @@ class TestMCPServer:
         """Test that MCP server has expected tools and resources."""
         # Check that tools are registered
         tools = mcp.get_tools()
-        assert len(tools) > 0
-        assert "query_documents" in [tool.name for tool in tools.values()]
+        assert len(tools) > 0  # nosec B101
+        assert "query_documents" in [tool.name for tool in tools.values()]  # nosec B101
 
         # Check that resources are registered
         resources = mcp.get_resource_templates()
-        assert len(resources) > 0
+        assert len(resources) > 0  # nosec B101
 
         resources_static = mcp.get_resources()
-        assert len(resources_static) > 0
+        assert len(resources_static) > 0  # nosec B101

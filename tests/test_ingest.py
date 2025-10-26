@@ -22,7 +22,7 @@ def test_load_data_nonexistent_dir():
     """Test load_data with nonexistent directory."""
     adapter = PDFIngestAdapter()
     documents = adapter.load_data("nonexistent")
-    assert documents == []
+    assert documents == []  # nosec B101
 
 
 def test_load_data_empty_dir(temp_dirs):
@@ -32,7 +32,7 @@ def test_load_data_empty_dir(temp_dirs):
     with patch('src.rag.services.ingest_service.service.SimpleDirectoryReader') as mock_reader:
         mock_reader.return_value.load_data.return_value = []
         documents = adapter.load_data(str(raw_dir))
-        assert documents == []
+        assert documents == []  # nosec B101
         mock_reader.assert_called_once()
 
 
@@ -47,8 +47,8 @@ def test_load_data_with_documents(temp_dirs):
     with patch('src.rag.services.ingest_service.service.SimpleDirectoryReader') as mock_reader:
         mock_reader.return_value.load_data.return_value = mock_docs
         documents = adapter.load_data(str(raw_dir))
-        assert len(documents) == 2
-        assert documents[0]['text'] == "Test content 1"
+        assert len(documents) == 2  # nosec B101
+        assert documents[0]['text'] == "Test content 1"  # nosec B101
 
 
 def test_load_data_exception(temp_dirs):
@@ -58,14 +58,14 @@ def test_load_data_exception(temp_dirs):
     with patch('src.rag.services.ingest_service.service.SimpleDirectoryReader') as mock_reader:
         mock_reader.return_value.load_data.side_effect = Exception("Load error")
         documents = adapter.load_data(str(raw_dir))
-        assert documents == []
+        assert documents == []  # nosec B101
 
 
 def test_save_processed_text_empty_list(temp_dirs):
     """Test save_processed_text with empty document list."""
     _, processed_dir = temp_dirs
     saved_count = save_processed_text([], processed_dir)
-    assert saved_count == 0
+    assert saved_count == 0  # nosec B101
 
 
 def test_save_processed_text_valid_documents(temp_dirs):
@@ -76,11 +76,11 @@ def test_save_processed_text_valid_documents(temp_dirs):
         {'text': "Content 2", 'metadata': {"file_path": "test2.pdf"}}
     ]
     saved_count = save_processed_text(documents, processed_dir)
-    assert saved_count == 2
-    assert (processed_dir / "test1.txt").exists()
-    assert (processed_dir / "test2.txt").exists()
+    assert saved_count == 2  # nosec B101
+    assert (processed_dir / "test1.txt").exists()  # nosec B101
+    assert (processed_dir / "test2.txt").exists()  # nosec B101
     with open(processed_dir / "test1.txt") as f:
-        assert f.read() == "Content 1"
+        assert f.read() == "Content 1"  # nosec B101
 
 
 def test_save_processed_text_empty_text(temp_dirs):
@@ -91,9 +91,9 @@ def test_save_processed_text_empty_text(temp_dirs):
         {'text': "Valid content", 'metadata': {"file_path": "valid.pdf"}}
     ]
     saved_count = save_processed_text(documents, processed_dir)
-    assert saved_count == 1
-    assert not (processed_dir / "empty.txt").exists()
-    assert (processed_dir / "valid.txt").exists()
+    assert saved_count == 1  # nosec B101
+    assert not (processed_dir / "empty.txt").exists()  # nosec B101
+    assert (processed_dir / "valid.txt").exists()  # nosec B101
 
 
 def test_save_processed_text_exception(temp_dirs):
@@ -104,4 +104,4 @@ def test_save_processed_text_exception(temp_dirs):
     ]
     with patch('builtins.open', side_effect=Exception("Write error")):
         saved_count = save_processed_text(documents, processed_dir)
-        assert saved_count == 0
+        assert saved_count == 0  # nosec B101
