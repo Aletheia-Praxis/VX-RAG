@@ -13,7 +13,7 @@ from pathlib import Path
 # from rag.index import create_index
 # from rag.query import create_query_engine, query_documents
 
-def main():
+def main() -> None:
     """
     Main CLI entry point.
     """
