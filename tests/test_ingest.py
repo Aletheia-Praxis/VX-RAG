@@ -11,7 +11,7 @@ from llama_index.core import Document
 
 
 @pytest.fixture
-def temp_dirs(tmp_path) -> Tuple[Path, Path]:
+def temp_dirs(tmp_path: Path) -> Tuple[Path, Path]:
     """Create temporary directories for testing."""
     raw_dir = tmp_path / "raw" / "pdf"
     processed_dir = tmp_path / "processed"
@@ -26,7 +26,7 @@ def test_load_data_nonexistent_dir() -> None:
     assert documents == []  # nosec B101
 
 
-def test_load_data_empty_dir(temp_dirs) -> None:
+def test_load_data_empty_dir(temp_dirs: Tuple[Path, Path]) -> None:
     """Test load_data with empty directory."""
     adapter = PDFIngestAdapter()
     raw_dir, _ = temp_dirs
@@ -37,7 +37,7 @@ def test_load_data_empty_dir(temp_dirs) -> None:
         mock_reader.assert_called_once()
 
 
-def test_load_data_with_documents(temp_dirs) -> None:
+def test_load_data_with_documents(temp_dirs: Tuple[Path, Path]) -> None:
     """Test load_data with mock documents."""
     adapter = PDFIngestAdapter()
     raw_dir, _ = temp_dirs
@@ -52,7 +52,7 @@ def test_load_data_with_documents(temp_dirs) -> None:
         assert documents[0]['text'] == "Test content 1"  # nosec B101
 
 
-def test_load_data_exception(temp_dirs) -> None:
+def test_load_data_exception(temp_dirs: Tuple[Path, Path]) -> None:
     """Test load_data handles exceptions."""
     adapter = PDFIngestAdapter()
     raw_dir, _ = temp_dirs
@@ -62,14 +62,14 @@ def test_load_data_exception(temp_dirs) -> None:
         assert documents == []  # nosec B101
 
 
-def test_save_processed_text_empty_list(temp_dirs) -> None:
+def test_save_processed_text_empty_list(temp_dirs: Tuple[Path, Path]) -> None:
     """Test save_processed_text with empty document list."""
     _, processed_dir = temp_dirs
     saved_count = save_processed_text([], processed_dir)
     assert saved_count == 0  # nosec B101
 
 
-def test_save_processed_text_valid_documents(temp_dirs) -> None:
+def test_save_processed_text_valid_documents(temp_dirs: Tuple[Path, Path]) -> None:
     """Test save_processed_text with valid documents."""
     _, processed_dir = temp_dirs
     documents = [
@@ -84,7 +84,7 @@ def test_save_processed_text_valid_documents(temp_dirs) -> None:
         assert f.read() == "Content 1"  # nosec B101
 
 
-def test_save_processed_text_empty_text(temp_dirs) -> None:
+def test_save_processed_text_empty_text(temp_dirs: Tuple[Path, Path]) -> None:
     """Test save_processed_text skips documents with empty text."""
     _, processed_dir = temp_dirs
     documents = [
@@ -97,7 +97,7 @@ def test_save_processed_text_empty_text(temp_dirs) -> None:
     assert (processed_dir / "valid.txt").exists()  # nosec B101
 
 
-def test_save_processed_text_exception(temp_dirs) -> None:
+def test_save_processed_text_exception(temp_dirs: Tuple[Path, Path]) -> None:
     """Test save_processed_text handles file write exceptions."""
     _, processed_dir = temp_dirs
     documents = [
