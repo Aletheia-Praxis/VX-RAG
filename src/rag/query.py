@@ -74,6 +74,13 @@ class DocumentQuery:
                 return "", []
 
         try:
+            # Ensure index is loaded
+            if self.index is None:
+                if not self.load_index():
+                    return "", []
+            
+            assert self.index is not None  # For type checker
+            
             # Create query engine with LLM
             query_engine = self.index.as_query_engine(
                 similarity_top_k=top_k,
@@ -87,9 +94,9 @@ class DocumentQuery:
             # Extract source nodes for detailed results
             results = []
             for node in response.source_nodes:
-                text = node.node.text[:500] + "..." if len(node.node.text) > 500 else node.node.text
+                text = node.text[:500] + "..." if len(node.text) > 500 else node.text
                 score = node.score
-                metadata = node.node.metadata
+                metadata = node.metadata
                 results.append((text, score, metadata))
 
             return generated_response, results
