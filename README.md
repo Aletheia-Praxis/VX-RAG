@@ -7,16 +7,16 @@ A hybrid RAG (Retrieval-Augmented Generation) + MCP (Model Context Protocol) sys
 ### RAG Component
 
 - **Ingestion**: Loads and preprocesses PDF, TXT, and Markdown files from the vx-underground corpus (~10,000+ documents).
-- **Indexing**: Creates vector embeddings using local models (sentence-transformers or nomic-embed-text) and stores them in ChromaDB or FAISS.
+- **Indexing**: Creates vector embeddings using local models (sentence-transformers or nomic-embed-text) and stores them in FAISS.
 - **Querying**: Retrieves relevant document chunks based on user queries and provides context for generation.
 
 ### MCP Component
 
-- **Bridge**: Acts as an intermediary between external LLMs (GPT, Claude, Mistral) and the RAG engine.
-- **Routes**: Provides REST API endpoints for MCP communication.
-- **Auth**: Handles authentication and authorization for secure access.
+- **Server**: FastMCP-based MCP server providing tools and resources for LLM integration.
+- **Tools**: Query tool for document retrieval and response generation.
+- **Resources**: Health status and system context endpoints.
 
-The MCP layer manages context flow: external LLMs send queries to MCP, which retrieves relevant context from RAG and returns it for generation.
+The MCP server enables direct integration with IDEs and LLMs through the Model Context Protocol, allowing tools to query the RAG system for contextual information.
 
 ## Project Structure
 
@@ -26,38 +26,35 @@ VX-RAG/
 ├── src/
 │   ├── rag/
 │   │   ├── ingest.py      # Document loading and preprocessing
-│   │   ├── index.py       # Vector index creation with LlamaIndex/ChromaDB
+│   │   ├── build_index.py # Vector index creation with FAISS
 │   │   ├── query.py       # Query handling and response formatting
 │   │   ├── embeddings.py  # Local embedding generation
 │   │   ├── config.py      # Configuration management
 │   │   └── utils.py       # Helper functions
 │   │
 │   ├── mcp/
+│   │   ├── server.py      # FastMCP server with tools and resources
 │   │   ├── bridge.py      # MCP-RAG bridge logic
-│   │   ├── routes.py      # Flask API routes
+│   │   ├── routes.py      # Additional MCP routes
 │   │   └── auth.py        # Authentication/authorization
 │   │
 │   └── cli.py             # Command-line interface
 │
 ├── data/
 │   ├── raw/
-│   │   ├── md/            # Raw Markdown files
 │   │   ├── pdf/           # Raw PDF files
-│   │   └── txt/           # Raw text files
+│   │   └── txt/           # Raw text files (TODO: MD support)
 │   ├── processed/         # Preprocessed text documents
-│   └── index/             # Vector index storage
+│   └── index/             # FAISS vector index storage
 │
 ├── tests/
 │   ├── test_ingest.py     # Ingestion tests
 │   ├── test_query.py      # Query tests
-│   └── test_bridge.py     # MCP bridge tests
+│   └── test_server.py     # MCP server tests
 │
-├── config/
-│   └── settings.yaml      # Configuration file
-│
-├── Dockerfile             # Containerization
 ├── requirements.txt       # Python dependencies
-└── README.md
+├── README.md
+└── LICENSE
 ```
 
 ## Installation
@@ -115,37 +112,46 @@ Query the system via CLI:
 python src/cli.py query "What is malware analysis?"
 ```
 
-### MCP API Usage
+### MCP Server Usage
 
 Start the MCP server:
 
 ```bash
-python src/mcp/routes.py
+python src/mcp/server.py
 ```
 
-The API will be available at `http://localhost:5000`.
+The MCP server will start and listen for connections from MCP clients (IDEs, LLMs).
 
-Example API call:
+#### Available Tools
 
-```bash
-curl -X POST http://localhost:5000/query \
-  -H "Content-Type: application/json" \
-  -d '{"query": "Explain VX Underground"}'
-```
+- **query_documents**: Query the RAG system for relevant documents
+  - Parameters: `query` (string), `top_k` (integer, 1-10)
 
-### Connecting External LLMs
+#### Available Resources
 
-Configure your LLM client to use the MCP API endpoint. The MCP bridge will:
+- **health://status**: Get system health status
+- **context://system**: Get system capabilities and context
 
-1. Receive queries from the LLM
-2. Retrieve relevant context from RAG
-3. Return context for the LLM to generate responses
+#### Example MCP Client Usage
 
-Set environment variables:
+```python
+from fastmcp import Client
 
-```bash
-export MCP_API_KEY=your_api_key
-export LLM_API_KEY=your_llm_key
+# Connect to MCP server
+client = Client("python src/mcp/server.py")
+
+async def query_example():
+    async with client:
+        # Query documents
+        result = await client.call_tool("query_documents", {
+            "query": "What is malware analysis?",
+            "top_k": 3
+        })
+        print(result)
+
+        # Get health status
+        health = await client.get_resource("health://status")
+        print(health)
 ```
 
 ## Configuration
@@ -157,7 +163,7 @@ data_dir: "./data"
 index_dir: "./data/index"
 embedding_model: "..."
 chunk_size: 512
-vector_store: "chromadb"  # or "faiss"
+vector_store: "faiss"
 ```
 
 ## Testing
@@ -172,7 +178,7 @@ pytest tests/
 
 - Python 3.11+
 - Disk space: ~20GB for index (depending on corpus size)
-- Brains and understanding what you are doing
+- Ollama for local LLM inference (optional, for query responses)
 
 ## License
 
