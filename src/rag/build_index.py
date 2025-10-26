@@ -85,9 +85,13 @@ class IndexBuilder:
             raise ValueError("No documents provided for indexing")
 
         try:
-            logger.info(f"Initializing FAISS vector store with dimension {self.embed_model.embed_dim}")
+            logger.info(f"Initializing FAISS vector store")
+            # Get embedding dimension by creating a test embedding
+            test_embedding = self.embed_model.get_text_embedding("test")
+            d = len(test_embedding)
+            logger.info(f"Embedding dimension: {d}")
+            
             # Initialize FAISS vector store
-            d = self.embed_model.embed_dim  # Get dimension from embedding model
             faiss_index = faiss.IndexFlatL2(d)
             vector_store = FaissVectorStore(faiss_index=faiss_index)
 
