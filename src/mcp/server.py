@@ -32,8 +32,7 @@ def initialize_query_handler():
 
 # Create FastMCP server
 mcp = FastMCP(
-    name="VX-RAG MCP Server",
-    description="Retrieval-Augmented Generation system for VX Underground documents"
+    name="VX-RAG MCP Server"
 )
 
 
