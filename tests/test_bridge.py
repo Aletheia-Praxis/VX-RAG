@@ -10,7 +10,7 @@ class TestBridge(unittest.TestCase):
     Test cases for MCP bridge.
     """
 
-    def test_handle_query(self):
+    def test_handle_query(self) -> None:
         """
         Test handling queries.
         """
@@ -21,7 +21,7 @@ class TestBridge(unittest.TestCase):
         # self.assertIn("query", response)
         pass
 
-    def test_get_context(self):
+    def test_get_context(self) -> None:
         """
         Test getting context.
         """

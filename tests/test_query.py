@@ -10,7 +10,7 @@ class TestQuery(unittest.TestCase):
     Test cases for querying.
     """
 
-    def test_create_query_engine(self):
+    def test_create_query_engine(self) -> None:
         """
         Test creating query engine.
         """
@@ -20,7 +20,7 @@ class TestQuery(unittest.TestCase):
         # self.assertIsNotNone(engine)
         pass
 
-    def test_query_documents(self):
+    def test_query_documents(self) -> None:
         """
         Test querying documents.
         """
