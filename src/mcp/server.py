@@ -2,32 +2,23 @@
 FastMCP server module for VX-RAG system.
 
 Provides MCP (Model Context Protocol) interface for querying the RAG system.
+Delegates all RAG operations to the MCP bridge for clean separation of concerns.
 """
 
 import logging
 from typing import List, Optional, Dict, Any
+import json
 
 from fastmcp import FastMCP
 from pydantic import BaseModel, Field
-from ..rag.query import DocumentQuery
+from .bridge import get_mcp_bridge
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Global query handler
-query_handler: Optional[DocumentQuery] = None
-
-
-def initialize_query_handler():
-    """Initialize the document query handler."""
-    global query_handler
-    if query_handler is None:
-        logger.info("Initializing VX-RAG query handler")
-        query_handler = DocumentQuery()
-        if not query_handler.load_index():
-            logger.warning("Failed to load index. Queries may not work.")
-    return query_handler
+# Global MCP bridge instance
+mcp_bridge = get_mcp_bridge()
 
 
 # Create FastMCP server
@@ -57,36 +48,15 @@ def query_documents(params: QueryParams) -> str:
     Returns:
         Formatted response with query results and LLM-generated answer
     """
-    global query_handler
-    
-    # Initialize if needed
-    if query_handler is None:
-        initialize_query_handler()
-    
-    if query_handler is None:
-        return "Error: Query service not initialized"
-    
     try:
         logger.info(f"Processing MCP query: {params.query} (top_k={params.top_k})")
         
-        # Perform query
-        response, results = query_handler.query_documents(params.query, params.top_k)
+        # Delegate to MCP bridge
+        response = mcp_bridge.query_documents(params.query, params.top_k)
         
-        if not response and not results:
-            return "Error: Query execution failed"
+        logger.info("MCP query completed successfully")
         
-        # Format results
-        formatted_results = []
-        for i, (text, score, metadata) in enumerate(results, 1):
-            formatted_results.append(f"Result {i} (score: {score:.3f}):\n{text[:500]}...")
-        
-        result_text = "\n\n".join(formatted_results)
-        
-        full_response = f"Query: {params.query}\n\nLLM Response:\n{response}\n\nTop Results:\n{result_text}"
-        
-        logger.info(f"MCP query completed: {len(results)} results returned")
-        
-        return full_response
+        return response
         
     except Exception as e:
         logger.error(f"MCP query failed: {e}")
@@ -101,22 +71,12 @@ def get_health_status() -> str:
     Returns:
         JSON-formatted health status including index load state
     """
-    global query_handler
-    
-    if query_handler is None:
-        initialize_query_handler()
-    
-    index_loaded = query_handler is not None and query_handler.index is not None
-    status = "healthy" if index_loaded else "degraded"
-    
-    import json
-    health_data = {
-        "status": status,
-        "index_loaded": index_loaded,
-        "version": "1.0.0"
-    }
-    
-    return json.dumps(health_data, indent=2)
+    try:
+        # Delegate to MCP bridge
+        return mcp_bridge.get_health_status()
+    except Exception as e:
+        logger.error(f"Health check failed: {e}")
+        return json.dumps({"status": "error", "error": str(e)})
 
 
 @mcp.resource("context://system")
@@ -127,20 +87,12 @@ def get_system_context() -> str:
     Returns:
         JSON-formatted system information
     """
-    import json
-    
-    context_data = {
-        "description": "VX-RAG is a Retrieval-Augmented Generation system specialized in VX Underground technical documents.",
-        "capabilities": [
-            "Semantic document search using FAISS vector database",
-            "Text extraction from PDF documents",
-            "LLM-powered response generation",
-            "MCP protocol integration for IDE/LLM access"
-        ],
-        "supported_formats": ["PDF"]
-    }
-    
-    return json.dumps(context_data, indent=2)
+    try:
+        # Delegate to MCP bridge
+        return mcp_bridge.get_system_context()
+    except Exception as e:
+        logger.error(f"System context retrieval failed: {e}")
+        return json.dumps({"error": f"Failed to retrieve system context: {str(e)}"})
 
 
 if __name__ == "__main__":
