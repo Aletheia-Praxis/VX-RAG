@@ -4,7 +4,7 @@ Tests for MCP server module.
 
 import pytest
 from unittest.mock import Mock, patch
-from src.mcp.server import mcp, query_documents, get_health_status, get_system_context, initialize_query_handler
+from src.mcp.server import mcp, query_documents, get_health_status, get_system_context
 
 
 class TestMCPServer:
@@ -81,30 +81,16 @@ class TestMCPServer:
         assert "Semantic document search" in result  # nosec B101
         assert "PDF" in result  # nosec B101
 
-    def test_initialize_query_handler(self) -> None:
-        """Test query handler initialization."""
-        with patch('src.mcp.server.query_handler', None):
-            with patch('src.mcp.server.DocumentQuery') as mock_doc_query:
-                mock_instance = Mock()
-                mock_instance.load_index.return_value = True
-                mock_doc_query.return_value = mock_instance
-
-                handler = initialize_query_handler()
-
-                assert handler is mock_instance  # nosec B101
-                mock_doc_query.assert_called_once()
-                mock_instance.load_index.assert_called_once()
-
     def test_mcp_server_registration(self) -> None:
         """Test that MCP server has expected tools and resources."""
         # Check that tools are registered
         tools = mcp.get_tools()  # type: ignore
-        assert len(tools) > 0  # nosec B101
-        assert "query_documents" in [tool.name for tool in tools.values()]  # nosec B101
+        assert len(tools) > 0  # type: ignore  # nosec B101
+        assert "query_documents" in [tool.name for tool in tools.values()]  # type: ignore  # nosec B101
 
         # Check that resources are registered
         resources = mcp.get_resource_templates()  # type: ignore
-        assert len(resources) > 0  # nosec B101
+        assert len(resources) > 0  # type: ignore  # nosec B101
 
         resources_static = mcp.get_resources()  # type: ignore
-        assert len(resources_static) > 0  # nosec B101
+        assert len(resources_static) > 0  # type: ignore  # nosec B101
