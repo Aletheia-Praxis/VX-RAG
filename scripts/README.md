@@ -5,7 +5,7 @@ Minimalist script for crawling, downloading, and indexing all PDF files from <ht
 
 ## Requirements
 
-- Python 3.8+
+- Python 3.13+
 - Virtual environment recommended
 - Dependencies:
   - selenium

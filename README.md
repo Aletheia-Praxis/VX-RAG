@@ -176,8 +176,8 @@ pytest tests/
 
 ## Requirements
 
-- Python 3.11+
-- Disk space: ~20GB for index (depending on corpus size)
+- Python 3.13+
+- Disk space: ~10GB for index (depending on corpus size)
 - Ollama for local LLM inference (optional, for query responses)
 
 ## License
