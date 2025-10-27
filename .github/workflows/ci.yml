@@ -48,7 +48,7 @@ jobs:
       - name: Install tools
         run: |
           python -m pip install --upgrade pip
-          pip install mypy types-requests python-dotenv types-selenium types-beautifulsoup4
+          pip install mypy types-requests python-dotenv types-selenium types-beautifulsoup4 fastmcp pydantic
       - name: Run mypy
         run: |
           mypy --config-file mypy.ini src scripts
