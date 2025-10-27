@@ -129,7 +129,6 @@ class VectorStoreClient:
         assert self.index is not None  # nosec B101
         try:
             # Use LlamaIndex query engine for search
-            query_engine = self.index.as_query_engine(similarity_top_k=top_k)
             # Note: This is a simplified implementation
             # For pure vector search, we'd need direct FAISS access
             logger.warning("search_vectors using query engine, not pure vector search")

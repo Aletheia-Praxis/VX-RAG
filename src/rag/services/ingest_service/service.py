@@ -8,7 +8,7 @@ from typing import List, Dict, Any
 import logging
 from pathlib import Path
 
-from llama_index.core import Document, SimpleDirectoryReader
+from llama_index.core import SimpleDirectoryReader
 
 logger = logging.getLogger(__name__)
 

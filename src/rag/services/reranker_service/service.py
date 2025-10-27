@@ -4,7 +4,7 @@ Reranker Service implementation.
 Provides classes for re-ranking retrieved documents.
 """
 
-from typing import List, Dict, Any, Tuple
+from typing import List, Dict, Any
 import logging
 
 logger = logging.getLogger(__name__)

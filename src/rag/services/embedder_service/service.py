@@ -4,7 +4,7 @@ Embedder Service implementation.
 Provides classes for text embedding generation.
 """
 
-from typing import List, cast, Any
+from typing import List
 import logging
 
 from llama_index.embeddings.huggingface import HuggingFaceEmbedding
