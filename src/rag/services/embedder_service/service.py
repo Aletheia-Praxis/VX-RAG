@@ -38,7 +38,7 @@ class EmbeddingService:
         try:
             embedding = self.embed_model.get_text_embedding(text)
             logger.debug(f"Generated embedding for single text (dim: {len(embedding)})")
-            return embedding
+            return embedding  # type: ignore
         except Exception as e:
             logger.error(f"Failed to generate embedding for text: {e}")
             raise

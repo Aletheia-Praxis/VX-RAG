@@ -21,7 +21,7 @@ class VectorStoreClient:
         self.store_type = store_type
         self.config = config or {}
         self.index_dir = Path(self.config.get('index_dir', 'data/index'))
-        self.index = None
+        self.index: Optional[VectorStoreIndex] = None
         
         # Create index directory if it doesn't exist
         self.index_dir.mkdir(parents=True, exist_ok=True)
@@ -70,7 +70,7 @@ class VectorStoreClient:
                 show_progress=True
             )
 
-            self.index = index  # type: ignore
+            self.index = index
             logger.info(f"Successfully built index with {len(documents)} documents")
             return index
 
@@ -106,7 +106,7 @@ class VectorStoreClient:
             storage_context = StorageContext.from_defaults(persist_dir=str(self.index_dir))
 
             # Load index
-            self.index = cast(VectorStoreIndex, load_index_from_storage(storage_context))  # type: ignore
+            self.index = cast(VectorStoreIndex, load_index_from_storage(storage_context))
             logger.info(f"Index loaded from {self.index_dir}")
             return True
 
