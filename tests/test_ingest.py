@@ -10,7 +10,7 @@ from src.rag.services.ingest_service.service import PDFIngestAdapter, save_proce
 from llama_index.core import Document
 
 
-@pytest.fixture
+@pytest.fixture  # type: ignore
 def temp_dirs(tmp_path: Path) -> Tuple[Path, Path]:
     """Create temporary directories for testing."""
     raw_dir = tmp_path / "raw" / "pdf"
