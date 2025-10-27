@@ -26,7 +26,7 @@ class EmbeddingService:
             embeddings = []
             for text in texts:
                 embedding = self.embed_model.get_text_embedding(text)
-                embeddings.append(cast(List[float], embedding))
+                embeddings.append(embedding)
             logger.info(f"Generated embeddings for {len(texts)} texts")
             return embeddings
         except Exception as e:
@@ -38,7 +38,7 @@ class EmbeddingService:
         try:
             embedding = self.embed_model.get_text_embedding(text)
             logger.debug(f"Generated embedding for single text (dim: {len(embedding)})")
-            return cast(List[float], embedding)
+            return embedding
         except Exception as e:
             logger.error(f"Failed to generate embedding for text: {e}")
             raise

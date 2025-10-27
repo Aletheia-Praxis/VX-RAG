@@ -4,7 +4,7 @@ Vector Database Service implementation.
 Provides classes for vector storage operations.
 """
 
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, cast
 import logging
 from pathlib import Path
 
@@ -70,7 +70,7 @@ class VectorStoreClient:
                 show_progress=True
             )
 
-            self.index = index
+            self.index = index  # type: ignore
             logger.info(f"Successfully built index with {len(documents)} documents")
             return index
 
@@ -106,7 +106,7 @@ class VectorStoreClient:
             storage_context = StorageContext.from_defaults(persist_dir=str(self.index_dir))
 
             # Load index
-            self.index = load_index_from_storage(storage_context)
+            self.index = cast(VectorStoreIndex, load_index_from_storage(storage_context))  # type: ignore
             logger.info(f"Index loaded from {self.index_dir}")
             return True
 
