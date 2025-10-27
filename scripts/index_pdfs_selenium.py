@@ -192,7 +192,7 @@ def download_pdfs(pdf_links: List[Dict[str, str]], driver: Optional[WebDriver] =
     # Use cookies from Selenium driver if available (helps after CAPTCHA)
     try:
         if driver is not None:
-            selenium_cookies = driver.get_cookies() or []
+            selenium_cookies = driver.get_cookies() or []  # type: ignore
             for c in selenium_cookies:
                 name = c.get('name')
                 value = c.get('value')
@@ -210,7 +210,7 @@ def download_pdfs(pdf_links: List[Dict[str, str]], driver: Optional[WebDriver] =
                         logging.info(f"Could not set cookie {name}")
             # Try to mirror browser User-Agent
             try:
-                ua = driver.execute_script('return navigator.userAgent')
+                ua = driver.execute_script('return navigator.userAgent')  # type: ignore
                 if ua:
                     session.headers.update({'User-Agent': ua})
             except Exception as e:
