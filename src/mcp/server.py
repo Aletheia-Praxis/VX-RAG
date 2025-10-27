@@ -28,13 +28,13 @@ mcp = FastMCP(
 
 
 # Pydantic models for tool parameters
-class QueryParams(BaseModel):  # type: ignore
+class QueryParams(BaseModel):
     """Parameters for document query tool."""
     query: str = Field(..., description="The search query")
     top_k: int = Field(3, ge=1, le=10, description="Number of top results to return")
 
 
-@mcp.tool  # type: ignore
+@mcp.tool
 def query_documents(params: QueryParams) -> str:
     """
     Query the RAG system for relevant documents and generate a response.
@@ -63,7 +63,7 @@ def query_documents(params: QueryParams) -> str:
         return f"Error: Query processing failed: {str(e)}"
 
 
-@mcp.resource("health://status")  # type: ignore
+@mcp.resource("health://status")
 def get_health_status() -> str:
     """
     Get the health status of the RAG system.
@@ -79,7 +79,7 @@ def get_health_status() -> str:
         return json.dumps({"status": "error", "error": str(e)})
 
 
-@mcp.resource("context://system")  # type: ignore
+@mcp.resource("context://system")
 def get_system_context() -> str:
     """
     Get information about the RAG system's capabilities and context.
