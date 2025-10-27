@@ -2,7 +2,6 @@
 Tests for MCP server module.
 """
 
-import pytest
 from unittest.mock import Mock, patch
 from src.mcp.server import mcp, query_documents, get_health_status, get_system_context
 

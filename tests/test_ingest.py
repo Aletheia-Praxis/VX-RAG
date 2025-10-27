@@ -5,7 +5,7 @@ Tests for the ingestion service using pytest.
 import pytest
 from pathlib import Path
 from typing import Tuple
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch
 from src.rag.services.ingest_service.service import PDFIngestAdapter, save_processed_text
 from llama_index.core import Document
 
