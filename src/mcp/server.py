@@ -6,7 +6,6 @@ Delegates all RAG operations to the MCP bridge for clean separation of concerns.
 """
 
 import logging
-from typing import List, Optional, Dict, Any
 import json
 
 from fastmcp import FastMCP

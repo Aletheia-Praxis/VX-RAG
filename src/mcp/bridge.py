@@ -7,7 +7,7 @@ Provides a clean interface for MCP server operations.
 """
 
 import logging
-from typing import Dict, Any, List, Tuple, Optional
+from typing import Dict, Any, Optional
 import json
 from datetime import datetime
 
