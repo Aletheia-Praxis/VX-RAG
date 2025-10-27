@@ -6,7 +6,6 @@ Provides command-line tools for ingestion, indexing, and querying.
 
 import argparse
 import sys
-from pathlib import Path
 
 # Import modules (will be available after setup)
 # from rag.ingest import load_documents, preprocess_documents
