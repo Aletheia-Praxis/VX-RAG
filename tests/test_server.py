@@ -81,16 +81,16 @@ class TestMCPServer:
         assert "Semantic document search" in result  # nosec B101
         assert "PDF" in result  # nosec B101
 
-    def test_mcp_server_registration(self) -> None:
+    async def test_mcp_server_registration(self) -> None:
         """Test that MCP server has expected tools and resources."""
         # Check that tools are registered
-        tools = mcp.get_tools()  # type: ignore
-        assert len(tools) > 0  # type: ignore  # nosec B101
-        assert "query_documents" in [tool.name for tool in tools.values()]  # type: ignore  # nosec B101
+        tools = await mcp.get_tools()
+        assert len(tools) > 0  # nosec B101
+        assert "query_documents" in [tool.name for tool in tools.values()]  # nosec B101
 
         # Check that resources are registered
-        resources = mcp.get_resource_templates()  # type: ignore
-        assert len(resources) > 0  # type: ignore  # nosec B101
+        resources = await mcp.get_resource_templates()
+        assert len(resources) > 0  # nosec B101
 
-        resources_static = mcp.get_resources()  # type: ignore
-        assert len(resources_static) > 0  # type: ignore  # nosec B101
+        resources_static = await mcp.get_resources()
+        assert len(resources_static) > 0  # nosec B101
