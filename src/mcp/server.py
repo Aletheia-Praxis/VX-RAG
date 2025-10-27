@@ -28,7 +28,7 @@ mcp = FastMCP(
 
 
 # Pydantic models for tool parameters
-class QueryParams(BaseModel):
+class QueryParams(BaseModel):  # type: ignore
     """Parameters for document query tool."""
     query: str = Field(..., description="The search query")
     top_k: int = Field(3, ge=1, le=10, description="Number of top results to return")
