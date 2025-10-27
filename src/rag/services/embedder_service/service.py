@@ -4,10 +4,11 @@ Embedder Service implementation.
 Provides classes for text embedding generation.
 """
 
-from typing import List
+from typing import List, TYPE_CHECKING
 import logging
 
-from llama_index.embeddings.huggingface import HuggingFaceEmbedding
+if TYPE_CHECKING:
+    from llama_index.embeddings.huggingface import HuggingFaceEmbedding
 
 logger = logging.getLogger(__name__)
 
@@ -17,7 +18,8 @@ class EmbeddingService:
     def __init__(self, model_name: str = "sentence-transformers/all-MiniLM-L6-v2"):
         self.model_name = model_name
         # Initialize embedding model
-        self.embed_model = HuggingFaceEmbedding(model_name=self.model_name)
+        from llama_index.embeddings.huggingface import HuggingFaceEmbedding
+        self.embed_model: HuggingFaceEmbedding = HuggingFaceEmbedding(model_name=self.model_name)
         logger.info(f"Initialized embedding model: {self.model_name}")
     
     def embed_texts(self, texts: List[str]) -> List[List[float]]:
@@ -38,7 +40,7 @@ class EmbeddingService:
         try:
             embedding = self.embed_model.get_text_embedding(text)
             logger.debug(f"Generated embedding for single text (dim: {len(embedding)})")
-            return embedding  # type: ignore
+            return embedding
         except Exception as e:
             logger.error(f"Failed to generate embedding for text: {e}")
             raise
