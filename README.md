@@ -20,7 +20,7 @@ The MCP server enables direct integration with IDEs and LLMs through the Model C
 
 ## Project Structure
 
-```text
+```bash
 VX-RAG/
 │
 ├── src/
