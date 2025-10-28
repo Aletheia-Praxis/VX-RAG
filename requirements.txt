@@ -31,3 +31,4 @@ faiss-cpu>=1.8.0.post1
 # Development
 pytest>=8.4.2
 pytest-mock>=3.13.0
+langdetect>=1.0.9
