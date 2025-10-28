@@ -4,9 +4,12 @@ Ingest Service implementation.
 Provides classes and functions for document ingestion.
 """
 
-from typing import List, Dict, Any
+from typing import List, Dict, Any, TYPE_CHECKING
 import logging
 from pathlib import Path
+
+if TYPE_CHECKING:
+    import pandas as pd
 
 from llama_index.core import SimpleDirectoryReader
 
@@ -307,8 +310,10 @@ class APIIngestAdapter(IngestAdapter):
         # Default implementation: look for common text fields
         text_fields = ['text', 'content', 'description', 'body', 'message']
         for field in text_fields:
-            if field in item and isinstance(item[field], str):
-                return item[field]
+            if field in item:
+                value = item[field]
+                if isinstance(value, str):
+                    return value
         
         # If no text field found, convert the whole item to string
         return str(item)
@@ -372,7 +377,7 @@ class DatabaseIngestAdapter(IngestAdapter):
             logger.error(f"Failed to load data from database: {e}")
             return []
     
-    def _row_to_text(self, row) -> str:
+    def _row_to_text(self, row: "pd.Series") -> str:
         """
         Convert database row to text content.
         Customize this method based on your database schema.
