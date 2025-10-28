@@ -8,7 +8,7 @@ from typing import List, TYPE_CHECKING, cast
 import logging
 
 if TYPE_CHECKING:
-    from llama_index.embeddings.huggingface import HuggingFaceEmbedding
+    pass
 
 logger = logging.getLogger(__name__)
 
@@ -19,7 +19,7 @@ class EmbeddingService:
         self.model_name = model_name
         # Initialize embedding model
         from llama_index.embeddings.huggingface import HuggingFaceEmbedding
-        self.embed_model: HuggingFaceEmbedding = HuggingFaceEmbedding(model_name=self.model_name)
+        self.embed_model = HuggingFaceEmbedding(model_name=self.model_name)
         logger.info(f"Initialized embedding model: {self.model_name}")
     
     def embed_texts(self, texts: List[str]) -> List[List[float]]:
