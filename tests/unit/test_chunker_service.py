@@ -2,16 +2,7 @@
 Unit tests for chunker_service module.
 """
 
-import pytest
-from typing import TYPE_CHECKING
 from unittest.mock import patch, MagicMock
-
-if TYPE_CHECKING:
-    from _pytest.capture import CaptureFixture
-    from _pytest.fixtures import FixtureRequest
-    from _pytest.logging import LogCaptureFixture
-    from _pytest.monkeypatch import MonkeyPatch
-    from pytest_mock.plugin import MockerFixture
 
 from src.rag.services.chunker_service.service import Chunker, ChunkMetadata
 
