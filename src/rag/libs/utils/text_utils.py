@@ -6,6 +6,7 @@ Provides functions for text normalization, language detection, and other text-re
 
 import re
 import unicodedata
+import logging
 from typing import Optional
 
 try:
@@ -64,7 +65,7 @@ def detect_language(text: str) -> str:
             else:
                 return 'unknown'
         except Exception:
-            pass  # Fall back to heuristic
+            logging.warning("Language detection failed, falling back to heuristic")
 
     # Heuristic detection for Ukrainian, Russian, English
     # Ukrainian specific characters
