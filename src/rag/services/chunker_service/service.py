@@ -4,7 +4,7 @@ Chunker Service implementation.
 Provides classes and functions for text chunking and preprocessing.
 """
 
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Union
 import logging
 from dataclasses import dataclass
 
@@ -36,6 +36,8 @@ class Chunker:
     
     Supports different chunking strategies based on language and content type.
     """
+    
+    parser: Union[SimpleNodeParser, SentenceSplitter]
     
     def __init__(
         self,
