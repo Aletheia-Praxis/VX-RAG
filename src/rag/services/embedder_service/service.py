@@ -4,7 +4,7 @@ Embedder Service implementation.
 Provides classes for text embedding generation.
 """
 
-from typing import List, TYPE_CHECKING
+from typing import List, TYPE_CHECKING, Any, cast
 import logging
 
 if TYPE_CHECKING:
@@ -19,15 +19,16 @@ class EmbeddingService:
         self.model_name = model_name
         # Initialize embedding model
         from llama_index.embeddings.huggingface import HuggingFaceEmbedding
-        self.embed_model = HuggingFaceEmbedding(model_name=self.model_name)
+        # annotate embed_model as Any so mypy knows we may need to cast results
+        self.embed_model: Any = HuggingFaceEmbedding(model_name=self.model_name)
         logger.info(f"Initialized embedding model: {self.model_name}")
     
     def embed_texts(self, texts: List[str]) -> List[List[float]]:
         """Generate embeddings for list of texts."""
         try:
-            embeddings = []
+            embeddings: List[List[float]] = []
             for text in texts:
-                embedding = self.embed_model.get_text_embedding(text)
+                embedding = cast(List[float], self.embed_model.get_text_embedding(text))
                 embeddings.append(embedding)
             logger.info(f"Generated embeddings for {len(texts)} texts")
             return embeddings
@@ -38,7 +39,7 @@ class EmbeddingService:
     def embed_single(self, text: str) -> List[float]:
         """Generate embedding for single text."""
         try:
-            embedding = self.embed_model.get_text_embedding(text)
+            embedding = cast(List[float], self.embed_model.get_text_embedding(text))
             logger.debug(f"Generated embedding for single text (dim: {len(embedding)})")
             return embedding
         except Exception as e:
