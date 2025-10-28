@@ -190,7 +190,7 @@ class Chunker:
             return {'total_chunks': 0, 'avg_chunk_length': 0, 'languages': {}}
         
         total_length = sum(len(chunk['text']) for chunk in chunks)
-        languages = {}
+        languages: Dict[str, int] = {}
         
         for chunk in chunks:
             lang = chunk['metadata']['chunk_metadata']['lang']
