@@ -2,16 +2,11 @@
 Tests for text_utils module using pytest.
 """
 
-import pytest
 from typing import TYPE_CHECKING
 from unittest.mock import patch
 
 if TYPE_CHECKING:
-    from _pytest.capture import CaptureFixture
-    from _pytest.fixtures import FixtureRequest
-    from _pytest.logging import LogCaptureFixture
-    from _pytest.monkeypatch import MonkeyPatch
-    from pytest_mock.plugin import MockerFixture
+    pass
 
 from src.rag.libs.utils.text_utils import normalize_text, detect_language
 
