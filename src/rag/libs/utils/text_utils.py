@@ -7,7 +7,7 @@ Provides functions for text normalization, language detection, and other text-re
 import re
 import unicodedata
 import logging
-from typing import Optional, cast
+from typing import cast
 
 try:
     from langdetect import detect

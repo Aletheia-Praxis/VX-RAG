@@ -346,7 +346,7 @@ class DatabaseIngestAdapter(IngestAdapter):
         try:
             import pandas as pd
             
-            logger.info(f"Connecting to database and executing query")
+            logger.info("Connecting to database and executing query")
             df = pd.read_sql(self.query, self.connection_string)
             
             result = []
