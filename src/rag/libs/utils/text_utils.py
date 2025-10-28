@@ -7,7 +7,7 @@ Provides functions for text normalization, language detection, and other text-re
 import re
 import unicodedata
 import logging
-from typing import Optional
+from typing import Optional, cast
 
 try:
     from langdetect import detect
@@ -58,7 +58,7 @@ def detect_language(text: str) -> str:
 
     if LANGDETECT_AVAILABLE:
         try:
-            lang = detect(text)
+            lang = cast(str, detect(text))
             # Map to our supported languages
             if lang in ['uk', 'ru', 'en']:
                 return lang
