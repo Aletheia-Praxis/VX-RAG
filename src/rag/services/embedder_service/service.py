@@ -5,7 +5,7 @@ HuggingFaceEmbedding to generate embeddings for text chunks.
 """
 
 import logging
-from typing import Optional
+from typing import Optional, Any
 
 from llama_index.embeddings.huggingface import HuggingFaceEmbedding
 
@@ -41,7 +41,7 @@ class EmbeddingService:
             logger.error(f"Failed to initialize embedding model {model_name}: {e}")
             raise RuntimeError(f"Could not load embedding model: {e}") from e
 
-    def get_model_info(self) -> dict:
+    def get_model_info(self) -> dict[str, Any]:
         """Get information about the embedding model.
 
         Returns:
