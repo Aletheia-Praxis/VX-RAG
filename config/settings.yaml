@@ -14,7 +14,7 @@ embedding_batch_size: 32
 # Indexing configuration
 chunk_size: 512
 chunk_overlap: 50
-vector_store: "chromadb"  # Options: chromadb, faiss
+vector_store: "faiss"
 
 # Query configuration
 similarity_top_k: 5
