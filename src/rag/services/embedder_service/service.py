@@ -1,49 +1,91 @@
-"""
-Embedder Service implementation.
+"""Embedder service for generating text embeddings.
 
-Provides classes for text embedding generation.
+This module provides the EmbeddingService class that uses LlamaIndex's
+HuggingFaceEmbedding to generate embeddings for text chunks.
 """
 
-from typing import List, TYPE_CHECKING, Any, cast
 import logging
+from typing import Optional
 
-if TYPE_CHECKING:
-    pass
+from llama_index.embeddings.huggingface import HuggingFaceEmbedding
 
 logger = logging.getLogger(__name__)
 
-class EmbeddingService:
-    """Service for generating text embeddings."""
-    
-    def __init__(self, model_name: str = "sentence-transformers/all-MiniLM-L6-v2"):
-        self.model_name = model_name
-        # Initialize embedding model
-        from llama_index.embeddings.huggingface import HuggingFaceEmbedding
-        # annotate embed_model as Any so mypy knows we may need to cast results
-        self.embed_model: Any = HuggingFaceEmbedding(model_name=self.model_name)
-        logger.info(f"Initialized embedding model: {self.model_name}")
-    
-    def embed_texts(self, texts: List[str]) -> List[List[float]]:
-        """Generate embeddings for list of texts."""
-        try:
-            embeddings: List[List[float]] = []
-            for text in texts:
-                embedding = cast(List[float], self.embed_model.get_text_embedding(text))
-                embeddings.append(embedding)
-            logger.info(f"Generated embeddings for {len(texts)} texts")
-            return embeddings
-        except Exception as e:
-            logger.error(f"Failed to generate embeddings: {e}")
-            raise
-    
-    def embed_single(self, text: str) -> List[float]:
-        """Generate embedding for single text."""
-        try:
-            embedding = cast(List[float], self.embed_model.get_text_embedding(text))
-            logger.debug(f"Generated embedding for single text (dim: {len(embedding)})")
-            return embedding
-        except Exception as e:
-            logger.error(f"Failed to generate embedding for text: {e}")
-            raise
 
-# TODO: Add caching, batch processing, error handling
+class EmbeddingService:
+    """Service for generating text embeddings using HuggingFace models.
+
+    This class provides a wrapper around LlamaIndex's HuggingFaceEmbedding
+    for compatibility with the RAG system.
+    """
+
+    def __init__(self, model_name: str = "all-MiniLM-L6-v2", cache_size: int = 1000):
+        """Initialize the embedding service.
+
+        Args:
+            model_name: Name of the HuggingFace model to use.
+            cache_size: Maximum number of cached embeddings (not used by HuggingFaceEmbedding).
+        """
+        self.model_name = model_name
+        self.cache_size = cache_size
+
+        try:
+            self.embed_model = HuggingFaceEmbedding(
+                model_name=model_name,
+                embed_batch_size=10,
+                cache_folder=None,
+                trust_remote_code=False
+            )
+            logger.info(f"Initialized embedding service with model: {model_name}")
+        except Exception as e:
+            logger.error(f"Failed to initialize embedding model {model_name}: {e}")
+            raise RuntimeError(f"Could not load embedding model: {e}") from e
+
+    def get_model_info(self) -> dict:
+        """Get information about the embedding model.
+
+        Returns:
+            Dictionary with model information.
+        """
+        return {
+            "model_name": self.model_name,
+            "provider": "HuggingFace",
+            "cache_size": self.cache_size
+        }
+
+    def embed_single(self, text: str) -> list[float]:
+        """Generate embedding for a single text.
+
+        Args:
+            text: Text to embed.
+
+        Returns:
+            Embedding vector as list of floats.
+        """
+        if not text.strip():
+            return []
+        return self.embed_model._get_text_embedding(text)
+
+    def embed_batch(self, texts: list[str]) -> list[list[float]]:
+        """Generate embeddings for a batch of texts.
+
+        Args:
+            texts: List of texts to embed.
+
+        Returns:
+            List of embedding vectors.
+        """
+        if not texts:
+            return []
+        return self.embed_model._get_text_embeddings(texts)
+
+    def embed(self, texts: list[str]) -> list[list[float]]:
+        """Main embedding interface.
+
+        Args:
+            texts: List of texts to embed.
+
+        Returns:
+            List of embedding vectors.
+        """
+        return self.embed_batch(texts)
