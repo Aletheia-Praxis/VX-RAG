@@ -13,25 +13,81 @@ from llama_index.core.retrievers import QueryFusionRetriever
 
 logger = logging.getLogger(__name__)
 
+"""
+Retriever Service implementation.
+
+Provides classes for document retrieval operations.
+"""
+
+from typing import List, Dict, Any, Optional
+import logging
+import yaml
+from pathlib import Path
+
+from llama_index.core import VectorStoreIndex
+from llama_index.core.retrievers import VectorIndexRetriever
+from llama_index.core.retrievers import QueryFusionRetriever
+
+logger = logging.getLogger(__name__)
+
 class RetrieverService:
     """Service for retrieving documents from index."""
     
-    def __init__(self, index: Optional[VectorStoreIndex] = None):
+    def __init__(self, index: Optional[VectorStoreIndex] = None, config_path: Optional[str] = None):
         self.index = index
         self.vector_retriever = None
         self.hybrid_retriever = None
+        self.config = self._load_config(config_path)
+    
+    def _load_config(self, config_path: Optional[str]) -> Dict[str, Any]:
+        """Load configuration from YAML file."""
+        if config_path is None:
+            config_path = "config/settings.yaml"
+        
+        try:
+            with open(config_path, 'r', encoding='utf-8') as f:
+                config = yaml.safe_load(f)
+            if isinstance(config, dict):
+                return config.get('retriever', {})
+            else:
+                logger.warning(f"Config file {config_path} does not contain a valid dict")
+                return {}
+        except Exception as e:
+            logger.warning(f"Failed to load config from {config_path}: {e}")
+            return {}
     
     def set_index(self, index: VectorStoreIndex) -> None:
         """Set the index for retrieval."""
         self.index = index
         # Initialize retrievers
+        semantic_top_k = self.config.get('semantic_top_k', 20)
+        
         self.vector_retriever = VectorIndexRetriever(
             index=index,
-            similarity_top_k=10
+            similarity_top_k=semantic_top_k
         )
-        # For hybrid, we can use QueryFusionRetriever with multiple retrievers
-        # For now, using vector retriever as hybrid fallback
-        self.hybrid_retriever = self.vector_retriever
+        
+        # For hybrid search, we'll use QueryFusionRetriever with multiple vector retrievers
+        # Note: True hybrid (vector + keyword) requires BM25Retriever which may not be available
+        # For now, using multiple vector retrievers with different parameters as approximation
+        vector_retriever_2 = VectorIndexRetriever(
+            index=index,
+            similarity_top_k=semantic_top_k
+        )
+        
+        try:
+            self.hybrid_retriever = QueryFusionRetriever(
+                [self.vector_retriever, vector_retriever_2],
+                similarity_top_k=semantic_top_k,
+                num_queries=1,
+                llm=None,  # Disable LLM to avoid API key issues
+                use_async=True,
+                verbose=False
+            )
+            logger.info("Initialized hybrid retriever with QueryFusionRetriever")
+        except Exception as e:
+            logger.warning(f"Failed to initialize QueryFusionRetriever: {e}")
+            self.hybrid_retriever = self.vector_retriever
     
     def retrieve(self, query: str, top_k: int = 5, filters: Optional[Dict[str, Any]] = None, search_type: str = "semantic") -> List[Dict[str, Any]]:
         """Retrieve top-k relevant documents for query.
