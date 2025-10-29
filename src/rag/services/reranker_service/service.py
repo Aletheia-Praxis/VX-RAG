@@ -6,6 +6,7 @@ Provides classes for re-ranking retrieved documents.
 
 from typing import List, Dict, Any, Optional
 import logging
+import yaml
 
 from sentence_transformers import CrossEncoder
 
@@ -14,14 +15,39 @@ logger = logging.getLogger(__name__)
 class RerankerService:
     """Service for re-ranking documents using cross-encoders."""
     
-    def __init__(self, model_name: str = "cross-encoder/ms-marco-MiniLM-L-6-v2"):
+    def __init__(self, model_name: Optional[str] = None, config_path: Optional[str] = None):
+        self.config = self._load_config(config_path)
+        if model_name is None:
+            model_name = self.config.get('model_name', "cross-encoder/ms-marco-MiniLM-L-6-v2")
+        
         self.model_name = model_name
         try:
-            self.model = CrossEncoder(model_name)
-            logger.info(f"Initialized cross-encoder model: {model_name}")
+            if model_name:
+                self.model = CrossEncoder(model_name)
+                logger.info(f"Initialized cross-encoder model: {model_name}")
+            else:
+                logger.error("No model name provided for cross-encoder")
+                self.model = None
         except Exception as e:
             logger.error(f"Failed to load cross-encoder model {model_name}: {e}")
             self.model = None
+    
+    def _load_config(self, config_path: Optional[str]) -> Dict[str, Any]:
+        """Load configuration from YAML file."""
+        if config_path is None:
+            config_path = "config/settings.yaml"
+        
+        try:
+            with open(config_path, 'r', encoding='utf-8') as f:
+                config = yaml.safe_load(f)
+            if isinstance(config, dict):
+                return config.get('reranker', {})
+            else:
+                logger.warning(f"Config file {config_path} does not contain a valid dict")
+                return {}
+        except Exception as e:
+            logger.warning(f"Failed to load config from {config_path}: {e}")
+            return {}
     
     def rerank(self, query: str, documents: List[Dict[str, Any]], top_k: Optional[int] = None) -> List[Dict[str, Any]]:
         """Re-rank documents based on query relevance using cross-encoder.
