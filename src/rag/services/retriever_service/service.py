@@ -6,7 +6,7 @@ Provides classes for document retrieval operations.
 
 from typing import List, Dict, Any, Optional, cast
 import logging
-import yaml  # type: ignore
+import yaml
 from pathlib import Path
 
 from llama_index.core import VectorStoreIndex
@@ -30,9 +30,10 @@ class RetrieverService:
         
         try:
             with open(config_path, 'r', encoding='utf-8') as f:
-                loaded_config = yaml.safe_load(f)
+                loaded_config = cast(Dict[str, Any], yaml.safe_load(f))
             if isinstance(loaded_config, dict):
-                return cast(Dict[str, Any], loaded_config.get('retriever', {}))
+                retriever_config = loaded_config.get('retriever', {})
+                return cast(Dict[str, Any], retriever_config)
             else:
                 logger.warning(f"Config file {config_path} does not contain a valid dict")
                 return {}
