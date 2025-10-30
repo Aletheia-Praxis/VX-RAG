@@ -4,29 +4,13 @@ Retriever Service implementation.
 Provides classes for document retrieval operations.
 """
 
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, cast
 import logging
-
-from llama_index.core import VectorStoreIndex
-from llama_index.core.retrievers import VectorIndexRetriever
-from llama_index.core.retrievers import QueryFusionRetriever
-
-logger = logging.getLogger(__name__)
-
-"""
-Retriever Service implementation.
-
-Provides classes for document retrieval operations.
-"""
-
-from typing import List, Dict, Any, Optional
-import logging
-import yaml
+import yaml  # type: ignore
 from pathlib import Path
 
 from llama_index.core import VectorStoreIndex
-from llama_index.core.retrievers import VectorIndexRetriever
-from llama_index.core.retrievers import QueryFusionRetriever
+from llama_index.core.retrievers import VectorIndexRetriever, QueryFusionRetriever, BaseRetriever
 
 logger = logging.getLogger(__name__)
 
@@ -35,8 +19,8 @@ class RetrieverService:
     
     def __init__(self, index: Optional[VectorStoreIndex] = None, config_path: Optional[str] = None):
         self.index = index
-        self.vector_retriever = None
-        self.hybrid_retriever = None
+        self.vector_retriever: Optional[BaseRetriever] = None
+        self.hybrid_retriever: Optional[BaseRetriever] = None
         self.config = self._load_config(config_path)
     
     def _load_config(self, config_path: Optional[str]) -> Dict[str, Any]:
@@ -46,9 +30,9 @@ class RetrieverService:
         
         try:
             with open(config_path, 'r', encoding='utf-8') as f:
-                config = yaml.safe_load(f)
-            if isinstance(config, dict):
-                return config.get('retriever', {})
+                loaded_config = yaml.safe_load(f)
+            if isinstance(loaded_config, dict):
+                return cast(Dict[str, Any], loaded_config.get('retriever', {}))
             else:
                 logger.warning(f"Config file {config_path} does not contain a valid dict")
                 return {}
@@ -87,7 +71,7 @@ class RetrieverService:
             logger.info("Initialized hybrid retriever with QueryFusionRetriever")
         except Exception as e:
             logger.warning(f"Failed to initialize QueryFusionRetriever: {e}")
-            self.hybrid_retriever = self.vector_retriever
+            self.hybrid_retriever = cast(Optional[QueryFusionRetriever], self.vector_retriever)
     
     def retrieve(self, query: str, top_k: int = 5, filters: Optional[Dict[str, Any]] = None, search_type: str = "semantic") -> List[Dict[str, Any]]:
         """Retrieve top-k relevant documents for query.
