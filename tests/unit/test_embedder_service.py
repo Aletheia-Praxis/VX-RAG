@@ -6,12 +6,9 @@ and error handling.
 """
 
 import pytest
-from unittest.mock import Mock, patch, MagicMock
-from typing import List, Dict, Any
-import numpy as np
+from unittest.mock import Mock, patch
 
 from src.rag.services.embedder_service.service import EmbeddingService
-from src.rag.libs.schemas.embedder_schemas import EmbeddingRequest, EmbeddingResponse, EmbeddingVector
 
 
 class TestEmbeddingService:

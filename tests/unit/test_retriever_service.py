@@ -3,7 +3,7 @@ Unit tests for RetrieverService.
 """
 
 import pytest
-from unittest.mock import Mock, patch, MagicMock
+from unittest.mock import Mock, patch
 from pathlib import Path
 import tempfile
 import yaml
