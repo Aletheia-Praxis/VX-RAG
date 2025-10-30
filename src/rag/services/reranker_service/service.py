@@ -6,7 +6,7 @@ Provides classes for re-ranking retrieved documents.
 
 from typing import List, Dict, Any, Optional, cast
 import logging
-import yaml  # type: ignore
+import yaml
 
 from sentence_transformers import CrossEncoder
 
@@ -39,9 +39,10 @@ class RerankerService:
         
         try:
             with open(config_path, 'r', encoding='utf-8') as f:
-                loaded_config = yaml.safe_load(f)
+                loaded_config = cast(Dict[str, Any], yaml.safe_load(f))
             if isinstance(loaded_config, dict):
-                return cast(Dict[str, Any], loaded_config.get('reranker', {}))
+                reranker_config = loaded_config.get('reranker', {})
+                return cast(Dict[str, Any], reranker_config)
             else:
                 logger.warning(f"Config file {config_path} does not contain a valid dict")
                 return {}
