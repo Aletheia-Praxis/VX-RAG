@@ -72,7 +72,7 @@ class TokenBudgeter:
             reverse=True
         )
         
-        selected = []
+        selected: List[Dict[str, Any]] = []
         total_tokens = 0
         
         for doc in sorted_docs:
