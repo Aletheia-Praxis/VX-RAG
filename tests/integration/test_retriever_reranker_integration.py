@@ -4,8 +4,6 @@ Integration tests for Retriever and Reranker services.
 
 import pytest
 from unittest.mock import Mock, patch
-import tempfile
-from pathlib import Path
 
 from src.rag.services.retriever_service.service import RetrieverService
 from src.rag.services.reranker_service.service import RerankerService
@@ -24,7 +22,6 @@ class TestRetrieverRerankerIntegration:
     @pytest.fixture
     def sample_nodes(self):
         """Create sample Node objects for testing."""
-        from llama_index.core.schema import NodeWithScore
         
         nodes = []
         for i, doc in enumerate([
