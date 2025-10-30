@@ -48,10 +48,10 @@ jobs:
       - name: Install tools
         run: |
           python -m pip install --upgrade pip
-          pip install mypy types-requests python-dotenv types-selenium types-beautifulsoup4 fastmcp pydantic
+          pip install mypy types-requests python-dotenv types-selenium types-beautifulsoup4 fastmcp pydantic types-PyYAML
       - name: Run mypy
         run: |
-          mypy --config-file mypy.ini src scripts
+          echo "y" | mypy --install-types --config-file mypy.ini src scripts
 
   ruff:
     name: Lint (Ruff)
