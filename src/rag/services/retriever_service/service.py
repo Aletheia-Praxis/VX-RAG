@@ -7,7 +7,6 @@ Provides classes for document retrieval operations.
 from typing import List, Dict, Any, Optional, cast
 import logging
 import yaml
-from pathlib import Path
 
 from llama_index.core import VectorStoreIndex
 from llama_index.core.retrievers import VectorIndexRetriever, QueryFusionRetriever, BaseRetriever

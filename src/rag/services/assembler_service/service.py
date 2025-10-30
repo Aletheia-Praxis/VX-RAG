@@ -8,7 +8,7 @@ from typing import List, Dict, Any, Optional
 import logging
 
 from ...libs.schemas.mcp_schemas import (
-    MCPContextPayload, ContextItem, ContextAssemblyRequest, ContextAssemblyResponse
+    MCPContextPayload, ContextAssemblyRequest, ContextAssemblyResponse
 )
 from ...libs.utils.token_utils import TokenBudgeter, budget_and_assemble
 

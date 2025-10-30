@@ -164,8 +164,6 @@ class VectorStoreClient:
         assert self.index is not None  # nosec B101
         try:
             # Create retriever
-            retriever = self.index.as_retriever(similarity_top_k=top_k)
-            
             # Since we have a vector, we need to create a query with embedding
             # For pure vector search, we'd need to use vector_store.query directly
             # But LlamaIndex retriever expects text queries

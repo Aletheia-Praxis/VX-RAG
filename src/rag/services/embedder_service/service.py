@@ -5,7 +5,7 @@ HuggingFaceEmbedding to generate embeddings for text chunks.
 """
 
 import logging
-from typing import Optional, Any
+from typing import Any
 
 from llama_index.embeddings.huggingface import HuggingFaceEmbedding
 
