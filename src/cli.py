@@ -7,10 +7,7 @@ Provides command-line tools for ingestion, indexing, and querying.
 import argparse
 import sys
 
-# Import modules (will be available after setup)
-# from rag.ingest import load_documents, preprocess_documents
-# from rag.index import create_index
-# from rag.query import create_query_engine, query_documents
+from typing import Any
 
 def main() -> None:
     """
@@ -49,15 +46,17 @@ def main() -> None:
     elif args.command == "index":
         print(f"Creating index in {args.persist_dir}")
         try:
-            import yaml
+            import yaml  # type: ignore
             from pathlib import Path
             from llama_index.core import SimpleDirectoryReader
             
             # Load configuration
-            config = {}
+            config: dict[str, Any] = {}
             if Path(args.config).exists():
                 with open(args.config, 'r', encoding='utf-8') as f:
-                    config = yaml.safe_load(f) or {}
+                    loaded_config = yaml.safe_load(f)
+                    if isinstance(loaded_config, dict):
+                        config = loaded_config
             
             # Import services
             from rag.services.embedder_service.service import EmbeddingService
