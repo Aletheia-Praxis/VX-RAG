@@ -5,7 +5,7 @@ Defines Pydantic models for MCP-compatible payloads used in RAG system.
 """
 
 from typing import List, Dict, Any, Optional
-from pydantic import BaseModel, Field, validator
+from pydantic import BaseModel, Field, field_validator
 from datetime import datetime
 
 
@@ -17,8 +17,9 @@ class ContextItem(BaseModel):
     score: Optional[float] = Field(None, description="Relevance score (0.0 to 1.0)")
     meta: Dict[str, Any] = Field(default_factory=dict, description="Metadata for the context item")
     
-    @validator('score')
-    def validate_score(cls, v):
+    @field_validator('score')
+    @classmethod
+    def validate_score(cls, v: Optional[float]) -> Optional[float]:
         if v is not None and not (0.0 <= v <= 1.0):
             raise ValueError('Score must be between 0.0 and 1.0')
         return v
@@ -34,14 +35,16 @@ class MCPContextPayload(BaseModel):
     timestamp: Optional[datetime] = Field(default_factory=datetime.utcnow, description="Payload creation timestamp")
     provenance: Dict[str, Any] = Field(default_factory=dict, description="Provenance information")
     
-    @validator('schema_version')
-    def validate_schema_version(cls, v):
+    @field_validator('schema_version')
+    @classmethod
+    def validate_schema_version(cls, v: str) -> str:
         if v != "1.0":
             raise ValueError('Only schema version 1.0 is supported')
         return v
     
-    @validator('token_budget')
-    def validate_token_budget(cls, v):
+    @field_validator('token_budget')
+    @classmethod
+    def validate_token_budget(cls, v: int) -> int:
         if v <= 0:
             raise ValueError('Token budget must be positive')
         return v
