@@ -64,7 +64,8 @@ class EmbeddingService:
         """
         if not text.strip():
             return []
-        return self.embed_model.get_text_embedding(text)
+        result = self.embed_model.get_text_embedding(text)
+        return list(result) if result else []
 
     def embed_batch(self, texts: list[str]) -> list[list[float]]:
         """Generate embeddings for a batch of texts.
@@ -77,7 +78,8 @@ class EmbeddingService:
         """
         if not texts:
             return []
-        return self.embed_model.get_text_embedding_batch(texts)
+        result = self.embed_model.get_text_embedding_batch(texts)
+        return [list(vec) for vec in result] if result else []
 
     def embed(self, texts: list[str]) -> list[list[float]]:
         """Main embedding interface.
