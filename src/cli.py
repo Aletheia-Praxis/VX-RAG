@@ -46,7 +46,7 @@ def main() -> None:
     elif args.command == "index":
         print(f"Creating index in {args.persist_dir}")
         try:
-            import yaml  # type: ignore
+            import yaml
             from pathlib import Path
             from llama_index.core import SimpleDirectoryReader
             
