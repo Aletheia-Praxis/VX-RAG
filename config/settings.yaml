@@ -22,16 +22,21 @@ query_temperature: 0.1
 
 # Retriever configuration
 retriever:
-  semantic_top_k: 20  # Number of documents to retrieve semantically
-  hybrid_alpha: 0.5   # Weight for hybrid search (0.0 = sparse, 1.0 = dense)
+  semantic_top_k: 20    # Number of documents to retrieve semantically
+  hybrid_alpha: 0.5     # Weight for hybrid search (0.0 = sparse, 1.0 = dense)
   metadata_filters: []  # List of metadata filters to apply
-  enable_hybrid: false  # Enable hybrid search (requires BM25 index)
+  enable_hybrid: true   # Enable hybrid search (requires BM25 index)
+
+# BM25 configuration
+bm25:
+  index_dir: "./data/index/bm25"  # Directory for BM25 index
+  enable_persistence: true        # Save/load BM25 index to/from disk
 
 # Reranker configuration
 reranker:
   model_name: "cross-encoder/ms-marco-MiniLM-L-6-v2"  # Cross-encoder model for reranking
-  top_k: 5  # Final number of documents after reranking
-  device: "cpu"  # Device for reranking model
+  top_k: 5             # Final number of documents after reranking
+  device: "cpu"        # Device for reranking model
   metadata_boost: 0.1  # Boost factor for documents with matching metadata
   enable_metadata_prioritization: true  # Enable metadata-based prioritization
 
