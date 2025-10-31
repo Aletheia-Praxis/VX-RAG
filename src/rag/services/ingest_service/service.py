@@ -77,7 +77,7 @@ class PDFIngestAdapter(IngestAdapter):
             else:
                 logger.info(f"Found {len(pdf_files)} PDF files, no other files to ignore")
             
-            result = []
+            result: List[Dict[str, Any]] = []
             for pdf_file in pdf_files:
                 try:
                     logger.info(f"Parsing PDF with LlamaParse: {pdf_file}")

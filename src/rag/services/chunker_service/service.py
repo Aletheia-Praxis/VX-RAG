@@ -365,7 +365,7 @@ class MarkdownHierarchicalChunker:
         sections = []
         lines = text.split('\n')
         current_section = None
-        current_content = []
+        current_content: List[str] = []
         
         for i, line in enumerate(lines):
             heading_match = self.heading_pattern.match(line)
@@ -427,7 +427,7 @@ class MarkdownHierarchicalChunker:
             List of chunk dictionaries
         """
         content = section['content']
-        chunks = []
+        chunks: List[Dict[str, Any]] = []
         
         # Split content into semantic units
         semantic_units = self._split_into_semantic_units(content)
