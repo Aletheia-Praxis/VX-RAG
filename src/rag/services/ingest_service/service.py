@@ -4,14 +4,16 @@ Ingest Service implementation.
 Provides classes and functions for document ingestion.
 """
 
-from typing import List, Dict, Any, TYPE_CHECKING
+from typing import List, Dict, Any, TYPE_CHECKING, Optional
 import logging
+import os
 from pathlib import Path
 
 if TYPE_CHECKING:
     import pandas as pd
 
 from llama_index.core import SimpleDirectoryReader
+from llama_parse import LlamaParse
 
 from ...libs.utils.text_utils import normalize_text, detect_language
 
@@ -26,11 +28,25 @@ class IngestAdapter:
 
 
 class PDFIngestAdapter(IngestAdapter):
-    """Adapter for loading PDF documents."""
+    """Adapter for loading PDF documents using LlamaParse for advanced parsing."""
+    
+    def __init__(self, api_key: Optional[str] = None):
+        """
+        Initialize PDF adapter with LlamaParse.
+        
+        Args:
+            api_key: LlamaCloud API key. If None, uses environment variable.
+        """
+        self.api_key = api_key or os.getenv('LLAMA_CLOUD_API_KEY')
+        if not self.api_key:
+            raise ValueError("LLAMA_CLOUD_API_KEY environment variable is required for LlamaParse")
+        
+        # Initialize LlamaParse
+        self.parser = LlamaParse(api_key=self.api_key)
     
     def load_data(self, source: str) -> List[Dict[str, Any]]:
         """
-        Load PDF documents from the specified directory.
+        Load PDF documents from the specified directory using LlamaParse.
         
         Args:
             source: Path to the directory containing PDF files
@@ -38,6 +54,7 @@ class PDFIngestAdapter(IngestAdapter):
         Returns:
             List of document dictionaries with text and metadata
         """
+        import os
         raw_pdf_dir = Path(source)
         
         if not raw_pdf_dir.exists():
@@ -60,41 +77,49 @@ class PDFIngestAdapter(IngestAdapter):
             else:
                 logger.info(f"Found {len(pdf_files)} PDF files, no other files to ignore")
             
-            reader = SimpleDirectoryReader(
-                input_dir=str(raw_pdf_dir),
-                required_exts=[".pdf"],
-                recursive=False  # Only process files directly in the directory
-            )
-            documents = reader.load_data()
-            logger.info(f"Successfully loaded {len(documents)} PDF documents from {raw_pdf_dir}")
-            
-            # Convert to unified format
             result = []
-            for doc in documents:
-                normalized_text = normalize_text(doc.text)
-                lang = detect_language(normalized_text)
-                
-                # Extract additional metadata from PDF
-                pdf_metadata = doc.metadata
-                title = pdf_metadata.get('title', pdf_metadata.get('file_name', 'Unknown').replace('.pdf', ''))
-                author = pdf_metadata.get('author', 'Unknown')
-                creation_date = pdf_metadata.get('creation_date', None)
-                
-                result.append({
-                    'id': doc.id_,
-                    'source': doc.metadata.get('file_path', 'unknown'),
-                    'text': normalized_text,
-                    'lang': lang,
-                    'metadata': {
-                        **doc.metadata,
-                        'title': title,
-                        'author': author,
-                        'creation_date': creation_date,
-                        'file_type': 'pdf',
-                        'category': 'document'  # Default category
-                    }
-                })
+            for pdf_file in pdf_files:
+                try:
+                    logger.info(f"Parsing PDF with LlamaParse: {pdf_file}")
+                    
+                    # Use LlamaParse to parse the PDF
+                    documents = self.parser.load_data(str(pdf_file))
+                    
+                    for doc in documents:
+                        # LlamaParse returns markdown-structured text
+                        markdown_text = doc.text
+                        normalized_text = normalize_text(markdown_text)
+                        lang = detect_language(normalized_text)
+                        
+                        # Extract metadata
+                        pdf_metadata = doc.metadata
+                        title = pdf_metadata.get('title', pdf_metadata.get('file_name', pdf_file.stem))
+                        author = pdf_metadata.get('author', 'Unknown')
+                        creation_date = pdf_metadata.get('creation_date', None)
+                        
+                        result.append({
+                            'id': f"{pdf_file.name}_{len(result)}",
+                            'source': str(pdf_file),
+                            'text': normalized_text,
+                            'lang': lang,
+                            'metadata': {
+                                **pdf_metadata,
+                                'title': title,
+                                'author': author,
+                                'creation_date': creation_date,
+                                'file_type': 'pdf',
+                                'category': 'document',
+                                'parsed_with': 'llama_parse',
+                                'content_type': 'markdown'  # Indicates structured markdown content
+                            }
+                        })
+                    
+                    logger.info(f"Successfully parsed PDF: {pdf_file}")
+                    
+                except Exception as e:
+                    logger.error(f"Failed to parse PDF {pdf_file} with LlamaParse: {e}")
             
+            logger.info(f"Successfully loaded {len(result)} PDF documents from {raw_pdf_dir} using LlamaParse")
             return result
             
         except Exception as e:
