@@ -20,7 +20,23 @@ class RetrieverService:
         self.index = index
         self.vector_retriever: Optional[BaseRetriever] = None
         self.hybrid_retriever: Optional[BaseRetriever] = None
+        self.reranker = None
         self.config = self._load_config(config_path)
+        self._initialize_reranker()
+    
+    def _initialize_reranker(self) -> None:
+        """Initialize the reranker if configured."""
+        reranker_config = self.config.get('reranker', {})
+        if reranker_config.get('enable_metadata_prioritization', False):
+            try:
+                from sentence_transformers import CrossEncoder
+                model_name = reranker_config.get('model_name', 'cross-encoder/ms-marco-MiniLM-L-6-v2')
+                self.reranker = CrossEncoder(model_name)
+                logger.info(f"Initialized reranker with model: {model_name}")
+            except ImportError:
+                logger.warning("sentence_transformers not available, reranker disabled")
+            except Exception as e:
+                logger.warning(f"Failed to initialize reranker: {e}")
     
     def _load_config(self, config_path: Optional[str]) -> Dict[str, Any]:
         """Load configuration from YAML file."""
@@ -122,6 +138,10 @@ class RetrieverService:
             # Limit to top_k
             nodes = nodes[:top_k]
             
+            # Apply reranking if available
+            if self.reranker and len(nodes) > 1:
+                nodes = self._rerank_nodes(query, nodes)
+            
             # Extract results
             results = []
             for node in nodes:
@@ -139,6 +159,28 @@ class RetrieverService:
         except Exception as e:
             logger.error(f"Failed to retrieve documents: {e}")
             return []
+    
+    def _rerank_nodes(self, query: str, nodes: List[Any]) -> List[Any]:
+        """Rerank nodes using cross-encoder."""
+        if not self.reranker:
+            return nodes
+        
+        try:
+            # Prepare pairs for reranking
+            pairs = [[query, node.text] for node in nodes]
+            scores = self.reranker.predict(pairs)
+            
+            # Sort nodes by reranker scores
+            scored_nodes = list(zip(nodes, scores))
+            scored_nodes.sort(key=lambda x: x[1], reverse=True)
+            
+            reranked_nodes = [node for node, score in scored_nodes]
+            logger.info(f"Reranked {len(reranked_nodes)} nodes")
+            return reranked_nodes
+            
+        except Exception as e:
+            logger.warning(f"Reranking failed: {e}, returning original nodes")
+            return nodes
     
     def _matches_filters(self, metadata: Dict[str, Any], filters: Dict[str, Any]) -> bool:
         """Check if metadata matches the given filters."""
