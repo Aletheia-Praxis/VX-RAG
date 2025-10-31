@@ -168,7 +168,7 @@ def main() -> None:
             # Print results
             print(f"\nQuery: {args.query}")
             print(f"\nLLM Response:\n{result['response']}")
-            print(f"\nTop Results:")
+            print("\nTop Results:")
             for i, source in enumerate(result['sources'], 1):
                 print(f"{i}. Score: {source['score']:.3f}")
                 print(f"   Text: {source['text'][:200]}...")
