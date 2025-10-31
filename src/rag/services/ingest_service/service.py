@@ -12,7 +12,6 @@ from pathlib import Path
 if TYPE_CHECKING:
     import pandas as pd
 
-from llama_index.core import SimpleDirectoryReader
 from llama_parse import LlamaParse
 
 from ...libs.utils.text_utils import normalize_text, detect_language
@@ -54,7 +53,6 @@ class PDFIngestAdapter(IngestAdapter):
         Returns:
             List of document dictionaries with text and metadata
         """
-        import os
         raw_pdf_dir = Path(source)
         
         if not raw_pdf_dir.exists():
