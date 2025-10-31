@@ -2,11 +2,9 @@
 Unit tests for ingest service.
 """
 
-import pytest
 from unittest.mock import patch, MagicMock
 from pathlib import Path
 import tempfile
-import json
 
 from rag.services.ingest_service.service import PDFIngestAdapter, TXTIngestAdapter, MDIngestAdapter, save_processed_text
 

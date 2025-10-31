@@ -2,7 +2,6 @@
 Unit tests for LLM proxy service.
 """
 
-import pytest
 from unittest.mock import patch, MagicMock
 
 from rag.services.llm_proxy.service import LLMProxy
