@@ -28,4 +28,4 @@ ENV PYTHONPATH=/app
 ENV PYTHONUNBUFFERED=1
 
 # Run the MCP server
-CMD ["python", "src/mcp/routes.py"]
+CMD ["python", "src/mcp/server.py"]
