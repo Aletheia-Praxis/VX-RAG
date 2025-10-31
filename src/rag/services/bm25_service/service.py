@@ -4,7 +4,7 @@ BM25 Service implementation.
 Provides classes for BM25 indexing and retrieval operations.
 """
 
-from typing import List, Dict, Any, Optional, cast
+from typing import List, Dict, Any, Optional
 import logging
 import joblib
 from pathlib import Path
