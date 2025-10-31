@@ -4,7 +4,7 @@ Retriever Service implementation.
 Provides classes for document retrieval operations.
 """
 
-from typing import List, Dict, Any, Optional, cast
+from typing import List, Dict, Any, Optional, cast, TYPE_CHECKING
 import logging
 import yaml
 
@@ -12,14 +12,18 @@ from llama_index.core import VectorStoreIndex
 from llama_index.core.retrievers import VectorIndexRetriever, QueryFusionRetriever, BaseRetriever
 from llama_index.retrievers.bm25 import BM25Retriever
 
+if TYPE_CHECKING:
+    from ..bm25_service.service import BM25Service
+
 logger = logging.getLogger(__name__)
 
 # Import BM25 service
 try:
     from ..bm25_service.service import BM25Service
+    _bm25_available = True
 except ImportError:
     logger.warning("BM25Service not available")
-    BM25Service = None
+    _bm25_available = False
 
 class RetrieverService:
     """Service for retrieving documents from index."""
@@ -37,10 +41,11 @@ class RetrieverService:
     def _initialize_services(self) -> None:
         """Initialize BM25 service and reranker."""
         # Initialize BM25 service if available
-        if BM25Service:
+        if _bm25_available:
+            from ..bm25_service.service import BM25Service as BM25ServiceClass
             bm25_config = self.config.get('bm25', {})
             index_dir = bm25_config.get('index_dir', 'data/index/bm25')
-            self.bm25_service = BM25Service(index_dir=index_dir)
+            self.bm25_service = BM25ServiceClass(index_dir=index_dir)
             logger.info("Initialized BM25 service")
         else:
             logger.warning("BM25 service not available")
