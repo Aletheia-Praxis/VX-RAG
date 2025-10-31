@@ -10,8 +10,16 @@ import yaml
 
 from llama_index.core import VectorStoreIndex
 from llama_index.core.retrievers import VectorIndexRetriever, QueryFusionRetriever, BaseRetriever
+from llama_index.retrievers.bm25 import BM25Retriever
 
 logger = logging.getLogger(__name__)
+
+# Import BM25 service
+try:
+    from ..bm25_service.service import BM25Service
+except ImportError:
+    logger.warning("BM25Service not available")
+    BM25Service = None
 
 class RetrieverService:
     """Service for retrieving documents from index."""
@@ -19,9 +27,25 @@ class RetrieverService:
     def __init__(self, index: Optional[VectorStoreIndex] = None, config_path: Optional[str] = None):
         self.index = index
         self.vector_retriever: Optional[BaseRetriever] = None
+        self.bm25_retriever: Optional[BM25Retriever] = None
         self.hybrid_retriever: Optional[BaseRetriever] = None
+        self.bm25_service: Optional[Any] = None
         self.reranker = None
         self.config = self._load_config(config_path)
+        self._initialize_services()
+    
+    def _initialize_services(self) -> None:
+        """Initialize BM25 service and reranker."""
+        # Initialize BM25 service if available
+        if BM25Service:
+            bm25_config = self.config.get('bm25', {})
+            index_dir = bm25_config.get('index_dir', 'data/index/bm25')
+            self.bm25_service = BM25Service(index_dir=index_dir)
+            logger.info("Initialized BM25 service")
+        else:
+            logger.warning("BM25 service not available")
+        
+        # Initialize reranker
         self._initialize_reranker()
     
     def _initialize_reranker(self) -> None:
@@ -67,27 +91,65 @@ class RetrieverService:
             similarity_top_k=semantic_top_k
         )
         
-        # For hybrid search, we'll use QueryFusionRetriever with multiple vector retrievers
-        # Note: True hybrid (vector + keyword) requires BM25Retriever which may not be available
-        # For now, using multiple vector retrievers with different parameters as approximation
-        vector_retriever_2 = VectorIndexRetriever(
-            index=index,
-            similarity_top_k=semantic_top_k
-        )
+        # Initialize BM25 retriever if service is available
+        if self.bm25_service and self.bm25_service.is_index_built():
+            try:
+                self.bm25_retriever = self.bm25_service.bm25_retriever
+                logger.info("BM25 retriever initialized from service")
+            except Exception as e:
+                logger.warning(f"Failed to initialize BM25 retriever: {e}")
         
-        try:
-            self.hybrid_retriever = QueryFusionRetriever(
-                [self.vector_retriever, vector_retriever_2],
-                similarity_top_k=semantic_top_k,
-                num_queries=1,
-                llm=None,  # Disable LLM to avoid API key issues
-                use_async=True,
-                verbose=False
-            )
-            logger.info("Initialized hybrid retriever with QueryFusionRetriever")
-        except Exception as e:
-            logger.warning(f"Failed to initialize QueryFusionRetriever: {e}")
-            self.hybrid_retriever = cast(Optional[QueryFusionRetriever], self.vector_retriever)
+        # Initialize hybrid retriever if both vector and BM25 are available
+        if self.vector_retriever and self.bm25_retriever:
+            try:
+                from llama_index.core.retrievers import QueryFusionRetriever
+                self.hybrid_retriever = QueryFusionRetriever(
+                    [self.vector_retriever, self.bm25_retriever],
+                    similarity_top_k=semantic_top_k,
+                    num_queries=1,
+                    llm=None,  # Disable LLM to avoid API key issues
+                    use_async=True,
+                    verbose=False
+                )
+                logger.info("Initialized hybrid retriever with vector and BM25")
+            except Exception as e:
+                logger.warning(f"Failed to initialize hybrid retriever: {e}")
+                self.hybrid_retriever = cast(Optional[QueryFusionRetriever], self.vector_retriever)
+        else:
+            # Fallback to QueryFusion with multiple vector retrievers
+            try:
+                from llama_index.core.retrievers import QueryFusionRetriever
+                vector_retriever_2 = VectorIndexRetriever(
+                    index=index,
+                    similarity_top_k=semantic_top_k
+                )
+                self.hybrid_retriever = QueryFusionRetriever(
+                    [self.vector_retriever, vector_retriever_2],
+                    similarity_top_k=semantic_top_k,
+                    num_queries=1,
+                    llm=None,
+                    use_async=True,
+                    verbose=False
+                )
+                logger.info("Initialized hybrid retriever with QueryFusionRetriever (vector only)")
+            except Exception as e:
+                logger.warning(f"Failed to initialize QueryFusionRetriever: {e}")
+                self.hybrid_retriever = cast(Optional[QueryFusionRetriever], self.vector_retriever)
+    
+    def build_bm25_index(self, documents: List[Any]) -> None:
+        """Build BM25 index from documents."""
+        if self.bm25_service:
+            try:
+                self.bm25_service.build_index(documents)
+                self.bm25_service.save_index()
+                # Re-initialize retrievers with new BM25
+                if self.index:
+                    self.set_index(self.index)
+                logger.info("BM25 index built and saved")
+            except Exception as e:
+                logger.error(f"Failed to build BM25 index: {e}")
+        else:
+            logger.warning("BM25 service not available")
     
     def retrieve(self, query: str, top_k: int = 5, filters: Optional[Dict[str, Any]] = None, search_type: str = "semantic") -> List[Dict[str, Any]]:
         """Retrieve top-k relevant documents for query.
@@ -109,9 +171,11 @@ class RetrieverService:
             if search_type == "hybrid":
                 retriever = self.hybrid_retriever
             elif search_type == "keyword":
-                # For now, fall back to vector retriever for keyword
-                logger.warning("Keyword search not implemented, using semantic search")
-                retriever = self.vector_retriever
+                if self.bm25_retriever:
+                    retriever = self.bm25_retriever
+                else:
+                    logger.warning("BM25 retriever not available, using semantic search")
+                    retriever = self.vector_retriever
             else:
                 retriever = self.vector_retriever
             
