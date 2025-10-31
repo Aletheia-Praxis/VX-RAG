@@ -73,12 +73,26 @@ class PDFIngestAdapter(IngestAdapter):
             for doc in documents:
                 normalized_text = normalize_text(doc.text)
                 lang = detect_language(normalized_text)
+                
+                # Extract additional metadata from PDF
+                pdf_metadata = doc.metadata
+                title = pdf_metadata.get('title', pdf_metadata.get('file_name', 'Unknown').replace('.pdf', ''))
+                author = pdf_metadata.get('author', 'Unknown')
+                creation_date = pdf_metadata.get('creation_date', None)
+                
                 result.append({
                     'id': doc.id_,
                     'source': doc.metadata.get('file_path', 'unknown'),
                     'text': normalized_text,
                     'lang': lang,
-                    'metadata': doc.metadata
+                    'metadata': {
+                        **doc.metadata,
+                        'title': title,
+                        'author': author,
+                        'creation_date': creation_date,
+                        'file_type': 'pdf',
+                        'category': 'document'  # Default category
+                    }
                 })
             
             return result
@@ -133,7 +147,12 @@ class TXTIngestAdapter(IngestAdapter):
                         'metadata': {
                             'file_path': str(file_path),
                             'file_name': file_path.name,
-                            'file_size': file_path.stat().st_size
+                            'file_size': file_path.stat().st_size,
+                            'title': file_path.stem,  # Use filename without extension as title
+                            'author': 'Unknown',
+                            'creation_date': None,
+                            'file_type': 'txt',
+                            'category': 'text'
                         }
                     })
                     
@@ -197,7 +216,11 @@ class MDIngestAdapter(IngestAdapter):
                             'file_path': str(file_path),
                             'file_name': file_path.name,
                             'file_size': file_path.stat().st_size,
-                            'file_type': 'markdown'
+                            'file_type': 'markdown',
+                            'title': file_path.stem,
+                            'author': 'Unknown',
+                            'creation_date': None,
+                            'category': 'markdown'
                         }
                     })
                     
