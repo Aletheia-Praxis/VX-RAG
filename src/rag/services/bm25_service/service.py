@@ -6,7 +6,7 @@ Provides classes for BM25 indexing and retrieval operations.
 
 from typing import List, Dict, Any, Optional, cast
 import logging
-import pickle
+import joblib
 from pathlib import Path
 
 from llama_index.retrievers.bm25 import BM25Retriever
@@ -58,18 +58,19 @@ class BM25Service:
 
     def save_index(self) -> None:
         """Save the BM25 index and nodes to disk."""
-        if self.bm25_retriever is None:
-            raise ValueError("No index to save. Build index first.")
+        if not self.nodes:
+            raise ValueError("No nodes to save. Build index first.")
 
         try:
-            # Save the retriever and nodes
+            # Save only the nodes data, not the retriever object
+            # This is safer than serializing complex objects
             data = {
-                'retriever': self.bm25_retriever,
-                'nodes': self.nodes
+                'nodes': self.nodes,
+                'similarity_top_k': 20  # Default value
             }
 
             with open(self.index_path, 'wb') as f:
-                pickle.dump(data, f)
+                joblib.dump(data, f)
 
             logger.info(f"BM25 index saved to {self.index_path}")
 
@@ -90,10 +91,22 @@ class BM25Service:
 
         try:
             with open(self.index_path, 'rb') as f:
-                data = pickle.load(f)
+                data = joblib.load(f)
 
-            self.bm25_retriever = data['retriever']
+            # Validate loaded data
+            if not isinstance(data, dict) or 'nodes' not in data:
+                logger.error("Invalid index file format")
+                return False
+
             self.nodes = data['nodes']
+            similarity_top_k = data.get('similarity_top_k', 20)
+
+            # Recreate the retriever from nodes
+            self.bm25_retriever = BM25Retriever.from_defaults(
+                nodes=self.nodes,
+                similarity_top_k=similarity_top_k,
+                verbose=True
+            )
 
             logger.info(f"BM25 index loaded from {self.index_path}")
             return True
