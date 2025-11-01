@@ -7,7 +7,7 @@ processed_data_dir: "./data/processed"
 index_dir: "./data/index"
 
 # Embedding configuration
-embedding_model: "..."
+embedding_model: "all-MiniLM-L6-v2"
 embedding_device: "cpu"  # Force CPU usage
 embedding_batch_size: 32
 
