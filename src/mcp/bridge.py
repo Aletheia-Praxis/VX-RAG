@@ -7,15 +7,20 @@ Provides a clean interface for MCP server operations.
 """
 
 import logging
-from typing import Dict, Any, Optional
 import json
+from typing import Dict, Any, Optional
 import re
 from datetime import datetime
 
 from ..rag.services.vectordb_service.service import VectorStoreClient
 from ..rag.services.retriever_service.service import RetrieverService
 
-logger = logging.getLogger(__name__)
+# Import structured logging and metrics
+from src.utils.logging_config import get_logger, log_index_event, log_service_health
+from src.utils.metrics import get_metrics
+
+logger = get_logger("mcp_bridge")
+metrics = get_metrics()
 
 
 def redact_sensitive_data(text: str) -> str:
@@ -71,13 +76,18 @@ class MCPBridge:
                 if self.vector_store.index is not None:
                     self.retriever = RetrieverService(self.vector_store.index)
                     logger.info("Retriever service initialized with loaded index")
+                    log_service_health("vector_store", "loaded")
+                    log_service_health("retriever", "initialized")
                 else:
                     logger.warning("Index loaded but index object is None")
+                    log_service_health("vector_store", "error", error="index_object_none")
             else:
                 logger.warning("Failed to load index. Retriever service not initialized.")
+                log_service_health("vector_store", "error", error="load_failed")
             
         except Exception as e:
-            logger.error(f"Failed to initialize RAG services: {e}")
+            logger.error("Failed to initialize RAG services", error=str(e))
+            log_service_health("bridge_initialization", "error", error=str(e))
 
     def query_documents(self, query: str, top_k: int = 3) -> Dict[str, Any]:
         """
@@ -90,7 +100,11 @@ class MCPBridge:
         Returns:
             Structured JSON response with query results and sources
         """
+        import time
+        start_time = time.time()
+        
         if self.retriever is None:
+            logger.error("Query failed: RAG services not initialized", query=query)
             return {
                 "error": "RAG services not initialized",
                 "query": query,
@@ -98,12 +112,16 @@ class MCPBridge:
             }
         
         try:
-            logger.info(f"Processing query via MCP bridge: {query} (top_k={top_k})")
+            logger.info("Processing query via MCP bridge", query=query, top_k=top_k)
             
             # Retrieve relevant documents
             retrieved_docs = self.retriever.retrieve(query, top_k)
             
+            duration = time.time() - start_time
+            
             if not retrieved_docs:
+                logger.info("Query completed: no relevant documents found", 
+                           query=query, results_count=0, duration_ms=duration * 1000)
                 return {
                     "query": query,
                     "response": "No relevant documents found for the query.",
@@ -136,12 +154,25 @@ class MCPBridge:
                 "sources": sources
             }
             
-            logger.info(f"Query completed via MCP bridge: {len(retrieved_docs)} results returned")
+            # Log metrics
+            results_count = len(retrieved_docs)
+            metrics.increment("bridge_queries_total")
+            metrics.histogram("bridge_query_duration_ms", duration * 1000)
+            metrics.gauge("bridge_query_results_count", results_count)
+            
+            logger.info("Query completed via MCP bridge", 
+                       query=query, 
+                       results_count=results_count, 
+                       duration_ms=duration * 1000)
             
             return result
             
         except Exception as e:
-            logger.error(f"Query failed in MCP bridge: {e}")
+            duration = time.time() - start_time
+            logger.error("Query failed in MCP bridge", 
+                        query=query, 
+                        error=str(e), 
+                        duration_ms=duration * 1000)
             return {
                 "error": f"Query processing failed: {str(e)}",
                 "query": query,
@@ -171,8 +202,12 @@ class MCPBridge:
                     "initialized": retriever_ready
                 }
             },
-            "version": "1.0.0"
+            "version": "1.0.0",
+            "timestamp": datetime.now().isoformat() + "Z"
         }
+        
+        # Log health status
+        log_service_health("rag_system", status)
         
         return json.dumps(health_data, indent=2)
 
