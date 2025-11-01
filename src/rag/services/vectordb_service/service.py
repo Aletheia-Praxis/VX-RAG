@@ -33,13 +33,14 @@ class VectorStoreClient:
         else:
             raise ValueError(f"Unsupported store type: {store_type}")
     
-    def build_index(self, documents: List[Any], embed_model: Any) -> VectorStoreIndex:
+    def build_index(self, documents: List[Any], embed_model: Any, transformations: Optional[List[Any]] = None) -> VectorStoreIndex:
         """
         Build FAISS vector index from documents.
         
         Args:
             documents: List of documents to index
             embed_model: Embedding model to use
+            transformations: Optional list of transformations (e.g., node parsers)
             
         Returns:
             The created VectorStoreIndex
@@ -67,6 +68,7 @@ class VectorStoreClient:
                 documents,
                 storage_context=storage_context,
                 embed_model=embed_model,
+                transformations=transformations,
                 show_progress=True
             )
 

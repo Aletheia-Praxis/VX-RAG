@@ -9,7 +9,7 @@ import logging
 import re
 from dataclasses import dataclass
 
-from llama_index.core.node_parser import SimpleNodeParser, SentenceSplitter
+from llama_index.core.node_parser import SimpleNodeParser, SentenceSplitter, TokenTextSplitter
 from llama_index.core.schema import Document as LlamaDocument
 
 from ...libs.utils.text_utils import normalize_text
@@ -55,7 +55,7 @@ class Chunker:
     Supports different chunking strategies based on language and content type.
     """
     
-    parser: Union[SimpleNodeParser, SentenceSplitter]
+    parser: Union[SimpleNodeParser, SentenceSplitter, TokenTextSplitter]
     
     def __init__(
         self,
@@ -69,9 +69,9 @@ class Chunker:
         Initialize the chunker.
         
         Args:
-            chunk_size: Default chunk size in characters
-            chunk_overlap: Overlap between chunks in characters
-            separator: Separator for character-based splitting
+            chunk_size: Default chunk size in tokens
+            chunk_overlap: Overlap between chunks in tokens
+            separator: Separator for character-based splitting (not used for token splitting)
             use_semantic_chunking: Whether to use sentence-based semantic chunking
             use_hierarchical_chunking: Whether to use hierarchical markdown chunking
         """
@@ -90,10 +90,9 @@ class Chunker:
                 chunk_overlap=chunk_overlap
             )
         else:
-            self.parser = SimpleNodeParser.from_defaults(
+            self.parser = TokenTextSplitter(
                 chunk_size=chunk_size,
-                chunk_overlap=chunk_overlap,
-                separator=separator
+                chunk_overlap=chunk_overlap
             )
     
     def chunk_documents(self, documents: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
