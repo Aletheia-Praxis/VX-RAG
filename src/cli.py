@@ -34,10 +34,32 @@ def main() -> None:
     query_parser = subparsers.add_parser("query", help="Query the system")
     query_parser.add_argument("query", type=str, help="Query string")
 
+    # Update index command
+    update_parser = subparsers.add_parser("update-index", help="Update existing index with new documents")
+    update_parser.add_argument("--persist-dir", type=str, default="./data/index",
+                              help="Directory containing existing index")
+    update_parser.add_argument("--data-dir", type=str, default="./data/processed",
+                              help="Directory containing new processed documents")
+    update_parser.add_argument("--config", type=str, default="./config/settings.yaml",
+                              help="Configuration file path")
+
+    # Snapshot command
+    snapshot_parser = subparsers.add_parser("snapshot", help="Create index snapshot")
+    snapshot_parser.add_argument("--persist-dir", type=str, default="./data/index",
+                                help="Directory containing index")
+    snapshot_parser.add_argument("--name", type=str, help="Snapshot name (optional)")
+    snapshot_parser.add_argument("--config", type=str, default="./config/settings.yaml",
+                                help="Configuration file path")
+
+    # Verify snapshot command
+    verify_parser = subparsers.add_parser("verify-snapshot", help="Verify snapshot integrity")
+    verify_parser.add_argument("--persist-dir", type=str, default="./data/index",
+                              help="Directory containing index")
+    verify_parser.add_argument("--name", type=str, required=True, help="Snapshot name to verify")
+
     args = parser.parse_args()
 
     if args.command == "ingest":
-        print(f"Ingesting documents from {args.data_dir}")
         try:
             from pathlib import Path
             from rag.services.ingest_service.service import PDFIngestAdapter, TXTIngestAdapter, MDIngestAdapter, save_processed_text
@@ -179,9 +201,179 @@ def main() -> None:
             print(f"Error during query: {e}")
             sys.exit(1)
 
+    elif args.command == "update-index":
+        print(f"Updating index in {args.persist_dir} with documents from {args.data_dir}")
+        try:
+            import yaml
+            from pathlib import Path
+            from llama_index.core import SimpleDirectoryReader
+            from llama_index.core.node_parser import TokenTextSplitter
+            
+            # Load configuration
+            config: dict[str, Any] = {}
+            if Path(args.config).exists():
+                with open(args.config, 'r', encoding='utf-8') as f:
+                    loaded_config = yaml.safe_load(f)
+                    if isinstance(loaded_config, dict):
+                        config = loaded_config
+            
+            # Create node parser with chunking settings
+            chunk_size = config.get('chunk_size', 1024)
+            chunk_overlap = config.get('chunk_overlap', 10)
+            node_parser = TokenTextSplitter(
+                chunk_size=chunk_size,
+                chunk_overlap=chunk_overlap
+            )
+            
+            # Import services
+            from rag.services.embedder_service.service import EmbeddingService
+            from rag.services.vectordb_service.service import VectorStoreClient
+            
+            # Initialize embedder
+            embedder = EmbeddingService(
+                model_name=config.get('embedding_model', 'all-MiniLM-L6-v2') if isinstance(config, dict) else 'all-MiniLM-L6-v2'
+            )
+            
+            # Load new processed documents
+            data_path = Path(args.data_dir)
+            if not data_path.exists():
+                print(f"Data directory {data_path} does not exist")
+                sys.exit(1)
+            
+            reader = SimpleDirectoryReader(
+                input_dir=str(data_path),
+                required_exts=[".txt"],
+                recursive=True
+            )
+            documents = reader.load_data()
+            print(f"Loaded {len(documents)} new documents from {data_path}")
+            
+            if not documents:
+                print("No new documents to add")
+                sys.exit(0)
+            
+            # Initialize vector store client and load existing index
+            vector_config = {
+                'index_dir': args.persist_dir
+            }
+            store_type = config.get('vector_store', 'faiss') if isinstance(config, dict) else 'faiss'
+            vector_client = VectorStoreClient(
+                store_type=store_type,
+                config=vector_config
+            )
+            
+            if not vector_client.load_index():
+                print(f"Failed to load existing index from {args.persist_dir}")
+                sys.exit(1)
+            
+            # Add documents incrementally
+            embed_model_info = {"model_name": embedder.model_name}
+            chunking_params = {"chunk_size": chunk_size, "chunk_overlap": chunk_overlap}
+            
+            success = vector_client.add_documents_incremental(documents, embedder.embed_model)
+            if success:
+                vector_client.save_index(create_backup=True, embed_model_info=embed_model_info, 
+                                       chunking_params=chunking_params)
+                print(f"Successfully added {len(documents)} documents to index")
+            else:
+                print("Failed to add documents to index")
+                sys.exit(1)
+                
+        except Exception as e:
+            print(f"Error updating index: {e}")
+            sys.exit(1)
+
+    elif args.command == "snapshot":
+        print(f"Creating snapshot of index in {args.persist_dir}")
+        try:
+            import yaml
+            from pathlib import Path
+            from rag.services.vectordb_service.service import VectorStoreClient
+            from rag.services.embedder_service.service import EmbeddingService
+            
+            # Load configuration
+            config: dict[str, Any] = {}
+            if Path(args.config).exists():
+                with open(args.config, 'r', encoding='utf-8') as f:
+                    loaded_config = yaml.safe_load(f)
+                    if isinstance(loaded_config, dict):
+                        config = loaded_config
+            
+            # Initialize services for metadata
+            embedder = EmbeddingService(
+                model_name=config.get('embedding_model', 'all-MiniLM-L6-v2') if isinstance(config, dict) else 'all-MiniLM-L6-v2'
+            )
+            
+            # Initialize vector store client and load index
+            vector_config = {
+                'index_dir': args.persist_dir
+            }
+            vector_client = VectorStoreClient(
+                store_type=config.get('vector_store', 'faiss') if isinstance(config, dict) else 'faiss',
+                config=vector_config
+            )
+            
+            if not vector_client.load_index():
+                print(f"Failed to load index from {args.persist_dir}")
+                sys.exit(1)
+            
+            # Create snapshot with metadata
+            embed_model_info = {"model_name": embedder.model_name}
+            chunking_params = {
+                "chunk_size": config.get('chunk_size', 1024),
+                "chunk_overlap": config.get('chunk_overlap', 10)
+            }
+            
+            success = vector_client.create_snapshot(args.name, embed_model_info, chunking_params)
+            if success:
+                snapshot_name = args.name or "auto-generated"
+                print(f"Snapshot '{snapshot_name}' created successfully")
+            else:
+                print("Failed to create snapshot")
+                sys.exit(1)
+                
+        except Exception as e:
+            print(f"Error creating snapshot: {e}")
+            sys.exit(1)
+
+    elif args.command == "verify-snapshot":
+        print(f"Verifying snapshot '{args.name}' in {args.persist_dir}")
+        try:
+            from rag.services.vectordb_service.service import VectorStoreClient
+            
+            # Initialize vector store client
+            vector_config = {
+                'index_dir': args.persist_dir
+            }
+            vector_client = VectorStoreClient(
+                store_type="faiss",
+                config=vector_config
+            )
+            
+            # Verify snapshot
+            result = vector_client.verify_snapshot_integrity(args.name)
+            
+            if result.get("valid", False):
+                print(f"✓ Snapshot '{args.name}' integrity verified successfully")
+                print(f"  Verified files: {result.get('verified_files', 0)}/{result.get('total_files', 0)}")
+            else:
+                print(f"✗ Snapshot '{args.name}' integrity verification failed")
+                if "error" in result:
+                    print(f"  Error: {result['error']}")
+                if result.get("missing_files"):
+                    print(f"  Missing files: {result['missing_files']}")
+                if result.get("failed_files"):
+                    print(f"  Corrupted files: {len(result['failed_files'])}")
+                sys.exit(1)
+                
+        except Exception as e:
+            print(f"Error verifying snapshot: {e}")
+            sys.exit(1)
+
     else:
         parser.print_help()
         sys.exit(1)
+
 
 if __name__ == "__main__":
     main()
