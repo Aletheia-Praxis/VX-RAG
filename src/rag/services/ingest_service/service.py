@@ -12,7 +12,7 @@ from pathlib import Path
 if TYPE_CHECKING:
     import pandas as pd
 
-from llama_parse import LlamaParse
+from docling.document_converter import DocumentConverter
 
 from ...libs.utils.text_utils import normalize_text, detect_language
 
@@ -27,25 +27,22 @@ class IngestAdapter:
 
 
 class PDFIngestAdapter(IngestAdapter):
-    """Adapter for loading PDF documents using LlamaParse for advanced parsing."""
+    """Adapter for loading PDF documents using Docling for local parsing."""
     
-    def __init__(self, api_key: Optional[str] = None):
+    def __init__(self):
         """
-        Initialize PDF adapter with LlamaParse.
-        
-        Args:
-            api_key: LlamaCloud API key. If None, uses environment variable.
+        Initialize PDF adapter with Docling.
+        Enables OCR for scanned documents as required by the standard.
         """
-        self.api_key = api_key or os.getenv('LLAMA_CLOUD_API_KEY')
-        if not self.api_key:
-            raise ValueError("LLAMA_CLOUD_API_KEY environment variable is required for LlamaParse")
+        # Enable OCR for scanned documents (required by standard)
+        os.environ['DOCLING_DO_OCR'] = 'true'
         
-        # Initialize LlamaParse
-        self.parser = LlamaParse(api_key=self.api_key)
+        # Initialize Docling DocumentConverter
+        self.converter = DocumentConverter()
     
     def load_data(self, source: str) -> List[Dict[str, Any]]:
         """
-        Load PDF documents from the specified directory using LlamaParse.
+        Load PDF documents from the specified directory using Docling.
         
         Args:
             source: Path to the directory containing PDF files
@@ -78,46 +75,43 @@ class PDFIngestAdapter(IngestAdapter):
             result: List[Dict[str, Any]] = []
             for pdf_file in pdf_files:
                 try:
-                    logger.info(f"Parsing PDF with LlamaParse: {pdf_file}")
+                    logger.info(f"Parsing PDF with Docling: {pdf_file}")
                     
-                    # Use LlamaParse to parse the PDF
-                    documents = self.parser.load_data(str(pdf_file))
+                    # Use Docling to parse the PDF
+                    conversion_result = self.converter.convert(str(pdf_file))
                     
-                    for doc in documents:
-                        # LlamaParse returns markdown-structured text
-                        markdown_text = doc.text
-                        normalized_text = normalize_text(markdown_text)
-                        lang = detect_language(normalized_text)
-                        
-                        # Extract metadata
-                        pdf_metadata = doc.metadata
-                        title = pdf_metadata.get('title', pdf_metadata.get('file_name', pdf_file.stem))
-                        author = pdf_metadata.get('author', 'Unknown')
-                        creation_date = pdf_metadata.get('creation_date', None)
-                        
-                        result.append({
-                            'id': f"{pdf_file.name}_{len(result)}",
-                            'source': str(pdf_file),
-                            'text': normalized_text,
-                            'lang': lang,
-                            'metadata': {
-                                **pdf_metadata,
-                                'title': title,
-                                'author': author,
-                                'creation_date': creation_date,
-                                'file_type': 'pdf',
-                                'category': 'document',
-                                'parsed_with': 'llama_parse',
-                                'content_type': 'markdown'  # Indicates structured markdown content
-                            }
-                        })
+                    # Export to markdown
+                    markdown_text = conversion_result.document.export_to_markdown()
+                    normalized_text = normalize_text(markdown_text)
+                    lang = detect_language(normalized_text)
+                    
+                    # Extract basic metadata from file
+                    title = pdf_file.stem
+                    author = 'Unknown'
+                    creation_date = None
+                    
+                    result.append({
+                        'id': f"{pdf_file.name}_0",
+                        'source': str(pdf_file),
+                        'text': normalized_text,
+                        'lang': lang,
+                        'metadata': {
+                            'title': title,
+                            'author': author,
+                            'creation_date': creation_date,
+                            'file_type': 'pdf',
+                            'category': 'document',
+                            'parsed_with': 'docling',
+                            'content_type': 'markdown'  # Indicates structured markdown content
+                        }
+                    })
                     
                     logger.info(f"Successfully parsed PDF: {pdf_file}")
                     
                 except Exception as e:
-                    logger.error(f"Failed to parse PDF {pdf_file} with LlamaParse: {e}")
+                    logger.error(f"Failed to parse PDF {pdf_file} with Docling: {e}")
             
-            logger.info(f"Successfully loaded {len(result)} PDF documents from {raw_pdf_dir} using LlamaParse")
+            logger.info(f"Successfully loaded {len(result)} PDF documents from {raw_pdf_dir} using Docling")
             return result
             
         except Exception as e:
