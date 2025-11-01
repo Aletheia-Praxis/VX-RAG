@@ -342,7 +342,7 @@ class VectorStoreClient:
                         file_content = f.read()
                     
                     # Calculate both MD5 and SHA256
-                    md5_hash = hashlib.md5(file_content).hexdigest()
+                    md5_hash = hashlib.md5(file_content, usedforsecurity=False).hexdigest()
                     sha256_hash = hashlib.sha256(file_content).hexdigest()
                     
                     # Store relative path from snapshot directory
@@ -433,7 +433,7 @@ class VectorStoreClient:
                         file_content = f.read()
                     
                     # Check MD5
-                    actual_md5 = hashlib.md5(file_content).hexdigest()
+                    actual_md5 = hashlib.md5(file_content, usedforsecurity=False).hexdigest()
                     expected_md5 = expected_hashes.get("md5")
                     
                     # Check SHA256
