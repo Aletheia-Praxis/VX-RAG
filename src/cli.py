@@ -6,8 +6,16 @@ Provides command-line tools for ingestion, indexing, and querying.
 
 import argparse
 import sys
+import time
 
 from typing import Any
+
+# Import structured logging and metrics
+from .utils.logging_config import get_logger, log_index_event
+from .utils.metrics import get_metrics
+
+logger = get_logger("cli")
+metrics = get_metrics()
 
 def main() -> None:
     """
@@ -60,6 +68,7 @@ def main() -> None:
     args = parser.parse_args()
 
     if args.command == "ingest":
+        start_time = time.time()
         try:
             from pathlib import Path
             from rag.services.ingest_service.service import PDFIngestAdapter, TXTIngestAdapter, MDIngestAdapter, save_processed_text
@@ -69,7 +78,10 @@ def main() -> None:
             
             if not data_path.exists():
                 print(f"Data directory {data_path} does not exist")
+                logger.error("Ingestion failed: data directory not found", data_dir=str(data_path))
                 sys.exit(1)
+            
+            logger.info("Starting document ingestion", data_dir=str(data_path))
             
             # Process PDF files
             pdf_adapter = PDFIngestAdapter()
@@ -94,11 +106,28 @@ def main() -> None:
             saved_count = save_processed_text(all_docs, processed_dir)
             print(f"Successfully saved {saved_count} processed documents to {processed_dir}")
             
+            duration = time.time() - start_time
+            log_index_event("ingestion", saved_count, duration)
+            metrics.increment("ingestion_total")
+            metrics.histogram("ingestion_duration_ms", duration * 1000)
+            
+            logger.info("Document ingestion completed", 
+                       pdf_count=len(pdf_docs), 
+                       txt_count=len(txt_docs), 
+                       md_count=len(md_docs), 
+                       total_saved=saved_count, 
+                       duration_ms=duration * 1000)
+            
         except Exception as e:
+            duration = time.time() - start_time
             print(f"Error during ingestion: {e}")
+            logger.error("Document ingestion failed", 
+                        error=str(e), 
+                        duration_ms=duration * 1000)
             sys.exit(1)
 
     elif args.command == "index":
+        start_time = time.time()
         print(f"Creating index in {args.persist_dir}")
         try:
             import yaml
@@ -113,6 +142,8 @@ def main() -> None:
                     loaded_config = yaml.safe_load(f)
                     if isinstance(loaded_config, dict):
                         config = loaded_config
+            
+            logger.info("Starting index creation", persist_dir=args.persist_dir, config_path=args.config)
             
             # Create node parser with chunking settings
             chunk_size = config.get('chunk_size', 1024)
@@ -135,6 +166,7 @@ def main() -> None:
             data_path = Path(args.data_dir)
             if not data_path.exists():
                 print(f"Data directory {data_path} does not exist")
+                logger.error("Index creation failed: data directory not found", data_dir=str(data_path))
                 sys.exit(1)
             
             reader = SimpleDirectoryReader(
@@ -160,12 +192,28 @@ def main() -> None:
             if index:
                 vector_client.save_index()
                 print(f"Index created and saved to {args.persist_dir}")
+                
+                duration = time.time() - start_time
+                log_index_event("creation", len(documents), duration)
+                metrics.increment("index_creations_total")
+                metrics.histogram("index_creation_duration_ms", duration * 1000)
+                
+                logger.info("Index creation completed", 
+                           documents_count=len(documents), 
+                           persist_dir=args.persist_dir, 
+                           duration_ms=duration * 1000)
             else:
                 print("Failed to create index")
+                logger.error("Index creation failed: build_index returned None")
                 sys.exit(1)
                 
         except Exception as e:
+            duration = time.time() - start_time
             print(f"Error creating index: {e}")
+            logger.error("Index creation failed", 
+                        error=str(e), 
+                        persist_dir=args.persist_dir, 
+                        duration_ms=duration * 1000)
             sys.exit(1)
 
     elif args.command == "query":
