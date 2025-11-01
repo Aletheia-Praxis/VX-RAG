@@ -90,6 +90,9 @@ class PDFIngestAdapter(IngestAdapter):
                     author = 'Unknown'
                     creation_date = None
                     
+                    # Get page count from Docling document
+                    page_count = len(conversion_result.document.pages) if hasattr(conversion_result.document, 'pages') else None
+                    
                     result.append({
                         'id': f"{pdf_file.name}_0",
                         'source': str(pdf_file),
@@ -100,6 +103,8 @@ class PDFIngestAdapter(IngestAdapter):
                             'author': author,
                             'creation_date': creation_date,
                             'file_type': 'pdf',
+                            'file_name': pdf_file.name,
+                            'page_count': page_count,
                             'category': 'document',
                             'parsed_with': 'docling',
                             'content_type': 'markdown'  # Indicates structured markdown content
