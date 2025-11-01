@@ -13,7 +13,12 @@ from llama_index.core import VectorStoreIndex
 from llama_index.core.retrievers import VectorIndexRetriever, BaseRetriever
 from llama_index.retrievers.bm25 import BM25Retriever
 
-logger = logging.getLogger(__name__)
+# Import structured logging and metrics
+from src.utils.logging_config import get_logger
+from src.utils.metrics import get_metrics
+
+logger = get_logger("retriever_service")
+metrics = get_metrics()
 
 # Check BM25 service availability
 _bm25_available = importlib.util.find_spec("src.rag.services.bm25_service.service") is not None
@@ -138,6 +143,9 @@ class RetrieverService:
     
     def build_bm25_index(self, documents: List[Any]) -> None:
         """Build BM25 index from documents."""
+        import time
+        start_time = time.time()
+        
         if self.bm25_service:
             try:
                 self.bm25_service.build_index(documents)
@@ -145,9 +153,19 @@ class RetrieverService:
                 # Re-initialize retrievers with new BM25
                 if self.index:
                     self.set_index(self.index)
-                logger.info("BM25 index built and saved")
+                
+                duration = time.time() - start_time
+                metrics.increment("bm25_index_builds_total")
+                metrics.histogram("bm25_index_build_duration_ms", duration * 1000)
+                
+                logger.info("BM25 index built and saved", 
+                           documents_count=len(documents), 
+                           duration_ms=duration * 1000)
             except Exception as e:
-                logger.error(f"Failed to build BM25 index: {e}")
+                duration = time.time() - start_time
+                logger.error("Failed to build BM25 index", 
+                           error=str(e), 
+                           duration_ms=duration * 1000)
         else:
             logger.warning("BM25 service not available")
     
@@ -163,8 +181,11 @@ class RetrieverService:
         Returns:
             List of retrieved documents with scores and metadata
         """
+        import time
+        start_time = time.time()
+        
         if self.index is None:
-            logger.error("No index set for retrieval")
+            logger.error("Retrieval failed: no index set", query=query)
             return []
         
         try:
@@ -174,20 +195,19 @@ class RetrieverService:
                 if self.bm25_retriever:
                     retriever = self.bm25_retriever
                 else:
-                    logger.warning("BM25 retriever not available, using semantic search")
+                    logger.warning("BM25 retriever not available, using semantic search", query=query)
                     retriever = self.vector_retriever
             else:
                 retriever = self.vector_retriever
             
             if retriever is None:
-                logger.error("Retriever not initialized")
+                logger.error("Retrieval failed: retriever not initialized", query=query)
                 return []
             
             # Apply filters if provided
             if filters:
+                logger.info("Applying filters to retrieval", query=query, filters=filters)
                 # Note: LlamaIndex filters need to be adapted based on metadata structure
-                logger.info(f"Applying filters: {filters}")
-                # For now, retrieve and filter post-hoc
                 nodes = retriever.retrieve(query)
                 filtered_nodes = []
                 for node in nodes:
@@ -217,11 +237,28 @@ class RetrieverService:
                 }
                 results.append(result)
             
-            logger.info(f"Retrieved {len(results)} documents for query using {search_type} search")
+            duration = time.time() - start_time
+            
+            # Log metrics
+            metrics.increment("retrieval_queries_total")
+            metrics.histogram("retrieval_duration_ms", duration * 1000)
+            metrics.gauge("retrieval_results_count", len(results))
+            
+            logger.info("Documents retrieved successfully", 
+                       query=query, 
+                       search_type=search_type, 
+                       results_count=len(results), 
+                       duration_ms=duration * 1000)
+            
             return results
             
         except Exception as e:
-            logger.error(f"Failed to retrieve documents: {e}")
+            duration = time.time() - start_time
+            logger.error("Document retrieval failed", 
+                        query=query, 
+                        search_type=search_type, 
+                        error=str(e), 
+                        duration_ms=duration * 1000)
             return []
     
     def _rerank_nodes(self, query: str, nodes: List[Any]) -> List[Any]:
