@@ -63,16 +63,12 @@ python src/cli.py query "What is malware analysis?"
 This command:
 
 - Searches for relevant documents
-- Generates an answer using Ollama LLM
 - Shows top results with scores
 
 Expected result:
 
 ```text
 Query: What is malware analysis?
-
-LLM Response:
-[Generated answer based on documents]
 
 Top Results:
 1. Score: 0.95
@@ -107,7 +103,6 @@ The server provides:
 
 ### Dependency Errors
 
-- Install Ollama: `ollama pull llama3`
 - Check Python and package versions
 
 ## Additional Features

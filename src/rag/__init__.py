@@ -12,7 +12,6 @@ from .services.ingest_service.service import PDFIngestAdapter
 from .services.embedder_service.service import EmbeddingService
 from .services.vectordb_service.service import VectorStoreClient
 from .services.retriever_service.service import RetrieverService
-from .services.llm_proxy.service import LLMProxy
 
 logger = logging.getLogger(__name__)
 
@@ -24,7 +23,6 @@ class RAGSystem:
         self.embedding_service: Optional[EmbeddingService] = None
         self.vector_store: Optional[VectorStoreClient] = None
         self.retriever: Optional[RetrieverService] = None
-        self.llm_proxy: Optional[LLMProxy] = None
         
         self._initialize_services()
     
@@ -36,7 +34,6 @@ class RAGSystem:
             self.ingest_adapter = PDFIngestAdapter()
             self.embedding_service = EmbeddingService()
             self.vector_store = VectorStoreClient()
-            self.llm_proxy = LLMProxy()
             
             # Try to load existing index
             if self.vector_store.load_index():
@@ -106,17 +103,14 @@ class RAGSystem:
         Returns:
             Dictionary with response and sources
         """
-        if self.retriever is None or self.llm_proxy is None:
+        if self.retriever is None:
             return {"error": "RAG system not fully initialized"}
         
         try:
             # Retrieve documents
             retrieved_docs = self.retriever.retrieve(query, top_k)
             
-            # Generate response
-            result = self.llm_proxy.generate_with_sources(query, retrieved_docs)
-            
-            return result
+            return {"context": retrieved_docs}
             
         except Exception as e:
             logger.error(f"Query failed: {e}")

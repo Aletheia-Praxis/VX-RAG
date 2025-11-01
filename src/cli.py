@@ -142,7 +142,6 @@ def main() -> None:
         try:
             from rag.services.vectordb_service.service import VectorStoreClient
             from rag.services.retriever_service.service import RetrieverService
-            from rag.services.llm_proxy.service import LLMProxy
             
             # Initialize vector store and load index
             vector_client = VectorStoreClient(store_type="faiss")
@@ -153,23 +152,16 @@ def main() -> None:
             # Initialize retriever
             retriever = RetrieverService(vector_client.index)
             
-            # Initialize LLM proxy
-            llm_proxy = LLMProxy()
-            
             # Retrieve documents
             retrieved_docs = retriever.retrieve(args.query, top_k=5)
             if not retrieved_docs:
                 print("No relevant documents found.")
                 sys.exit(0)
             
-            # Generate response
-            result = llm_proxy.generate_with_sources(args.query, retrieved_docs)
-            
             # Print results
             print(f"\nQuery: {args.query}")
-            print(f"\nLLM Response:\n{result['response']}")
             print("\nTop Results:")
-            for i, source in enumerate(result['sources'], 1):
+            for i, source in enumerate(retrieved_docs, 1):
                 print(f"{i}. Score: {source['score']:.3f}")
                 print(f"   Text: {source['text'][:200]}...")
                 print()
