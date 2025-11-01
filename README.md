@@ -104,6 +104,30 @@ Create the vector index:
 python src/cli.py index --persist-dir data/index
 ```
 
+### Incremental Index Updates
+
+Add new documents to existing index without full rebuild:
+
+```bash
+python src/cli.py update-index --data-dir data/raw --persist-dir data/index
+```
+
+This follows the technical standard for incremental FAISS updates, automatically creating backups and maintaining index integrity.
+
+### Index Management
+
+Create snapshots with integrity verification:
+
+```bash
+python src/cli.py snapshot --persist-dir data/index --name my_snapshot
+```
+
+Verify snapshot integrity:
+
+```bash
+python src/cli.py verify-snapshot --name my_snapshot
+```
+
 ### Local Querying
 
 Query the system via CLI:
