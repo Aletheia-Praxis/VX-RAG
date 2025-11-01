@@ -48,6 +48,14 @@ mcp_debug: true
 # Logging
 log_level: "INFO"
 log_file: "vx_rag.log"
+log_format: "json"           # Options: json, text
+log_structured_events: true  # Enable structured logging for key events
+log_metrics: true            # Enable metrics logging
+
+# Metrics
+metrics_enabled: true
+metrics_log_interval: 300    # Log metrics every 5 minutes (in seconds)
+metrics_file: "metrics.log"  # File to log metrics
 
 # Environment variables (set externally)
 # LLM_API_KEY: your_llm_api_key
