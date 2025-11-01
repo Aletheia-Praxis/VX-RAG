@@ -82,6 +82,7 @@ def main() -> None:
             import yaml
             from pathlib import Path
             from llama_index.core import SimpleDirectoryReader
+            from llama_index.core.node_parser import TokenTextSplitter
             
             # Load configuration
             config: dict[str, Any] = {}
@@ -90,6 +91,14 @@ def main() -> None:
                     loaded_config = yaml.safe_load(f)
                     if isinstance(loaded_config, dict):
                         config = loaded_config
+            
+            # Create node parser with chunking settings
+            chunk_size = config.get('chunk_size', 1024)
+            chunk_overlap = config.get('chunk_overlap', 10)
+            node_parser = TokenTextSplitter(
+                chunk_size=chunk_size,
+                chunk_overlap=chunk_overlap
+            )
             
             # Import services
             from rag.services.embedder_service.service import EmbeddingService
@@ -125,7 +134,7 @@ def main() -> None:
             )
             
             # Build index
-            index = vector_client.build_index(documents, embedder.embed_model)
+            index = vector_client.build_index(documents, embedder.embed_model, transformations=[node_parser])
             if index:
                 vector_client.save_index()
                 print(f"Index created and saved to {args.persist_dir}")
