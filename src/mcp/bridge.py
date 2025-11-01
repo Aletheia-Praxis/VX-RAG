@@ -55,7 +55,7 @@ class MCPBridge:
         except Exception as e:
             logger.error(f"Failed to initialize RAG services: {e}")
 
-    def query_documents(self, query: str, top_k: int = 3) -> str:
+    def query_documents(self, query: str, top_k: int = 3) -> Dict[str, Any]:
         """
         Query the RAG system for relevant documents.
         
@@ -64,10 +64,14 @@ class MCPBridge:
             top_k: Number of top results to return
             
         Returns:
-            Formatted response with query results
+            Structured JSON response with query results and sources
         """
         if self.retriever is None:
-            return "Error: RAG services not initialized"
+            return {
+                "error": "RAG services not initialized",
+                "query": query,
+                "sources": []
+            }
         
         try:
             logger.info(f"Processing query via MCP bridge: {query} (top_k={top_k})")
@@ -76,24 +80,48 @@ class MCPBridge:
             retrieved_docs = self.retriever.retrieve(query, top_k)
             
             if not retrieved_docs:
-                return f"Query: {query}\n\nNo relevant documents found."
+                return {
+                    "query": query,
+                    "response": "No relevant documents found for the query.",
+                    "sources": []
+                }
             
-            # Format results
-            formatted_results = []
+            # Format sources
+            sources = []
+            context_parts = []
             for i, source in enumerate(retrieved_docs, 1):
-                formatted_results.append(f"Result {i} (score: {source['score']:.3f}):\n{source['text']}")
+                source_info = {
+                    "id": i,
+                    "score": round(source['score'], 3),
+                    "text": source['text'],
+                    "metadata": source.get('metadata', {})
+                }
+                sources.append(source_info)
+                context_parts.append(f"Source {i} (score: {source['score']:.3f}):\n{source['text']}")
             
-            result_text = "\n\n".join(formatted_results)
+            # Combine context for response
+            full_context = "\n\n".join(context_parts)
             
-            full_response = f"Query: {query}\n\nTop Results:\n{result_text}"
+            # For now, response is the retrieved context (LLM generation can be added later)
+            response = f"Based on the retrieved documents:\n\n{full_context}"
+            
+            result = {
+                "query": query,
+                "response": response,
+                "sources": sources
+            }
             
             logger.info(f"Query completed via MCP bridge: {len(retrieved_docs)} results returned")
             
-            return full_response
+            return result
             
         except Exception as e:
             logger.error(f"Query failed in MCP bridge: {e}")
-            return f"Error: Query processing failed: {str(e)}"
+            return {
+                "error": f"Query processing failed: {str(e)}",
+                "query": query,
+                "sources": []
+            }
 
     def get_health_status(self) -> str:
         """
@@ -178,9 +206,10 @@ class MCPBridge:
             query: Query string.
             
         Returns:
-            Retrieved context as string.
+            Retrieved context as JSON string.
         """
-        return self.query_documents(query)
+        result = self.query_documents(query)
+        return json.dumps(result, indent=2, ensure_ascii=False)
 
 
 # Global bridge instance

@@ -45,7 +45,7 @@ def query_documents(params: QueryParams) -> str:
         params: Query parameters including query text and number of results
         
     Returns:
-        Formatted response with query results and LLM-generated answer
+        JSON-formatted response with query results, LLM-generated answer, and sources
     """
     try:
         logger.info(f"Processing MCP query: {params.query} (top_k={params.top_k})")
@@ -53,13 +53,21 @@ def query_documents(params: QueryParams) -> str:
         # Delegate to MCP bridge
         response = mcp_bridge.query_documents(params.query, params.top_k)
         
+        # Convert to JSON string for MCP response
+        json_response = json.dumps(response, indent=2, ensure_ascii=False)
+        
         logger.info("MCP query completed successfully")
         
-        return response
+        return json_response
         
     except Exception as e:
         logger.error(f"MCP query failed: {e}")
-        return f"Error: Query processing failed: {str(e)}"
+        error_response = {
+            "error": f"Query processing failed: {str(e)}",
+            "query": params.query,
+            "sources": []
+        }
+        return json.dumps(error_response, indent=2, ensure_ascii=False)
 
 
 @mcp.resource("health://status")
