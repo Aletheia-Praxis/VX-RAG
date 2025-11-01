@@ -5,16 +5,19 @@ Provides MCP (Model Context Protocol) interface for querying the RAG system.
 Delegates all RAG operations to the MCP bridge for clean separation of concerns.
 """
 
-import logging
 import json
-
+import time
 from fastmcp import FastMCP
 from pydantic import BaseModel, Field
 from .bridge import get_mcp_bridge
 
-# Configure logging
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
+# Import structured logging and metrics
+from src.utils.logging_config import get_logger, log_query_event, log_service_health
+from src.utils.metrics import get_metrics
+
+# Get structured logger and metrics
+logger = get_logger("mcp_server")
+metrics = get_metrics()
 
 # Global MCP bridge instance
 mcp_bridge = get_mcp_bridge()
@@ -47,6 +50,7 @@ def query_documents(params: QueryParams) -> str:
     Returns:
         JSON-formatted response with query results, LLM-generated answer, and sources
     """
+    start_time = time.time()
     try:
         logger.info(f"Processing MCP query: {params.query} (top_k={params.top_k})")
         
@@ -56,12 +60,25 @@ def query_documents(params: QueryParams) -> str:
         # Convert to JSON string for MCP response
         json_response = json.dumps(response, indent=2, ensure_ascii=False)
         
-        logger.info("MCP query completed successfully")
+        duration = time.time() - start_time
+        results_count = len(response.get('sources', []))
+        
+        # Log structured event and metrics
+        log_query_event(params.query, params.top_k, results_count, duration)
+        
+        logger.info("MCP query completed successfully", 
+                   query=params.query, 
+                   results_count=results_count, 
+                   duration_ms=duration * 1000)
         
         return json_response
         
     except Exception as e:
-        logger.error(f"MCP query failed: {e}")
+        duration = time.time() - start_time
+        logger.error(f"MCP query failed: {e}", 
+                    query=params.query, 
+                    duration_ms=duration * 1000, 
+                    error=str(e))
         error_response = {
             "error": f"Query processing failed: {str(e)}",
             "query": params.query,
@@ -80,9 +97,15 @@ def get_health_status() -> str:
     """
     try:
         # Delegate to MCP bridge
-        return mcp_bridge.get_health_status()
+        health_data = mcp_bridge.get_health_status()
+        
+        # Log service health
+        log_service_health("mcp_server", "healthy")
+        
+        return health_data
     except Exception as e:
-        logger.error(f"Health check failed: {e}")
+        logger.error("Health check failed", error=str(e))
+        log_service_health("mcp_server", "error", error=str(e))
         return json.dumps({"status": "error", "error": str(e)})
 
 
@@ -98,10 +121,11 @@ def get_system_context() -> str:
         # Delegate to MCP bridge
         return mcp_bridge.get_system_context()
     except Exception as e:
-        logger.error(f"System context retrieval failed: {e}")
+        logger.error("System context retrieval failed", error=str(e))
         return json.dumps({"error": f"Failed to retrieve system context: {str(e)}"})
 
 
 if __name__ == "__main__":
     logger.info("Starting VX-RAG MCP server")
+    log_service_health("mcp_server", "starting")
     mcp.run()
