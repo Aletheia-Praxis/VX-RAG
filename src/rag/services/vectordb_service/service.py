@@ -7,15 +7,31 @@ Provides classes for vector storage operations.
 from typing import List, Dict, Any, Optional, cast
 import logging
 from pathlib import Path
+import hashlib
+import json
+import datetime
 
 from llama_index.core import VectorStoreIndex, StorageContext, load_index_from_storage
 from llama_index.vector_stores.faiss import FaissVectorStore
+from llama_index.core.schema import Document
 import faiss
 
 logger = logging.getLogger(__name__)
 
 class VectorStoreClient:
-    """Client for vector database operations."""
+    """
+    Client for vector database operations.
+    
+    Supports FAISS vector storage with incremental updates, snapshotting, and integrity verification.
+    Implements the incremental update strategy from the technical standard, allowing documents to be
+    added to existing indexes without full rebuilds.
+    
+    Key features:
+    - Incremental document addition (add_documents_incremental)
+    - Snapshot creation with manifest.json and checksums
+    - Integrity verification of snapshots
+    - Automatic backups on index updates
+    """
     
     def __init__(self, store_type: str = "faiss", config: Optional[Dict[str, Any]] = None):
         self.store_type = store_type
@@ -81,12 +97,62 @@ class VectorStoreClient:
             logger.error(f"Failed to build index: {e}")
             raise
     
-    def save_index(self) -> None:
-        """Save the index to disk."""
+    def add_documents_incremental(self, documents: List[Any], embed_model: Any) -> bool:
+        """
+        Add new documents to existing FAISS index incrementally.
+        
+        This method appends new documents to the existing index without rebuilding it,
+        following the incremental update strategy specified in the technical standard.
+        
+        Args:
+            documents: List of new documents to add
+            embed_model: Embedding model to use for new documents
+            
+        Returns:
+            True if documents were added successfully, False otherwise
+        """
+        if self.index is None:
+            logger.error("No existing index found. Use build_index first or load existing index.")
+            return False
+        
+        if not documents:
+            logger.warning("No documents provided for incremental addition")
+            return True  # Not an error, just nothing to do
+        
+        try:
+            logger.info(f"Adding {len(documents)} documents incrementally to existing index")
+            
+            # Insert documents into existing index
+            # LlamaIndex handles embedding generation and FAISS index updates internally
+            for doc in documents:
+                self.index.insert(doc)
+            
+            logger.info(f"Successfully added {len(documents)} documents to index")
+            return True
+            
+        except Exception as e:
+            logger.error(f"Failed to add documents incrementally: {e}")
+            return False
+    
+    def save_index(self, create_backup: bool = True, embed_model_info: Optional[Dict[str, Any]] = None,
+                  chunking_params: Optional[Dict[str, Any]] = None) -> None:
+        """
+        Save the index to disk.
+        
+        Args:
+            create_backup: Whether to create a backup snapshot before saving
+            embed_model_info: Information about embedding model (for backup manifest)
+            chunking_params: Chunking parameters (for backup manifest)
+        """
         if self.index is None:
             raise ValueError("No index to save. Build index first.")
         
         try:
+            # Create backup if requested (following technical standard)
+            if create_backup:
+                backup_name = f"backup_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}"
+                self.create_snapshot(backup_name, embed_model_info, chunking_params)
+            
             self.index.storage_context.persist(persist_dir=str(self.index_dir))
             logger.info(f"Index saved to {self.index_dir}")
         except Exception as e:
@@ -200,25 +266,96 @@ class VectorStoreClient:
         logger.warning("delete_vectors not supported for FAISS. Consider rebuilding the index without deleted items.")
         return False
     
-    def create_snapshot(self, snapshot_name: Optional[str] = None) -> bool:
-        """Create a snapshot of the current index."""
+    def create_snapshot(self, snapshot_name: Optional[str] = None, 
+                       embed_model_info: Optional[Dict[str, Any]] = None,
+                       chunking_params: Optional[Dict[str, Any]] = None) -> bool:
+        """
+        Create a snapshot of the current index with manifest.json.
+        
+        Following the technical standard, creates a timestamped snapshot with:
+        - Index files persistence
+        - manifest.json with metadata and checksums
+        
+        Args:
+            snapshot_name: Optional custom snapshot name
+            embed_model_info: Information about the embedding model used
+            chunking_params: Parameters used for text chunking
+            
+        Returns:
+            True if snapshot was created successfully
+        """
         if self.index is None:
             logger.error("No index to snapshot. Build index first.")
             return False
         
         try:
-            import datetime
-            timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+            timestamp = datetime.datetime.now().strftime("%Y-%m-%d-%H-%M-%S")
             snapshot_name = snapshot_name or f"snapshot_{timestamp}"
             snapshot_dir = self.index_dir.parent / "snapshots" / snapshot_name
             snapshot_dir.mkdir(parents=True, exist_ok=True)
             
+            # Persist the index
             self.index.storage_context.persist(persist_dir=str(snapshot_dir))
-            logger.info(f"Snapshot created: {snapshot_dir}")
+            
+            # Create manifest.json with metadata and checksums
+            manifest = self._create_manifest(snapshot_dir, embed_model_info, chunking_params)
+            
+            # Save manifest
+            manifest_path = snapshot_dir / "manifest.json"
+            with open(manifest_path, 'w', encoding='utf-8') as f:
+                json.dump(manifest, f, indent=2, ensure_ascii=False)
+            
+            logger.info(f"Snapshot created: {snapshot_dir} with manifest.json")
             return True
         except Exception as e:
             logger.error(f"Failed to create snapshot: {e}")
             return False
+    
+    def _create_manifest(self, snapshot_dir: Path, embed_model_info: Optional[Dict[str, Any]] = None,
+                        chunking_params: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+        """
+        Create manifest.json with metadata and checksums for the snapshot.
+        
+        Args:
+            snapshot_dir: Directory containing the snapshot files
+            embed_model_info: Information about embedding model
+            chunking_params: Parameters used for chunking
+            
+        Returns:
+            Manifest dictionary
+        """
+        manifest = {
+            "snapshot_info": {
+                "created_at": datetime.datetime.now().isoformat(),
+                "version": "1.0"
+            },
+            "embedding_model": embed_model_info or {},
+            "chunking_parameters": chunking_params or {},
+            "files": {}
+        }
+        
+        # Calculate checksums for all files in snapshot
+        for file_path in snapshot_dir.rglob("*"):
+            if file_path.is_file() and file_path.name != "manifest.json":
+                try:
+                    with open(file_path, 'rb') as f:
+                        file_content = f.read()
+                    
+                    # Calculate both MD5 and SHA256
+                    md5_hash = hashlib.md5(file_content).hexdigest()
+                    sha256_hash = hashlib.sha256(file_content).hexdigest()
+                    
+                    # Store relative path from snapshot directory
+                    rel_path = file_path.relative_to(snapshot_dir)
+                    manifest["files"][str(rel_path)] = {
+                        "md5": md5_hash,
+                        "sha256": sha256_hash,
+                        "size": len(file_content)
+                    }
+                except Exception as e:
+                    logger.warning(f"Could not calculate checksum for {file_path}: {e}")
+        
+        return manifest
     
     def list_snapshots(self) -> List[str]:
         """List available snapshots."""
@@ -248,6 +385,91 @@ class VectorStoreClient:
             logger.error(f"Failed to load snapshot {snapshot_name}: {e}")
             return False
     
+    def verify_snapshot_integrity(self, snapshot_name: str) -> Dict[str, Any]:
+        """
+        Verify the integrity of a snapshot by checking file checksums against manifest.json.
+        
+        Args:
+            snapshot_name: Name of the snapshot to verify
+            
+        Returns:
+            Dictionary with verification results
+        """
+        try:
+            snapshots_dir = self.index_dir.parent / "snapshots"
+            snapshot_dir = snapshots_dir / snapshot_name
+            manifest_path = snapshot_dir / "manifest.json"
+            
+            if not snapshot_dir.exists():
+                return {"valid": False, "error": f"Snapshot {snapshot_name} does not exist"}
+            
+            if not manifest_path.exists():
+                return {"valid": False, "error": "manifest.json not found in snapshot"}
+            
+            # Load manifest
+            with open(manifest_path, 'r', encoding='utf-8') as f:
+                manifest = json.load(f)
+            
+            verification_results = {
+                "valid": True,
+                "total_files": len(manifest.get("files", {})),
+                "verified_files": 0,
+                "failed_files": [],
+                "missing_files": [],
+                "snapshot_info": manifest.get("snapshot_info", {})
+            }
+            
+            # Verify each file in manifest
+            for file_path_str, expected_hashes in manifest.get("files", {}).items():
+                file_path = snapshot_dir / file_path_str
+                
+                if not file_path.exists():
+                    verification_results["missing_files"].append(file_path_str)
+                    verification_results["valid"] = False
+                    continue
+                
+                try:
+                    with open(file_path, 'rb') as f:
+                        file_content = f.read()
+                    
+                    # Check MD5
+                    actual_md5 = hashlib.md5(file_content).hexdigest()
+                    expected_md5 = expected_hashes.get("md5")
+                    
+                    # Check SHA256
+                    actual_sha256 = hashlib.sha256(file_content).hexdigest()
+                    expected_sha256 = expected_hashes.get("sha256")
+                    
+                    if actual_md5 != expected_md5 or actual_sha256 != expected_sha256:
+                        verification_results["failed_files"].append({
+                            "file": file_path_str,
+                            "expected_md5": expected_md5,
+                            "actual_md5": actual_md5,
+                            "expected_sha256": expected_sha256,
+                            "actual_sha256": actual_sha256
+                        })
+                        verification_results["valid"] = False
+                    else:
+                        verification_results["verified_files"] += 1
+                        
+                except Exception as e:
+                    verification_results["failed_files"].append({
+                        "file": file_path_str,
+                        "error": str(e)
+                    })
+                    verification_results["valid"] = False
+            
+            if verification_results["valid"]:
+                logger.info(f"Snapshot {snapshot_name} integrity verified successfully")
+            else:
+                logger.error(f"Snapshot {snapshot_name} integrity verification failed")
+            
+            return verification_results
+            
+        except Exception as e:
+            logger.error(f"Failed to verify snapshot {snapshot_name} integrity: {e}")
+            return {"valid": False, "error": str(e)}
+    
     def replicate_index(self, target_dir: str) -> bool:
         """Replicate index to another directory."""
         if self.index is None:
@@ -264,4 +486,8 @@ class VectorStoreClient:
             logger.error(f"Failed to replicate index: {e}")
             return False
 
-# TODO: Add persistence, snapshotting, replication
+# Features implemented:
+# - Incremental updates to FAISS index (add_documents_incremental)
+# - Snapshotting with manifest.json and checksums (create_snapshot, verify_snapshot_integrity)
+# - Automatic backups on index updates (save_index with create_backup=True)
+# - Persistence and replication (save_index, load_index, replicate_index)
