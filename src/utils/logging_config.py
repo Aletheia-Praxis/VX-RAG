@@ -144,8 +144,8 @@ def load_logging_config() -> Dict[str, Any]:
             with open(config_path, 'r', encoding='utf-8') as f:
                 full_config = yaml.safe_load(f)
                 return full_config.get('logging', {}) if isinstance(full_config, dict) else {}
-    except Exception:
-        pass
+    except Exception as e:
+        logging.warning(f"Failed to load logging config: {e}")
     return {}
 
 
