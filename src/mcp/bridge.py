@@ -9,12 +9,36 @@ Provides a clean interface for MCP server operations.
 import logging
 from typing import Dict, Any, Optional
 import json
+import re
 from datetime import datetime
 
 from ..rag.services.vectordb_service.service import VectorStoreClient
 from ..rag.services.retriever_service.service import RetrieverService
 
 logger = logging.getLogger(__name__)
+
+
+def redact_sensitive_data(text: str) -> str:
+    """
+    Redact sensitive data from text according to VX-RAG standards.
+    
+    Automatically redacts emails and IP addresses. Does not redact names or code samples.
+    
+    Args:
+        text: The text to redact
+        
+    Returns:
+        Text with sensitive data redacted
+    """
+    # Redact email addresses
+    email_pattern = r'\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b'
+    text = re.sub(email_pattern, '[REDACTED_EMAIL]', text)
+    
+    # Redact IP addresses
+    ip_pattern = r'\b\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}\b'
+    text = re.sub(ip_pattern, '[REDACTED_IP]', text)
+    
+    return text
 
 
 class MCPBridge:
@@ -86,24 +110,25 @@ class MCPBridge:
                     "sources": []
                 }
             
-            # Format sources
+            # Format sources with redaction
             sources = []
             context_parts = []
             for i, source in enumerate(retrieved_docs, 1):
+                redacted_text = redact_sensitive_data(source['text'])
                 source_info = {
                     "id": i,
                     "score": round(source['score'], 3),
-                    "text": source['text'],
+                    "text": redacted_text,  # Redacted text
                     "metadata": source.get('metadata', {})
                 }
                 sources.append(source_info)
-                context_parts.append(f"Source {i} (score: {source['score']:.3f}):\n{source['text']}")
+                context_parts.append(f"Source {i} (score: {source['score']:.3f}):\n{redacted_text}")
             
-            # Combine context for response
+            # Combine redacted context for response
             full_context = "\n\n".join(context_parts)
             
-            # For now, response is the retrieved context (LLM generation can be added later)
-            response = f"Based on the retrieved documents:\n\n{full_context}"
+            # Redact the response
+            response = redact_sensitive_data(f"Based on the retrieved documents:\n\n{full_context}")
             
             result = {
                 "query": query,
