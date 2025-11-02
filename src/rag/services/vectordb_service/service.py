@@ -157,7 +157,7 @@ class VectorStoreClient:
             from llama_index.core.schema import RelatedNodeInfo
             
             class CustomJSONEncoder(json.JSONEncoder):
-                def default(self, obj):
+                def default(self, obj: Any) -> Any:
                     if isinstance(obj, RelatedNodeInfo):
                         # Convert RelatedNodeInfo to a string representation to avoid unhashable issues
                         return f"RelatedNodeInfo(node_id={obj.node_id})"
@@ -365,7 +365,7 @@ class VectorStoreClient:
             from llama_index.core.schema import RelatedNodeInfo
             
             class CustomJSONEncoder(json.JSONEncoder):
-                def default(self, obj):
+                def default(self, obj: Any) -> Any:
                     if isinstance(obj, RelatedNodeInfo):
                         # Convert RelatedNodeInfo to a string representation to avoid unhashable issues
                         return f"RelatedNodeInfo(node_id={obj.node_id})"

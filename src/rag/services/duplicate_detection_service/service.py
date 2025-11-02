@@ -108,7 +108,7 @@ class DuplicateDetector:
         Returns:
             List of similarity groups (each group contains similar documents)
         """
-        similarity_groups = []
+        similarity_groups: List[Dict[str, Any]] = []
 
         # Simple pairwise comparison (O(n^2) - only suitable for small datasets)
         processed = set()
