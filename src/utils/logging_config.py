@@ -9,7 +9,7 @@ import json
 import sys
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, Union
 
 
 class JSONFormatter(logging.Formatter):
@@ -62,6 +62,7 @@ class StructuredLogger:
         self.logger.setLevel(level)
 
         # Create formatters
+        formatter: Union[JSONFormatter, logging.Formatter]
         if self.config.get('log_format', 'json') == 'json':
             formatter = JSONFormatter()
         else:
@@ -86,14 +87,14 @@ class StructuredLogger:
         # Prevent duplicate logs
         self.logger.propagate = False
 
-    def log_event(self, event_type: str, **kwargs) -> None:
+    def log_event(self, event_type: str, **kwargs: Any) -> None:
         """Log a structured event."""
         if not self.config.get('log_structured_events', True):
             return
 
         self.logger.info(f"Event: {event_type}", extra={'event_type': event_type, **kwargs})
 
-    def log_metric(self, metric_name: str, value: Any, **tags) -> None:
+    def log_metric(self, metric_name: str, value: Any, **tags: Any) -> None:
         """Log a metric."""
         if not self.config.get('log_metrics', True):
             return
@@ -104,19 +105,19 @@ class StructuredLogger:
             **tags
         })
 
-    def info(self, message: str, **kwargs) -> None:
+    def info(self, message: str, **kwargs: Any) -> None:
         """Log info message."""
         self.logger.info(message, extra=kwargs if kwargs else None)
 
-    def error(self, message: str, **kwargs) -> None:
+    def error(self, message: str, **kwargs: Any) -> None:
         """Log error message."""
         self.logger.error(message, extra=kwargs if kwargs else None)
 
-    def warning(self, message: str, **kwargs) -> None:
+    def warning(self, message: str, **kwargs: Any) -> None:
         """Log warning message."""
         self.logger.warning(message, extra=kwargs if kwargs else None)
 
-    def debug(self, message: str, **kwargs) -> None:
+    def debug(self, message: str, **kwargs: Any) -> None:
         """Log debug message."""
         self.logger.debug(message, extra=kwargs if kwargs else None)
 
@@ -186,7 +187,7 @@ def log_index_event(event_type: str, documents_count: int = 0, duration: float =
         metrics.histogram(f"index_{event_type}_duration_ms", duration * 1000)
 
 
-def log_service_health(service_name: str, status: str, **kwargs) -> None:
+def log_service_health(service_name: str, status: str, **kwargs: Any) -> None:
     """Log service health status."""
     logger = get_logger()
     logger.log_event(
