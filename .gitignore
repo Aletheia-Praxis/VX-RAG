@@ -219,8 +219,9 @@ bin/
 # Local debug log files
 debug_logs/
 
-# Downloaded PDFs
+# PDFs
 downloaded_pdfs/
+data/raw/pdf/*.pdf
 
 # Image files
 *.png
