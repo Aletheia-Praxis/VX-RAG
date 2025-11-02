@@ -81,14 +81,14 @@ class TestBridge(unittest.TestCase):
         
         # Check structure
         self.assertIn("query", result)
-        self.assertIn("response", result)
+        self.assertIn("context", result)
         self.assertIn("sources", result)
         
-        # Check redaction in response
-        self.assertIn("[REDACTED_EMAIL]", result["response"])
-        self.assertIn("[REDACTED_IP]", result["response"])
-        self.assertNotIn("user@example.com", result["response"])
-        self.assertNotIn("192.168.1.1", result["response"])
+        # Check redaction in context
+        self.assertIn("[REDACTED_EMAIL]", result["context"])
+        self.assertIn("[REDACTED_IP]", result["context"])
+        self.assertNotIn("user@example.com", result["context"])
+        self.assertNotIn("192.168.1.1", result["context"])
         
         # Check redaction in sources
         source = result["sources"][0]

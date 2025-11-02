@@ -23,7 +23,7 @@ class TestMCPServer:
         result = bridge.query_documents("test query", 3)
 
         assert result["query"] == "test query"
-        assert "text1" in result["response"]
+        assert "text1" in result["context"]
         assert len(result["sources"]) == 1
         assert result["sources"][0]["score"] == 0.9
 
