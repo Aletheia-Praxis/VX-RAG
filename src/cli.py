@@ -212,12 +212,12 @@ def main() -> None:
             from llama_index.core import SimpleDirectoryReader
             
             # Load configuration
-            index_config: dict[str, Any] = {}
+            index_cmd_config: dict[str, Any] = {}
             if Path(args.config).exists():
                 with open(args.config, 'r', encoding='utf-8') as f:
                     loaded_config = yaml.safe_load(f)
                     if isinstance(loaded_config, dict):
-                        index_config = loaded_config
+                        index_cmd_config = loaded_config
             
             logger.info("Starting index creation", persist_dir=args.persist_dir, config_path=args.config)
             
@@ -227,7 +227,7 @@ def main() -> None:
             
             # Initialize embedder
             embedder = EmbeddingService(
-                model_name=index_config.get('embedding_model', 'all-MiniLM-L6-v2') if isinstance(index_config, dict) else 'all-MiniLM-L6-v2'
+                model_name=index_cmd_config.get('embedding_model', 'all-MiniLM-L6-v2') if isinstance(index_cmd_config, dict) else 'all-MiniLM-L6-v2'
             )
             
             # Load processed documents
@@ -249,7 +249,7 @@ def main() -> None:
             vector_config = {
                 'index_dir': args.persist_dir
             }
-            store_type = index_config.get('vector_store', 'faiss') if isinstance(index_config, dict) else 'faiss'
+            store_type = index_cmd_config.get('vector_store', 'faiss') if isinstance(index_cmd_config, dict) else 'faiss'
             vector_client = VectorStoreClient(
                 store_type=store_type,
                 config=vector_config
