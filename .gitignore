@@ -228,3 +228,13 @@ data/raw/pdf/*.pdf
 
 # VSCode JSON settings
 .vscode/*.json
+
+# Snapshot files
+data/snapshots/*/*.json
+
+# Processed data files
+data/processed/*.txt
+data/processed/*.json
+
+# Document store files
+data/index/*.json
