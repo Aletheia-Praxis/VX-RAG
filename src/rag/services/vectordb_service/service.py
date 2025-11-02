@@ -164,7 +164,7 @@ class VectorStoreClient:
                     # Handle other non-serializable objects
                     try:
                         return str(obj)
-                    except:
+                    except Exception:
                         return f"<{type(obj).__name__} object>"
             
             # Temporarily patch json.dumps to use our custom encoder
@@ -372,7 +372,7 @@ class VectorStoreClient:
                     # Handle other non-serializable objects
                     try:
                         return str(obj)
-                    except:
+                    except Exception:
                         return f"<{type(obj).__name__} object>"
             
             # Temporarily patch json.dumps to use our custom encoder
