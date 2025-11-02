@@ -3,7 +3,7 @@ Tests for MCP bridge module.
 """
 
 import unittest
-from unittest.mock import Mock, patch
+from unittest.mock import Mock
 from src.mcp.bridge import redact_sensitive_data, MCPBridge
 
 class TestBridge(unittest.TestCase):
