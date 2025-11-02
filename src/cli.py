@@ -136,18 +136,18 @@ def main() -> None:
             from llama_index.core.node_parser import TokenTextSplitter
             
             # Load configuration
-            config: dict[str, Any] = {}
+            index_config: dict[str, Any] = {}
             if Path(args.config).exists():
                 with open(args.config, 'r', encoding='utf-8') as f:
                     loaded_config = yaml.safe_load(f)
                     if isinstance(loaded_config, dict):
-                        config = loaded_config
+                        index_config = loaded_config
             
             logger.info("Starting index creation", persist_dir=args.persist_dir, config_path=args.config)
             
             # Create node parser with chunking settings
-            chunk_size = config.get('chunk_size', 1024)
-            chunk_overlap = config.get('chunk_overlap', 10)
+            chunk_size = index_config.get('chunk_size', 1024)
+            chunk_overlap = index_config.get('chunk_overlap', 10)
             node_parser = TokenTextSplitter(
                 chunk_size=chunk_size,
                 chunk_overlap=chunk_overlap
@@ -159,7 +159,7 @@ def main() -> None:
             
             # Initialize embedder
             embedder = EmbeddingService(
-                model_name=config.get('embedding_model', 'all-MiniLM-L6-v2') if isinstance(config, dict) else 'all-MiniLM-L6-v2'
+                model_name=index_config.get('embedding_model', 'all-MiniLM-L6-v2') if isinstance(index_config, dict) else 'all-MiniLM-L6-v2'
             )
             
             # Load processed documents
@@ -181,7 +181,7 @@ def main() -> None:
             vector_config = {
                 'index_dir': args.persist_dir
             }
-            store_type = config.get('vector_store', 'faiss') if isinstance(config, dict) else 'faiss'
+            store_type = index_config.get('vector_store', 'faiss') if isinstance(index_config, dict) else 'faiss'
             vector_client = VectorStoreClient(
                 store_type=store_type,
                 config=vector_config
@@ -258,16 +258,16 @@ def main() -> None:
             from llama_index.core.node_parser import TokenTextSplitter
             
             # Load configuration
-            config: dict[str, Any] = {}
+            update_config: dict[str, Any] = {}
             if Path(args.config).exists():
                 with open(args.config, 'r', encoding='utf-8') as f:
                     loaded_config = yaml.safe_load(f)
                     if isinstance(loaded_config, dict):
-                        config = loaded_config
+                        update_config = loaded_config
             
             # Create node parser with chunking settings
-            chunk_size = config.get('chunk_size', 1024)
-            chunk_overlap = config.get('chunk_overlap', 10)
+            chunk_size = update_config.get('chunk_size', 1024)
+            chunk_overlap = update_config.get('chunk_overlap', 10)
             node_parser = TokenTextSplitter(
                 chunk_size=chunk_size,
                 chunk_overlap=chunk_overlap
@@ -279,7 +279,7 @@ def main() -> None:
             
             # Initialize embedder
             embedder = EmbeddingService(
-                model_name=config.get('embedding_model', 'all-MiniLM-L6-v2') if isinstance(config, dict) else 'all-MiniLM-L6-v2'
+                model_name=update_config.get('embedding_model', 'all-MiniLM-L6-v2') if isinstance(update_config, dict) else 'all-MiniLM-L6-v2'
             )
             
             # Load new processed documents
@@ -304,7 +304,7 @@ def main() -> None:
             vector_config = {
                 'index_dir': args.persist_dir
             }
-            store_type = config.get('vector_store', 'faiss') if isinstance(config, dict) else 'faiss'
+            store_type = update_config.get('vector_store', 'faiss') if isinstance(update_config, dict) else 'faiss'
             vector_client = VectorStoreClient(
                 store_type=store_type,
                 config=vector_config
@@ -340,16 +340,16 @@ def main() -> None:
             from rag.services.embedder_service.service import EmbeddingService
             
             # Load configuration
-            config: dict[str, Any] = {}
+            snapshot_config: dict[str, Any] = {}
             if Path(args.config).exists():
                 with open(args.config, 'r', encoding='utf-8') as f:
                     loaded_config = yaml.safe_load(f)
                     if isinstance(loaded_config, dict):
-                        config = loaded_config
+                        snapshot_config = loaded_config
             
             # Initialize services for metadata
             embedder = EmbeddingService(
-                model_name=config.get('embedding_model', 'all-MiniLM-L6-v2') if isinstance(config, dict) else 'all-MiniLM-L6-v2'
+                model_name=snapshot_config.get('embedding_model', 'all-MiniLM-L6-v2') if isinstance(snapshot_config, dict) else 'all-MiniLM-L6-v2'
             )
             
             # Initialize vector store client and load index
@@ -357,7 +357,7 @@ def main() -> None:
                 'index_dir': args.persist_dir
             }
             vector_client = VectorStoreClient(
-                store_type=config.get('vector_store', 'faiss') if isinstance(config, dict) else 'faiss',
+                store_type=snapshot_config.get('vector_store', 'faiss') if isinstance(snapshot_config, dict) else 'faiss',
                 config=vector_config
             )
             
@@ -368,8 +368,8 @@ def main() -> None:
             # Create snapshot with metadata
             embed_model_info = {"model_name": embedder.model_name}
             chunking_params = {
-                "chunk_size": config.get('chunk_size', 1024),
-                "chunk_overlap": config.get('chunk_overlap', 10)
+                "chunk_size": snapshot_config.get('chunk_size', 1024),
+                "chunk_overlap": snapshot_config.get('chunk_overlap', 10)
             }
             
             success = vector_client.create_snapshot(args.name, embed_model_info, chunking_params)
