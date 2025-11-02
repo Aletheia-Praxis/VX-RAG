@@ -238,3 +238,6 @@ data/processed/*.json
 
 # Document store files
 data/index/*.json
+
+# Raw markdown files
+data/raw/md/*.md
