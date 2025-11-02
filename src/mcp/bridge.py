@@ -7,7 +7,7 @@ Provides a clean interface for MCP server operations.
 """
 
 import json
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, List
 import re
 from datetime import datetime
 
@@ -97,7 +97,7 @@ class MCPBridge:
             top_k: Number of top results to return
             
         Returns:
-            Structured JSON response with query results and sources
+            Structured JSON response with query, context, and sources
         """
         import time
         start_time = time.time()
@@ -107,54 +107,51 @@ class MCPBridge:
             return {
                 "error": "RAG services not initialized",
                 "query": query,
+                "context": "",
                 "sources": []
             }
         
         try:
             logger.info("Processing query via MCP bridge", query=query, top_k=top_k)
             
-            # Retrieve relevant documents
-            retrieved_docs = self.retriever.retrieve(query, top_k)
+            # Get retrieved chunks with redaction
+            chunks = self.get_retrieved_chunks(query, top_k)
             
             duration = time.time() - start_time
             
-            if not retrieved_docs:
+            if not chunks:
                 logger.info("Query completed: no relevant documents found", 
                            query=query, results_count=0, duration_ms=duration * 1000)
                 return {
                     "query": query,
-                    "response": "No relevant documents found for the query.",
+                    "context": "No relevant documents found for the query.",
                     "sources": []
                 }
             
-            # Format sources with redaction
-            sources = []
-            context_parts = []
-            for i, source in enumerate(retrieved_docs, 1):
-                redacted_text = redact_sensitive_data(source['text'])
-                source_info = {
-                    "id": i,
-                    "score": round(source['score'], 3),
-                    "text": redacted_text,  # Redacted text
-                    "metadata": source.get('metadata', {})
-                }
-                sources.append(source_info)
-                context_parts.append(f"Source {i} (score: {source['score']:.3f}):\n{redacted_text}")
-            
-            # Combine redacted context for response
+            # Combine chunk texts into context (without citations in text)
+            context_parts = [chunk['text'] for chunk in chunks]
             full_context = "\n\n".join(context_parts)
             
-            # Redact the response
-            response = redact_sensitive_data(f"Based on the retrieved documents:\n\n{full_context}")
+            # Format sources
+            sources = []
+            for i, chunk in enumerate(chunks, 1):
+                source_info = {
+                    "id": i,
+                    "score": round(chunk['score'], 3),
+                    "text": chunk['text'],  # Already redacted
+                    "metadata": chunk.get('metadata', {}),
+                    "node_id": chunk.get('node_id', '')
+                }
+                sources.append(source_info)
             
             result = {
                 "query": query,
-                "response": response,
+                "context": full_context,
                 "sources": sources
             }
             
             # Log metrics
-            results_count = len(retrieved_docs)
+            results_count = len(chunks)
             metrics.increment("bridge_queries_total")
             metrics.histogram("bridge_query_duration_ms", duration * 1000)
             metrics.gauge("bridge_query_results_count", results_count)
@@ -175,6 +172,7 @@ class MCPBridge:
             return {
                 "error": f"Query processing failed: {str(e)}",
                 "query": query,
+                "context": "",
                 "sources": []
             }
 
@@ -250,7 +248,8 @@ class MCPBridge:
         
         return {
             "query": query,
-            "retrieved_context": response,
+            "retrieved_context": response.get("context", ""),
+            "sources": response.get("sources", []),
             "metadata": {
                 "source": "vx-rag",
                 "timestamp": datetime.now().isoformat() + "Z"
@@ -269,6 +268,51 @@ class MCPBridge:
         """
         result = self.query_documents(query)
         return json.dumps(result, indent=2, ensure_ascii=False)
+
+    def get_retrieved_chunks(self, query: str, top_k: int = 3) -> List[Dict[str, Any]]:
+        """
+        Retrieve relevant document chunks with redacted sensitive data.
+        
+        Args:
+            query: The search query string
+            top_k: Number of top results to return
+            
+        Returns:
+            List of retrieved chunks with redacted text and metadata
+        """
+        if self.retriever is None:
+            logger.error("Retrieval failed: RAG services not initialized", query=query)
+            return []
+        
+        try:
+            logger.info("Retrieving chunks via MCP bridge", query=query, top_k=top_k)
+            
+            # Retrieve relevant documents
+            retrieved_docs = self.retriever.retrieve(query, top_k)
+            
+            # Redact sensitive data in each chunk
+            redacted_chunks = []
+            for doc in retrieved_docs:
+                redacted_text = redact_sensitive_data(doc['text'])
+                chunk = {
+                    'text': redacted_text,
+                    'score': doc['score'],
+                    'metadata': doc.get('metadata', {}),
+                    'node_id': doc.get('node_id', '')
+                }
+                redacted_chunks.append(chunk)
+            
+            logger.info("Chunks retrieved and redacted", 
+                       query=query, 
+                       chunks_count=len(redacted_chunks))
+            
+            return redacted_chunks
+            
+        except Exception as e:
+            logger.error("Chunk retrieval failed in MCP bridge", 
+                        query=query, 
+                        error=str(e))
+            return []
 
 
 # Global bridge instance
