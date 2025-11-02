@@ -29,7 +29,7 @@ class IngestAdapter:
 class PDFIngestAdapter(IngestAdapter):
     """Adapter for loading PDF documents using Docling for local parsing."""
     
-    def __init__(self):
+    def __init__(self) -> None:
         """
         Initialize PDF adapter with Docling.
         Enables OCR for scanned documents as required by the standard.
@@ -261,7 +261,7 @@ class MDIngestAdapter(IngestAdapter):
 class APIIngestAdapter(IngestAdapter):
     """Adapter for loading data from JSON APIs."""
     
-    def __init__(self, timeout: int = 30, retries: int = 3):
+    def __init__(self, timeout: int = 30, retries: int = 3) -> None:
         """
         Initialize API adapter.
         
@@ -367,7 +367,7 @@ class APIIngestAdapter(IngestAdapter):
 class DatabaseIngestAdapter(IngestAdapter):
     """Adapter for loading data from databases."""
     
-    def __init__(self, connection_string: str, query: str):
+    def __init__(self, connection_string: str, query: str) -> None:
         """
         Initialize database adapter.
         

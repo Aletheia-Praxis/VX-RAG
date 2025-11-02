@@ -65,7 +65,7 @@ class Chunker:
         separator: str = "\n",
         use_semantic_chunking: bool = False,
         use_hierarchical_chunking: bool = False
-    ):
+    ) -> None:
         """
         Initialize the chunker.
         
@@ -152,6 +152,7 @@ class Chunker:
             logger.debug(f"Detected general content for document {document.get('id')}, using chunk size {adaptive_chunk_size}")
         
         # Create adaptive parser if needed
+        adaptive_parser: Union[SimpleNodeParser, SentenceSplitter, TokenTextSplitter]
         if adaptive_chunk_size != self.chunk_size:
             if self.use_semantic_chunking:
                 adaptive_parser = SentenceSplitter(
@@ -355,7 +356,7 @@ class MarkdownHierarchicalChunker:
         max_chunk_size: int = 2000,
         preserve_code_blocks: bool = True,
         preserve_tables: bool = True
-    ):
+    ) -> None:
         """
         Initialize the hierarchical chunker.
         
