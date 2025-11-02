@@ -6,7 +6,6 @@ Implements the Model Context Protocol for managing context and queries.
 Provides a clean interface for MCP server operations.
 """
 
-import logging
 import json
 from typing import Dict, Any, Optional
 import re
@@ -16,7 +15,7 @@ from ..rag.services.vectordb_service.service import VectorStoreClient
 from ..rag.services.retriever_service.service import RetrieverService
 
 # Import structured logging and metrics
-from src.utils.logging_config import get_logger, log_index_event, log_service_health
+from src.utils.logging_config import get_logger, log_service_health
 from src.utils.metrics import get_metrics
 
 logger = get_logger("mcp_bridge")
