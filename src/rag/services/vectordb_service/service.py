@@ -74,10 +74,10 @@ class VectorStoreClient:
             Initialize FAISS HNSW index
             The technical standard requires HNSW for its high-speed, high-recall retrieval capabilities.
             "HNSW32" is a standard configuration for HNSW. The number 32 represents the number of neighbors
-            for each node in the graph. METRIC_L2 is used, which is equivalent to cosine similarity
-            for normalized embeddings, as produced by the specified `all-MiniLM-L6-v2` model.
+            for each node in the graph. METRIC_INNER_PRODUCT is used for cosine similarity,
+            as required by the technical standard for normalized embeddings.
             """
-            faiss_index = faiss.IndexHNSWFlat(d, 32, faiss.METRIC_L2)
+            faiss_index = faiss.IndexHNSWFlat(d, 32, faiss.METRIC_INNER_PRODUCT)
             vector_store = FaissVectorStore(faiss_index=faiss_index)
 
             # Create storage context
