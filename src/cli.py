@@ -11,8 +11,8 @@ import time
 from typing import Any
 
 # Import structured logging and metrics
-from .utils.logging_config import get_logger, log_index_event
-from .utils.metrics import get_metrics
+from utils.logging_config import get_logger, log_index_event
+from utils.metrics import get_metrics
 
 logger = get_logger("cli")
 metrics = get_metrics()
@@ -24,10 +24,14 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="VX-RAG CLI")
     subparsers = parser.add_subparsers(dest="command", help="Available commands")
 
-    # Ingest command
-    ingest_parser = subparsers.add_parser("ingest", help="Ingest documents")
-    ingest_parser.add_argument("--data-dir", type=str, default="../data/raw",
+    # Ingest command - Full ingestion pipeline
+    ingest_parser = subparsers.add_parser("ingest", help="Run full ingestion pipeline")
+    ingest_parser.add_argument("--data-dir", type=str, default="data/raw",
                               help="Directory containing raw documents")
+    ingest_parser.add_argument("--persist-dir", type=str, default="data/index",
+                              help="Directory to persist index")
+    ingest_parser.add_argument("--config", type=str, default="config/settings.yaml",
+                              help="Configuration file path")
 
     # Index command
     index_parser = subparsers.add_parser("index", help="Create index")
@@ -73,57 +77,128 @@ def main() -> None:
         start_time = time.time()
         try:
             from pathlib import Path
-            from rag.services.ingest_service.service import PDFIngestAdapter, TXTIngestAdapter, MDIngestAdapter, save_processed_text
+            from rag.services.ingest_service.service import PDFIngestAdapter, TXTIngestAdapter, MDIngestAdapter, process_and_save_documents
+            from rag.services.duplicate_detection_service.service import DuplicateDetector
+            from rag.services.chunker_service.service import Chunker
+            from rag.services.embedder_service.service import EmbeddingService
+            from rag.services.vectordb_service.service import VectorStoreClient
             
             data_path = Path(args.data_dir)
             processed_dir = Path("./data/processed")
+            persist_dir = Path(args.persist_dir)
             
             if not data_path.exists():
                 print(f"Data directory {data_path} does not exist")
                 logger.error("Ingestion failed: data directory not found", data_dir=str(data_path))
                 sys.exit(1)
             
-            logger.info("Starting document ingestion", data_dir=str(data_path))
+            logger.info("Starting full ingestion pipeline", data_dir=str(data_path))
             
-            # Process PDF files
+            # Step 1: Parse documents
+            print("Step 1: Parsing documents...")
             pdf_adapter = PDFIngestAdapter()
             pdf_docs = pdf_adapter.load_data(str(data_path / "pdf"))
             print(f"Loaded {len(pdf_docs)} PDF documents")
             
-            # Process TXT files
             txt_adapter = TXTIngestAdapter()
             txt_docs = txt_adapter.load_data(str(data_path / "txt"))
             print(f"Loaded {len(txt_docs)} TXT documents")
             
-            # Process MD files
             md_adapter = MDIngestAdapter()
             md_docs = md_adapter.load_data(str(data_path / "md"))
             print(f"Loaded {len(md_docs)} MD documents")
             
-            # Combine all documents
             all_docs = pdf_docs + txt_docs + md_docs
-            print(f"Total documents to process: {len(all_docs)}")
+            print(f"Total documents parsed: {len(all_docs)}")
             
-            # Save processed documents
-            saved_count = save_processed_text(all_docs, processed_dir)
-            print(f"Successfully saved {saved_count} processed documents to {processed_dir}")
+            # Step 2: Remove duplicates
+            print("Step 2: Removing duplicates...")
+            detector = DuplicateDetector()
+            unique_docs = detector.remove_duplicates(all_docs)
+            print(f"Documents after deduplication: {len(unique_docs)} (removed {len(all_docs) - len(unique_docs)} duplicates)")
+            
+            # Step 3: Chunk documents
+            print("Step 3: Chunking documents...")
+            chunker = Chunker(chunk_size=1024, chunk_overlap=200)  # Adaptive chunking enabled by default
+            chunks = chunker.chunk_documents(unique_docs)
+            print(f"Created {len(chunks)} chunks from {len(unique_docs)} documents")
+            
+            # Step 4: Save processed documents and chunks
+            print("Step 4: Saving processed data...")
+            saved_count = process_and_save_documents(unique_docs, processed_dir)
+            print(f"Saved {saved_count} processed documents to {processed_dir}")
+            
+            # Step 5: Create/update vector index
+            print("Step 5: Creating/updating vector index...")
+            
+            # Load configuration
+            import yaml
+            index_config: dict[str, Any] = {}
+            if Path(args.config).exists():
+                with open(args.config, 'r', encoding='utf-8') as f:
+                    loaded_config = yaml.safe_load(f)
+                    if isinstance(loaded_config, dict):
+                        index_config = loaded_config
+            
+            # Initialize embedder
+            embedder = EmbeddingService(
+                model_name=index_config.get('embedding_model', 'all-MiniLM-L6-v2')
+            )
+            
+            # Initialize vector store
+            vector_config = {'index_dir': str(persist_dir)}
+            store_type = index_config.get('vector_store', 'faiss')
+            vector_client = VectorStoreClient(store_type=store_type, config=vector_config)
+            
+            # Convert chunks to LlamaIndex documents for indexing
+            from llama_index.core.schema import Document as LlamaDocument
+            llama_docs = []
+            for chunk in chunks:
+                llama_doc = LlamaDocument(
+                    text=chunk['text'],
+                    metadata=chunk.get('metadata', {}),
+                    id_=chunk['id']
+                )
+                llama_docs.append(llama_doc)
+            
+            # Build/update index
+            index = vector_client.build_index(llama_docs, embedder.embed_model)
+            if index:
+                vector_client.save_index()
+                print(f"Index created/updated and saved to {persist_dir}")
+                
+                # Create snapshot with metadata
+                embed_model_info = {"model_name": embedder.model_name}
+                chunking_params = {"adaptive_chunking": True, "default_chunk_size": 1024, "technical_chunk_size": 384}
+                vector_client.create_snapshot(None, embed_model_info, chunking_params)
+                print("Index snapshot created")
+            else:
+                print("Failed to create/update index")
+                logger.error("Index creation failed: build_index returned None")
+                sys.exit(1)
             
             duration = time.time() - start_time
-            log_index_event("ingestion", saved_count, duration)
-            metrics.increment("ingestion_total")
-            metrics.histogram("ingestion_duration_ms", duration * 1000)
+            log_index_event("full_ingestion", len(unique_docs), duration)
+            metrics.increment("ingestion_full_pipeline_total")
+            metrics.histogram("ingestion_full_pipeline_duration_ms", duration * 1000)
             
-            logger.info("Document ingestion completed", 
-                       pdf_count=len(pdf_docs), 
-                       txt_count=len(txt_docs), 
-                       md_count=len(md_docs), 
-                       total_saved=saved_count, 
+            logger.info("Full ingestion pipeline completed", 
+                       parsed=len(all_docs), 
+                       unique=len(unique_docs), 
+                       chunks=len(chunks), 
                        duration_ms=duration * 1000)
+            
+            print("\nIngestion Summary:")
+            print(f"  Documents parsed: {len(all_docs)}")
+            print(f"  Duplicates removed: {len(all_docs) - len(unique_docs)}")
+            print(f"  Unique documents: {len(unique_docs)}")
+            print(f"  Chunks created: {len(chunks)}")
+            print(f"  Duration: {duration:.2f} seconds")
             
         except Exception as e:
             duration = time.time() - start_time
-            print(f"Error during ingestion: {e}")
-            logger.error("Document ingestion failed", 
+            print(f"Error during full ingestion: {e}")
+            logger.error("Full ingestion pipeline failed", 
                         error=str(e), 
                         duration_ms=duration * 1000)
             sys.exit(1)
@@ -135,7 +210,6 @@ def main() -> None:
             import yaml
             from pathlib import Path
             from llama_index.core import SimpleDirectoryReader
-            from llama_index.core.node_parser import TokenTextSplitter
             
             # Load configuration
             index_config: dict[str, Any] = {}
@@ -146,14 +220,6 @@ def main() -> None:
                         index_config = loaded_config
             
             logger.info("Starting index creation", persist_dir=args.persist_dir, config_path=args.config)
-            
-            # Create node parser with chunking settings
-            chunk_size = index_config.get('chunk_size', 1024)
-            chunk_overlap = index_config.get('chunk_overlap', 10)
-            node_parser = TokenTextSplitter(
-                chunk_size=chunk_size,
-                chunk_overlap=chunk_overlap
-            )
             
             # Import services
             from rag.services.embedder_service.service import EmbeddingService
@@ -190,7 +256,7 @@ def main() -> None:
             )
             
             # Build index
-            index = vector_client.build_index(documents, embedder.embed_model, transformations=[node_parser])
+            index = vector_client.build_index(documents, embedder.embed_model)
             if index:
                 vector_client.save_index()
                 print(f"Index created and saved to {args.persist_dir}")
@@ -225,6 +291,7 @@ def main() -> None:
             from pathlib import Path
             from rag.services.vectordb_service.service import VectorStoreClient
             from rag.services.retriever_service.service import RetrieverService
+            from rag.services.embedder_service.service import EmbeddingService
             
             # Load configuration
             query_config: dict[str, Any] = {}
@@ -234,17 +301,24 @@ def main() -> None:
                     if isinstance(loaded_config, dict):
                         query_config = loaded_config
             
+            # Initialize embedding service (needed for index loading)
+            embedder = EmbeddingService(
+                model_name=query_config.get('embedding_model', 'all-MiniLM-L6-v2') if isinstance(query_config, dict) else 'all-MiniLM-L6-v2'
+            )
+            
             # Initialize vector store and load index
             vector_config = {
                 'index_dir': query_config.get('index_dir', './data/index') if isinstance(query_config, dict) else './data/index'
             }
             vector_client = VectorStoreClient(store_type="faiss", config=vector_config)
-            if not vector_client.load_index():
+            if not vector_client.load_index(embed_model=embedder.embed_model):
                 print("Failed to load index. Please run 'index' command first.")
                 sys.exit(1)
             
             # Initialize retriever
-            retriever = RetrieverService(vector_client.index)
+            retriever = RetrieverService(index=vector_client.index)
+            if vector_client.index:
+                retriever.set_index(vector_client.index)
             
             # Retrieve documents
             retrieved_docs = retriever.retrieve(args.query, top_k=5)
@@ -270,7 +344,6 @@ def main() -> None:
             import yaml
             from pathlib import Path
             from llama_index.core import SimpleDirectoryReader
-            from llama_index.core.node_parser import TokenTextSplitter
             
             # Load configuration
             update_config: dict[str, Any] = {}
@@ -279,14 +352,6 @@ def main() -> None:
                     loaded_config = yaml.safe_load(f)
                     if isinstance(loaded_config, dict):
                         update_config = loaded_config
-            
-            # Create node parser with chunking settings
-            chunk_size = update_config.get('chunk_size', 1024)
-            chunk_overlap = update_config.get('chunk_overlap', 10)
-            node_parser = TokenTextSplitter(
-                chunk_size=chunk_size,
-                chunk_overlap=chunk_overlap
-            )
             
             # Import services
             from rag.services.embedder_service.service import EmbeddingService
@@ -331,7 +396,7 @@ def main() -> None:
             
             # Add documents incrementally
             embed_model_info = {"model_name": embedder.model_name}
-            chunking_params = {"chunk_size": chunk_size, "chunk_overlap": chunk_overlap}
+            chunking_params = {"adaptive_chunking": True, "default_chunk_size": 1024, "technical_chunk_size": 256}
             
             success = vector_client.add_documents_incremental(documents, embedder.embed_model)
             if success:
@@ -382,10 +447,7 @@ def main() -> None:
             
             # Create snapshot with metadata
             embed_model_info = {"model_name": embedder.model_name}
-            chunking_params = {
-                "chunk_size": snapshot_config.get('chunk_size', 1024),
-                "chunk_overlap": snapshot_config.get('chunk_overlap', 10)
-            }
+            chunking_params = {"adaptive_chunking": True, "default_chunk_size": 1024, "technical_chunk_size": 256}
             
             success = vector_client.create_snapshot(args.name, embed_model_info, chunking_params)
             if success:
