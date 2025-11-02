@@ -63,7 +63,7 @@ class Chunker:
         chunk_size: int = 1024,
         chunk_overlap: int = 200,
         separator: str = "\n",
-        use_semantic_chunking: bool = False,
+        use_semantic_chunking: bool = True,
         use_hierarchical_chunking: bool = False
     ) -> None:
         """

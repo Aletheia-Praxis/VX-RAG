@@ -119,7 +119,7 @@ def main() -> None:
             
             # Step 3: Chunk documents
             print("Step 3: Chunking documents...")
-            chunker = Chunker(chunk_size=1024, chunk_overlap=200)  # Adaptive chunking enabled by default
+            chunker = Chunker(chunk_size=1024, chunk_overlap=200, use_semantic_chunking=True)  # Adaptive chunking enabled by default
             chunks = chunker.chunk_documents(unique_docs)
             print(f"Created {len(chunks)} chunks from {len(unique_docs)} documents")
             
