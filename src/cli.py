@@ -41,6 +41,8 @@ def main() -> None:
     # Query command
     query_parser = subparsers.add_parser("query", help="Query the system")
     query_parser.add_argument("query", type=str, help="Query string")
+    query_parser.add_argument("--config", type=str, default="./config/settings.yaml",
+                             help="Configuration file path")
 
     # Update index command
     update_parser = subparsers.add_parser("update-index", help="Update existing index with new documents")
@@ -171,7 +173,7 @@ def main() -> None:
             
             reader = SimpleDirectoryReader(
                 input_dir=str(data_path),
-                required_exts=[".txt"],
+                required_exts=[".txt", ".md"],
                 recursive=True
             )
             documents = reader.load_data()
@@ -219,11 +221,24 @@ def main() -> None:
     elif args.command == "query":
         print(f"Querying: {args.query}")
         try:
+            import yaml
+            from pathlib import Path
             from rag.services.vectordb_service.service import VectorStoreClient
             from rag.services.retriever_service.service import RetrieverService
             
+            # Load configuration
+            query_config: dict[str, Any] = {}
+            if Path(args.config).exists():
+                with open(args.config, 'r', encoding='utf-8') as f:
+                    loaded_config = yaml.safe_load(f)
+                    if isinstance(loaded_config, dict):
+                        query_config = loaded_config
+            
             # Initialize vector store and load index
-            vector_client = VectorStoreClient(store_type="faiss")
+            vector_config = {
+                'index_dir': query_config.get('index_dir', './data/index') if isinstance(query_config, dict) else './data/index'
+            }
+            vector_client = VectorStoreClient(store_type="faiss", config=vector_config)
             if not vector_client.load_index():
                 print("Failed to load index. Please run 'index' command first.")
                 sys.exit(1)
@@ -290,7 +305,7 @@ def main() -> None:
             
             reader = SimpleDirectoryReader(
                 input_dir=str(data_path),
-                required_exts=[".txt"],
+                required_exts=[".txt", ".md"],
                 recursive=True
             )
             documents = reader.load_data()
