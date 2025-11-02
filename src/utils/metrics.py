@@ -35,19 +35,19 @@ class MetricsCollector:
             time.sleep(interval)
             self.log_all_metrics()
 
-    def increment(self, name: str, value: int = 1, **tags) -> None:
+    def increment(self, name: str, value: int = 1, **tags: Dict[str, Any]) -> None:
         """Increment a counter metric."""
         with self.lock:
             if name not in self.metrics:
                 self.metrics[name] = {'type': 'counter', 'value': 0, 'tags': tags}
             self.metrics[name]['value'] += value
 
-    def gauge(self, name: str, value: float, **tags) -> None:
+    def gauge(self, name: str, value: float, **tags: Dict[str, Any]) -> None:
         """Set a gauge metric."""
         with self.lock:
             self.metrics[name] = {'type': 'gauge', 'value': value, 'tags': tags}
 
-    def histogram(self, name: str, value: float, **tags) -> None:
+    def histogram(self, name: str, value: float, **tags: Dict[str, Any]) -> None:
         """Record a histogram value."""
         with self.lock:
             if name not in self.metrics:
