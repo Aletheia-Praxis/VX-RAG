@@ -5,7 +5,6 @@ Provides classes for document retrieval operations.
 """
 
 from typing import List, Dict, Any, Optional, cast
-import logging
 import yaml
 import importlib.util
 

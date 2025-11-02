@@ -13,7 +13,6 @@ import datetime
 
 from llama_index.core import VectorStoreIndex, StorageContext, load_index_from_storage
 from llama_index.vector_stores.faiss import FaissVectorStore
-from llama_index.core.schema import Document
 import faiss
 
 logger = logging.getLogger(__name__)

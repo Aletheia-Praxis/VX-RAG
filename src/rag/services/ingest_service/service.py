@@ -4,7 +4,7 @@ Ingest Service implementation.
 Provides classes and functions for document ingestion.
 """
 
-from typing import List, Dict, Any, TYPE_CHECKING, Optional
+from typing import List, Dict, Any, TYPE_CHECKING
 import logging
 import os
 from pathlib import Path
