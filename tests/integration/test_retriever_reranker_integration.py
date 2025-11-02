@@ -51,7 +51,7 @@ class TestRetrieverRerankerIntegration:
         """Test complete workflow from retrieval to reranking."""
         # Setup retriever
         with patch('src.rag.services.retriever_service.service.VectorIndexRetriever') as mock_vector_retriever, \
-             patch('src.rag.services.retriever_service.service.QueryFusionRetriever') as mock_query_fusion:
+             patch('llama_index.core.retrievers.QueryFusionRetriever') as mock_query_fusion:
 
             mock_retriever_instance = Mock()
             mock_retriever_instance.retrieve.return_value = sample_nodes
@@ -171,7 +171,7 @@ class TestRetrieverRerankerIntegration:
     def test_hybrid_search_integration(self, mock_index, sample_nodes):
         """Test hybrid search in integrated workflow."""
         with patch('src.rag.services.retriever_service.service.VectorIndexRetriever') as mock_vector_retriever, \
-             patch('src.rag.services.retriever_service.service.QueryFusionRetriever') as mock_query_fusion:
+             patch('llama_index.core.retrievers.QueryFusionRetriever') as mock_query_fusion:
 
             mock_retriever_instance = Mock()
             mock_retriever_instance.retrieve.return_value = sample_nodes
