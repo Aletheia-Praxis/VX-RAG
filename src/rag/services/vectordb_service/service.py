@@ -70,8 +70,14 @@ class VectorStoreClient:
             d = len(test_embedding)
             logger.info(f"Embedding dimension: {d}")
             
-            # Initialize FAISS vector store
-            faiss_index = faiss.IndexFlatL2(d)
+            """
+            Initialize FAISS HNSW index
+            The technical standard requires HNSW for its high-speed, high-recall retrieval capabilities.
+            "HNSW32" is a standard configuration for HNSW. The number 32 represents the number of neighbors
+            for each node in the graph. METRIC_L2 is used, which is equivalent to cosine similarity
+            for normalized embeddings, as produced by the specified `all-MiniLM-L6-v2` model.
+            """
+            faiss_index = faiss.IndexHNSWFlat(d, 32, faiss.METRIC_L2)
             vector_store = FaissVectorStore(faiss_index=faiss_index)
 
             # Create storage context
