@@ -14,6 +14,7 @@ if TYPE_CHECKING:
 
 from docling.document_converter import DocumentConverter
 
+from ..duplicate_detection_service import DuplicateDetector
 from ...libs.utils.text_utils import normalize_text, detect_language
 
 logger = logging.getLogger(__name__)
@@ -440,6 +441,27 @@ class DatabaseIngestAdapter(IngestAdapter):
                 text_parts.append(f"{col}: {value}")
         
         return ' '.join(text_parts)
+
+
+def process_and_save_documents(documents: List[Dict[str, Any]], processed_dir: Path) -> int:
+    """
+    Process documents (remove duplicates) and save to processed directory.
+
+    Args:
+        documents: List of document dictionaries
+        processed_dir: Directory to save processed text files
+
+    Returns:
+        Number of successfully saved files
+    """
+    # Remove duplicates
+    detector = DuplicateDetector()
+    unique_documents = detector.remove_duplicates(documents)
+
+    logger.info(f"After duplicate removal: {len(unique_documents)} unique documents from {len(documents)} total")
+
+    # Save processed documents
+    return save_processed_text(unique_documents, processed_dir)
 
 
 def save_processed_text(documents: List[Dict[str, Any]], processed_dir: Path) -> int:
