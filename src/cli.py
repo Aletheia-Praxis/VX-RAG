@@ -287,11 +287,14 @@ def main() -> None:
     elif args.command == "query":
         print(f"Querying: {args.query}")
         try:
+            import asyncio
             import yaml
             from pathlib import Path
             from rag.services.vectordb_service.service import VectorStoreClient
             from rag.services.retriever_service.service import RetrieverService
+            from rag.services.reranker_service.service import RerankerService
             from rag.services.embedder_service.service import EmbeddingService
+            from rag.services.hybrid_search_service.service import HybridSearchService
             
             # Load configuration
             query_config: dict[str, Any] = {}
@@ -316,12 +319,26 @@ def main() -> None:
                 sys.exit(1)
             
             # Initialize retriever
-            retriever = RetrieverService(index=vector_client.index)
+            retriever_service = RetrieverService(index=vector_client.index, config_path=args.config)
             if vector_client.index:
-                retriever.set_index(vector_client.index)
+                retriever_service.set_index(vector_client.index)
+
+            # Initialize reranker
+            reranker_service = RerankerService(config_path=args.config)
+
+            # Initialize hybrid search orchestrator
+            hybrid_search_service = HybridSearchService(
+                retriever_service=retriever_service,
+                reranker_service=reranker_service,
+                hybrid_alpha=query_config.get('hybrid_alpha', 0.5)
+            )
             
-            # Retrieve documents
-            retrieved_docs = retriever.retrieve(args.query, top_k=5)
+            # Asynchronously retrieve documents
+            async def do_search():
+                return await hybrid_search_service.asearch(args.query, top_k=5)
+
+            retrieved_docs = asyncio.run(do_search())
+            
             if not retrieved_docs:
                 print("No relevant documents found.")
                 sys.exit(0)
@@ -330,8 +347,8 @@ def main() -> None:
             print(f"\nQuery: {args.query}")
             print("\nTop Results:")
             for i, source in enumerate(retrieved_docs, 1):
-                print(f"{i}. Score: {source['score']:.3f}")
-                print(f"   Text: {source['text'][:200]}...")
+                print(f"{i}. Score: {source.get('score', 0.0):.3f}")
+                print(f"   Text: {source.get('text', '')[:200]}...")
                 print()
             
         except Exception as e:
