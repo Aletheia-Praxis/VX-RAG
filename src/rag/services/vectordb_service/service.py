@@ -152,16 +152,43 @@ class VectorStoreClient:
                 backup_name = f"backup_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}"
                 self.create_snapshot(backup_name, embed_model_info, chunking_params)
             
-            self.index.storage_context.persist(persist_dir=str(self.index_dir))
-            logger.info(f"Index saved to {self.index_dir}")
+            # Custom JSON encoder to handle non-serializable objects
+            import json
+            from llama_index.core.schema import RelatedNodeInfo
+            
+            class CustomJSONEncoder(json.JSONEncoder):
+                def default(self, obj):
+                    if isinstance(obj, RelatedNodeInfo):
+                        # Convert RelatedNodeInfo to a string representation to avoid unhashable issues
+                        return f"RelatedNodeInfo(node_id={obj.node_id})"
+                    # Handle other non-serializable objects
+                    try:
+                        return str(obj)
+                    except:
+                        return f"<{type(obj).__name__} object>"
+            
+            # Temporarily patch json.dumps to use our custom encoder
+            original_dumps = json.dumps
+            json.dumps = lambda obj, **kwargs: original_dumps(obj, cls=CustomJSONEncoder, **kwargs)
+            
+            try:
+                self.index.storage_context.persist(persist_dir=str(self.index_dir))
+                logger.info(f"Index saved to {self.index_dir}")
+            finally:
+                # Restore original json.dumps
+                json.dumps = original_dumps
+                
         except Exception as e:
             logger.error(f"Failed to save index: {e}")
             raise
     
-    def load_index(self) -> bool:
+    def load_index(self, embed_model: Optional[Any] = None) -> bool:
         """
         Load the index from disk.
         
+        Args:
+            embed_model: Embedding model to use for the index
+            
         Returns:
             True if loading succeeded, False otherwise
         """
@@ -170,21 +197,61 @@ class VectorStoreClient:
             return False
 
         try:
-            # Load storage context
-            storage_context = StorageContext.from_defaults(persist_dir=str(self.index_dir))
-
-            # Load index
-            self.index = cast(VectorStoreIndex, load_index_from_storage(storage_context))
-            
-            # Try to get direct access to FAISS index from vector store
+            # Try to load using LlamaIndex's standard method with embed_model
             try:
-                # Note: Direct FAISS access may not be available through LlamaIndex API
-                # We'll use LlamaIndex methods for operations
-                logger.info("Using LlamaIndex API for vector operations")
+                storage_context = StorageContext.from_defaults(persist_dir=str(self.index_dir))
+                self.index = cast(VectorStoreIndex, load_index_from_storage(storage_context, embed_model=embed_model))
+                logger.info(f"Index loaded from {self.index_dir} using standard method")
+                return True
             except Exception as e:
-                logger.warning(f"Could not access FAISS index directly: {e}")
+                logger.warning(f"Standard loading failed: {e}, trying alternative method")
             
-            logger.info(f"Index loaded from {self.index_dir}")
+            # Alternative method: Load FAISS index directly and reconstruct
+            faiss_index_path = self.index_dir / "default__vector_store.json"
+            docstore_path = self.index_dir / "docstore.json"
+            index_store_path = self.index_dir / "index_store.json"
+            
+            if not faiss_index_path.exists():
+                logger.error(f"FAISS index file not found: {faiss_index_path}")
+                return False
+            
+            # Load FAISS index directly
+            import faiss
+            faiss_index = faiss.read_index(str(faiss_index_path))
+            
+            # Create vector store with loaded index
+            vector_store = FaissVectorStore(faiss_index=faiss_index)
+            
+            # Try to load docstore and index_store if they exist
+            storage_context = StorageContext.from_defaults(vector_store=vector_store)
+            
+            # Load docstore if exists
+            if docstore_path.exists():
+                try:
+                    with open(docstore_path, 'r', encoding='utf-8') as f:
+                        docstore_data = json.load(f)
+                    # Reconstruct docstore from data
+                    from llama_index.core.storage.docstore import SimpleDocumentStore
+                    storage_context.docstore = SimpleDocumentStore.from_dict(docstore_data)
+                except Exception as e:
+                    logger.warning(f"Could not load docstore: {e}")
+            
+            # Load index_store if exists  
+            if index_store_path.exists():
+                try:
+                    with open(index_store_path, 'r', encoding='utf-8') as f:
+                        index_store_data = json.load(f)
+                    # Reconstruct index_store from data
+                    from llama_index.core.storage.index_store import SimpleIndexStore
+                    storage_context.index_store = SimpleIndexStore.from_dict(index_store_data)
+                except Exception as e:
+                    logger.warning(f"Could not load index_store: {e}")
+            
+            # Create index from storage context with embed_model
+            self.index = cast(VectorStoreIndex, load_index_from_storage(storage_context, embed_model=embed_model))
+            self.faiss_index = faiss_index
+            
+            logger.info(f"Index loaded from {self.index_dir} using alternative method")
             return True
 
         except Exception as e:
@@ -293,19 +360,43 @@ class VectorStoreClient:
             snapshot_dir = self.index_dir.parent / "snapshots" / snapshot_name
             snapshot_dir.mkdir(parents=True, exist_ok=True)
             
-            # Persist the index
-            self.index.storage_context.persist(persist_dir=str(snapshot_dir))
+            # Custom JSON encoder to handle non-serializable objects
+            import json
+            from llama_index.core.schema import RelatedNodeInfo
             
-            # Create manifest.json with metadata and checksums
-            manifest = self._create_manifest(snapshot_dir, embed_model_info, chunking_params)
+            class CustomJSONEncoder(json.JSONEncoder):
+                def default(self, obj):
+                    if isinstance(obj, RelatedNodeInfo):
+                        # Convert RelatedNodeInfo to a string representation to avoid unhashable issues
+                        return f"RelatedNodeInfo(node_id={obj.node_id})"
+                    # Handle other non-serializable objects
+                    try:
+                        return str(obj)
+                    except:
+                        return f"<{type(obj).__name__} object>"
             
-            # Save manifest
-            manifest_path = snapshot_dir / "manifest.json"
-            with open(manifest_path, 'w', encoding='utf-8') as f:
-                json.dump(manifest, f, indent=2, ensure_ascii=False)
+            # Temporarily patch json.dumps to use our custom encoder
+            original_dumps = json.dumps
+            json.dumps = lambda obj, **kwargs: original_dumps(obj, cls=CustomJSONEncoder, **kwargs)
             
-            logger.info(f"Snapshot created: {snapshot_dir} with manifest.json")
-            return True
+            try:
+                # Persist the index
+                self.index.storage_context.persist(persist_dir=str(snapshot_dir))
+                
+                # Create manifest.json with metadata and checksums
+                manifest = self._create_manifest(snapshot_dir, embed_model_info, chunking_params)
+                
+                # Save manifest
+                manifest_path = snapshot_dir / "manifest.json"
+                with open(manifest_path, 'w', encoding='utf-8') as f:
+                    json.dump(manifest, f, indent=2, ensure_ascii=False)
+                
+                logger.info(f"Snapshot created: {snapshot_dir} with manifest.json")
+                return True
+            finally:
+                # Restore original json.dumps
+                json.dumps = original_dumps
+                
         except Exception as e:
             logger.error(f"Failed to create snapshot: {e}")
             return False
