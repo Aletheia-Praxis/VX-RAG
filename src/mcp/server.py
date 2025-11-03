@@ -7,6 +7,7 @@ Delegates all RAG operations to the MCP bridge for clean separation of concerns.
 
 import json
 import time
+import asyncio
 from fastmcp import FastMCP
 from pydantic import BaseModel, Field
 from .bridge import get_mcp_bridge
@@ -28,6 +29,11 @@ mcp = FastMCP(
     name="VX-RAG MCP Server"
 )
 
+# TODO: Implement rate limiting with queue mechanism
+# According to specification 7.1, implement simple queue for concurrent requests.
+# For single-user system, this is not critical and can be deferred to backlog.
+# Consider using fastapi-limiter or similar when implementing.
+
 
 # Pydantic models for tool parameters
 class QueryParams(BaseModel):
@@ -37,7 +43,7 @@ class QueryParams(BaseModel):
 
 
 @mcp.tool
-def query_documents(params: QueryParams) -> str:
+async def query_documents(params: QueryParams) -> str:
     """
     Query the RAG system for relevant documents and generate a response.
     
@@ -54,8 +60,12 @@ def query_documents(params: QueryParams) -> str:
     try:
         logger.info(f"Processing MCP query: {params.query} (top_k={params.top_k})")
         
-        # Delegate to MCP bridge
-        response = mcp_bridge.query_documents(params.query, params.top_k)
+        # Add timeout to prevent hanging (10 minutes safeguard)
+        async def _query_with_timeout():
+            return mcp_bridge.query_documents(params.query, params.top_k)
+        
+        # Execute with timeout
+        response = await asyncio.wait_for(_query_with_timeout(), timeout=600.0)  # 10 minutes
         
         # Convert to JSON string for MCP response
         json_response = json.dumps(response, indent=2, ensure_ascii=False)
@@ -72,6 +82,18 @@ def query_documents(params: QueryParams) -> str:
                    duration_ms=duration * 1000)
         
         return json_response
+        
+    except asyncio.TimeoutError:
+        duration = time.time() - start_time
+        logger.error(f"MCP query timed out after 10 minutes: {params.query}", 
+                    query=params.query, 
+                    duration_ms=duration * 1000)
+        error_response = {
+            "error": "Query processing timed out after 10 minutes",
+            "query": params.query,
+            "sources": []
+        }
+        return json.dumps(error_response, indent=2, ensure_ascii=False)
         
     except Exception as e:
         duration = time.time() - start_time
