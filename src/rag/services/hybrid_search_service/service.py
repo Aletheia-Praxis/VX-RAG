@@ -55,7 +55,7 @@ class HybridSearchService:
         vector_results, bm25_results = await asyncio.gather(vector_task, bm25_task)
 
         # Combine results
-        combined_results = self._combine_results(vector_results, bm25_results)
+        combined_results = self._combine_results(vector_results, bm25_results, self.hybrid_alpha)
 
         # Rerank if reranker is available
         if self.reranker_service:
@@ -69,26 +69,72 @@ class HybridSearchService:
         self,
         vector_results: List[Dict[str, Any]],
         bm25_results: List[Dict[str, Any]],
+        hybrid_alpha: float,
     ) -> List[Dict[str, Any]]:
         """
-        Combine results from vector and BM25 search using reciprocal rank fusion.
+        Combine results from vector and BM25 search using hybrid alpha weighting.
+        
+        Args:
+            vector_results: Results from vector search
+            bm25_results: Results from BM25 search  
+            hybrid_alpha: Weight for vector search (0.0 = BM25 only, 1.0 = vector only)
+        
+        Returns:
+            Combined and ranked results
         """
+        # Create lookup dicts by node_id
+        vector_dict = {doc['node_id']: doc for doc in vector_results}
+        bm25_dict = {doc['node_id']: doc for doc in bm25_results}
         
-        all_docs = {}
-        for doc in vector_results:
-            all_docs[doc['node_id']] = doc
-        for doc in bm25_results:
-            if doc['node_id'] not in all_docs:
-                all_docs[doc['node_id']] = doc
-
-        # Simple combination and de-duplication
-        # A more sophisticated fusion method could be used here.
-        combined = list(all_docs.values())
+        # Combine all unique documents
+        all_node_ids = set(vector_dict.keys()) | set(bm25_dict.keys())
+        combined = []
         
-        # Sort by score as a default ranking before reranking
+        for node_id in all_node_ids:
+            vector_doc = vector_dict.get(node_id)
+            bm25_doc = bm25_dict.get(node_id)
+            
+            if vector_doc and bm25_doc:
+                # Document found in both results - combine scores
+                vector_score = vector_doc.get('score', 0.0)
+                bm25_score = bm25_doc.get('score', 0.0)
+                
+                # Normalize BM25 score (BM25 can be > 1, vector is typically 0-1)
+                # Simple normalization: scale BM25 to 0-1 range based on max score
+                max_bm25 = max((doc.get('score', 0.0) for doc in bm25_results), default=1.0)
+                normalized_bm25 = bm25_score / max_bm25 if max_bm25 > 0 else 0.0
+                
+                # Combine scores using hybrid_alpha
+                combined_score = hybrid_alpha * vector_score + (1 - hybrid_alpha) * normalized_bm25
+                
+                combined_doc = vector_doc.copy()
+                combined_doc['score'] = combined_score
+                combined_doc['vector_score'] = vector_score
+                combined_doc['bm25_score'] = bm25_score
+                combined.append(combined_doc)
+                
+            elif vector_doc:
+                # Only in vector results
+                combined_doc = vector_doc.copy()
+                combined_doc['score'] = hybrid_alpha * vector_doc.get('score', 0.0)
+                combined_doc['vector_score'] = vector_doc.get('score', 0.0)
+                combined_doc['bm25_score'] = 0.0
+                combined.append(combined_doc)
+                
+            elif bm25_doc:
+                # Only in BM25 results
+                max_bm25 = max((doc.get('score', 0.0) for doc in bm25_results), default=1.0)
+                normalized_bm25 = bm25_doc.get('score', 0.0) / max_bm25 if max_bm25 > 0 else 0.0
+                combined_doc = bm25_doc.copy()
+                combined_doc['score'] = (1 - hybrid_alpha) * normalized_bm25
+                combined_doc['vector_score'] = 0.0
+                combined_doc['bm25_score'] = bm25_doc.get('score', 0.0)
+                combined.append(combined_doc)
+        
+        # Sort by combined score
         combined.sort(key=lambda x: x.get('score', 0.0), reverse=True)
-
-        logger.info(f"Combined {len(vector_results)} vector results and {len(bm25_results)} BM25 results into {len(combined)} unique results.")
+        
+        logger.info(f"Combined {len(vector_results)} vector and {len(bm25_results)} BM25 results into {len(combined)} documents using alpha={hybrid_alpha}")
         return combined
 
     def shutdown(self) -> None:
