@@ -201,8 +201,8 @@ def main() -> None:
             print(f"  Duplicates removed: {len(all_docs) - len(unique_docs)}")
             print(f"  Unique documents: {len(unique_docs)}")
             print(f"  Chunks created: {len(chunks)}")
-            print(f"  Vector index: Created/Updated")
-            print(f"  BM25 index: Built for hybrid search")
+            print("  Vector index: Created/Updated")
+            print("  BM25 index: Built for hybrid search")
             print(f"  Duration: {duration:.2f} seconds")
             
         except Exception as e:
