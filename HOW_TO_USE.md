@@ -111,4 +111,14 @@ The server provides:
 - **Reranking**: Automatic improvement of search results
 - **Batch Processing**: For large document collections
 
+## Known Limitations and Future Improvements
+
+### Rate Limiting
+
+The current implementation does not include rate limiting or request queuing. For single-user local deployment, this is not a critical issue. Implementation of a queue mechanism for concurrent requests is planned for future releases.
+
+### Request Timeouts
+
+To prevent client hanging, requests are automatically timed out after 10 minutes. This is a safeguard measure - normal queries should complete much faster.
+
 For more information, see `README.md` and the configuration in `config/settings.yaml`.
