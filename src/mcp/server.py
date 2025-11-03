@@ -8,6 +8,7 @@ Delegates all RAG operations to the MCP bridge for clean separation of concerns.
 import json
 import time
 import asyncio
+from typing import Dict, Any
 from fastmcp import FastMCP
 from pydantic import BaseModel, Field
 from .bridge import get_mcp_bridge
@@ -61,7 +62,7 @@ async def query_documents(params: QueryParams) -> str:
         logger.info(f"Processing MCP query: {params.query} (top_k={params.top_k})")
         
         # Add timeout to prevent hanging (10 minutes safeguard)
-        async def _query_with_timeout():
+        async def _query_with_timeout() -> Dict[str, Any]:
             return mcp_bridge.query_documents(params.query, params.top_k)
         
         # Execute with timeout
