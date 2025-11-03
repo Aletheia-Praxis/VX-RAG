@@ -8,7 +8,7 @@ import argparse
 import sys
 import time
 
-from typing import Any
+from typing import Any, List, Dict, cast
 
 # Import structured logging and metrics
 from src.utils.logging_config import get_logger, log_index_event
@@ -344,8 +344,9 @@ def main() -> None:
             )
             
             # Asynchronously retrieve documents
-            async def do_search():
-                return await hybrid_search_service.asearch(args.query, top_k=5)
+            async def do_search() -> List[Dict[str, Any]]:
+                result = await hybrid_search_service.asearch(args.query, top_k=5)
+                return cast(List[Dict[str, Any]], result)
 
             retrieved_docs = asyncio.run(do_search())
             
