@@ -11,8 +11,8 @@ import time
 from typing import Any
 
 # Import structured logging and metrics
-from utils.logging_config import get_logger, log_index_event
-from utils.metrics import get_metrics
+from src.utils.logging_config import get_logger, log_index_event
+from src.utils.metrics import get_metrics
 
 logger = get_logger("cli")
 metrics = get_metrics()
@@ -177,6 +177,14 @@ def main() -> None:
                 logger.error("Index creation failed: build_index returned None")
                 sys.exit(1)
             
+            # Step 6: Build BM25 index for hybrid search
+            print("Step 6: Building BM25 index for hybrid search...")
+            from rag.services.retriever_service.service import RetrieverService
+            
+            retriever_service = RetrieverService(index=index, config_path=args.config)
+            retriever_service.build_bm25_index(llama_docs)
+            print("BM25 index built for hybrid search")
+            
             duration = time.time() - start_time
             log_index_event("full_ingestion", len(unique_docs), duration)
             metrics.increment("ingestion_full_pipeline_total")
@@ -193,6 +201,8 @@ def main() -> None:
             print(f"  Duplicates removed: {len(all_docs) - len(unique_docs)}")
             print(f"  Unique documents: {len(unique_docs)}")
             print(f"  Chunks created: {len(chunks)}")
+            print(f"  Vector index: Created/Updated")
+            print(f"  BM25 index: Built for hybrid search")
             print(f"  Duration: {duration:.2f} seconds")
             
         except Exception as e:
