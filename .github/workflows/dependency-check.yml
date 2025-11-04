@@ -19,18 +19,32 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: '3.13'
-      - name: Install dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install -r requirements.txt
       - name: Check outdated packages
-        run: pip list --outdated --format=json > outdated.json
-      - name: Analyze and create issue if needed
         uses: actions/github-script@v7
         with:
           script: |
             const fs = require('fs');
-            const outdated = JSON.parse(fs.readFileSync('outdated.json', 'utf8'));
+            const https = require('https');
+            
+            // Function to get latest version from PyPI
+            function getLatestVersion(packageName) {
+              return new Promise((resolve, reject) => {
+                const url = `https://pypi.org/pypi/${packageName}/json`;
+                https.get(url, (res) => {
+                  let data = '';
+                  res.on('data', (chunk) => data += chunk);
+                  res.on('end', () => {
+                    try {
+                      const json = JSON.parse(data);
+                      resolve(json.info.version);
+                    } catch (e) {
+                      reject(e);
+                    }
+                  });
+                }).on('error', reject);
+              });
+            }
+            
             // Parse requirements.txt
             const requirements = fs.readFileSync('requirements.txt', 'utf8').split('\n').filter(line => line.trim() && !line.startsWith('#'));
             const deps = {};
@@ -38,29 +52,37 @@ jobs:
               const match = line.match(/^([a-zA-Z0-9\-_]+)(.*)$/);
               if (match) {
                 const pkg = match[1];
-                const versionSpec = match[2];
+                const versionSpec = match[2].trim();
                 deps[pkg] = versionSpec;
               }
             });
+            
             let issues = [];
-            outdated.forEach(pkg => {
-              const name = pkg.name;
-              if (deps[name]) {
+            const promises = Object.keys(deps).map(async (name) => {
+              try {
+                const latest = await getLatestVersion(name);
                 const currentSpec = deps[name];
-                const latest = pkg.latest_version;
-                // Extract version from spec, assuming ~=X.Y.Z format or >=X.Y.Z
-                const versionMatch = currentSpec.match(/(?:~=|>=)(\d+\.\d+\.\d+)/);
+                let currentVersion = null;
+                
+                // Extract version from spec: ==X.Y.Z, ~=X.Y.Z, >=X.Y.Z, etc.
+                const versionMatch = currentSpec.match(/(?:==|~=|>=|<=|>|<)(\d+\.\d+\.\d+)/);
                 if (versionMatch) {
-                  const current = versionMatch[1];
-                  const currentParts = current.split('.').map(Number);
+                  currentVersion = versionMatch[1];
+                  const currentParts = currentVersion.split('.').map(Number);
                   const latestParts = latest.split('.').map(Number);
+                  
                   // Check if major or minor version differs
                   if (latestParts[0] > currentParts[0] || (latestParts[0] === currentParts[0] && latestParts[1] > currentParts[1])) {
-                    issues.push(`${name}: ${current} -> ${latest}`);
+                    issues.push(`${name}: ${currentVersion} -> ${latest}`);
                   }
                 }
+              } catch (e) {
+                console.log(`Failed to check ${name}: ${e.message}`);
               }
             });
+            
+            await Promise.all(promises);
+            
             if (issues.length > 0) {
               const title = 'Outdated Dependencies Detected';
               // Check if issue already exists
