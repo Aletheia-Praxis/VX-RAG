@@ -1,0 +1,73 @@
+name: Dependency Check
+
+on:
+  schedule:
+    - cron: '0 0 1 * *'  # Monthly on the 1st day at 00:00 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  check-dependencies:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+      - name: Check outdated packages
+        run: pip list --outdated --format=json > outdated.json
+      - name: Analyze and create issue if needed
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const outdated = JSON.parse(fs.readFileSync('outdated.json', 'utf8'));
+            // Parse requirements.txt
+            const requirements = fs.readFileSync('requirements.txt', 'utf8').split('\n').filter(line => line.trim() && !line.startsWith('#'));
+            const deps = {};
+            requirements.forEach(line => {
+              const match = line.match(/^([a-zA-Z0-9\-_]+)(.*)$/);
+              if (match) {
+                const pkg = match[1];
+                const versionSpec = match[2];
+                deps[pkg] = versionSpec;
+              }
+            });
+            let issues = [];
+            outdated.forEach(pkg => {
+              const name = pkg.name;
+              if (deps[name]) {
+                const currentSpec = deps[name];
+                const latest = pkg.latest_version;
+                // Extract version from spec, assuming ~=X.Y.Z format
+                const versionMatch = currentSpec.match(/~=(\d+\.\d+\.\d+)/);
+                if (versionMatch) {
+                  const current = versionMatch[1];
+                  const currentParts = current.split('.').map(Number);
+                  const latestParts = latest.split('.').map(Number);
+                  // Check if major or minor version differs
+                  if (latestParts[0] > currentParts[0] || (latestParts[0] === currentParts[0] && latestParts[1] > currentParts[1])) {
+                    issues.push(`${name}: ${current} -> ${latest}`);
+                  }
+                }
+              }
+            });
+            if (issues.length > 0) {
+              const body = `The following dependencies are significantly outdated (major or minor version changes):\n\n${issues.map(i => `- ${i}`).join('\n')}\n\nPlease update requirements.txt accordingly.`;
+              await github.rest.issues.create({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                title: 'Outdated Dependencies Detected',
+                body: body,
+                labels: ['dependencies', 'maintenance']
+              });
+            }
