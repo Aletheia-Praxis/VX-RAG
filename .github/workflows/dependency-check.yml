@@ -125,20 +125,26 @@ jobs:
                 state: 'open',
                 labels: ['dependencies']
               });
-              const alreadyExists = existingIssues.data.some(issue => issue.title === title);
-              console.log(`Issue already exists: ${alreadyExists}`);
-              if (!alreadyExists) {
-                const body = `The following dependencies can be safely updated (patch updates, no compatibility issues expected):\n\n${safeUpdates.map(u => `- ${u}`).join('\n')}\n\nThese updates are backward compatible and can be applied without manual compatibility checks.`;
-                console.log('Creating safe updates issue');
-                await github.rest.issues.create({
+              const existingIssue = existingIssues.data.find(issue => issue.title === title);
+              if (existingIssue) {
+                console.log(`Closing existing issue #${existingIssue.number}`);
+                await github.rest.issues.update({
                   owner: context.repo.owner,
                   repo: context.repo.repo,
-                  title: title,
-                  body: body,
-                  labels: ['dependencies', 'maintenance', 'safe-update']
+                  issue_number: existingIssue.number,
+                  state: 'closed'
                 });
-                console.log('Safe updates issue created');
               }
+              const body = `The following dependencies can be safely updated (patch updates, no compatibility issues expected):\n\n${safeUpdates.map(u => `- ${u}`).join('\n')}\n\nThese updates are backward compatible and can be applied without manual compatibility checks.`;
+              console.log('Creating safe updates issue');
+              await github.rest.issues.create({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                title: title,
+                body: body,
+                labels: ['dependencies', 'maintenance', 'safe-update']
+              });
+              console.log('Safe updates issue created');
             }
             
             // Create issue for compatibility checks (minor/major)
@@ -151,18 +157,24 @@ jobs:
                 state: 'open',
                 labels: ['dependencies']
               });
-              const alreadyExists = existingIssues.data.some(issue => issue.title === title);
-              console.log(`Issue already exists: ${alreadyExists}`);
-              if (!alreadyExists) {
-                const body = `The following dependencies have minor or major version updates available and require manual compatibility checks:\n\n${compatibilityChecks.map(u => `- ${u}`).join('\n')}\n\nThese updates may introduce breaking changes (e.g., 1.3.* to 1.4.*). Please review the changelog and test thoroughly before updating.`;
-                console.log('Creating compatibility check issue');
-                await github.rest.issues.create({
+              const existingIssue = existingIssues.data.find(issue => issue.title === title);
+              if (existingIssue) {
+                console.log(`Closing existing issue #${existingIssue.number}`);
+                await github.rest.issues.update({
                   owner: context.repo.owner,
                   repo: context.repo.repo,
-                  title: title,
-                  body: body,
-                  labels: ['dependencies', 'maintenance', 'compatibility-check']
+                  issue_number: existingIssue.number,
+                  state: 'closed'
                 });
-                console.log('Compatibility check issue created');
               }
+              const body = `The following dependencies have minor or major version updates available and require manual compatibility checks:\n\n${compatibilityChecks.map(u => `- ${u}`).join('\n')}\n\nThese updates may introduce breaking changes (e.g., 1.3.* to 1.4.*). Please review the changelog and test thoroughly before updating.`;
+              console.log('Creating compatibility check issue');
+              await github.rest.issues.create({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                title: title,
+                body: body,
+                labels: ['dependencies', 'maintenance', 'compatibility-check']
+              });
+              console.log('Compatibility check issue created');
             }
