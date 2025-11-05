@@ -133,6 +133,20 @@ jobs:
             });
             const existingTitles = existingIssues.data.map(issue => issue.title);
             
+            // Helper function to close issue if exists
+            async function closeIssueIfExists(title) {
+              if (existingTitles.includes(title)) {
+                const existingIssue = existingIssues.data.find(issue => issue.title === title);
+                console.log(`Closing outdated issue #${existingIssue.number}: ${title}`);
+                await github.rest.issues.update({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  issue_number: existingIssue.number,
+                  state: 'closed'
+                });
+              }
+            }
+            
             // Create issue for safe updates (patch)
             if (safeUpdates.length > 0) {
               const title = 'Safe Dependency Updates Available';
@@ -157,6 +171,9 @@ jobs:
                 labels: ['dependencies', 'maintenance', 'safe-update']
               });
               console.log('Safe updates issue created');
+            } else {
+              // No safe updates, close any existing safe updates issue
+              await closeIssueIfExists('Safe Dependency Updates Available');
             }
             
             // Create issue for compatibility checks (minor/major)
@@ -183,4 +200,7 @@ jobs:
                 labels: ['dependencies', 'maintenance', 'compatibility-check']
               });
               console.log('Compatibility check issue created');
+            } else {
+              // No compatibility checks needed, close any existing compatibility check issue
+              await closeIssueIfExists('Dependency Updates Requiring Compatibility Check');
             }
