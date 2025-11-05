@@ -67,6 +67,7 @@ jobs:
             
             // Parse requirements.txt
             const requirements = fs.readFileSync('requirements.txt', 'utf8').split('\n').filter(line => line.trim() && !line.startsWith('#'));
+            console.log(`Found ${requirements.length} requirement lines`);
             const deps = {};
             requirements.forEach(line => {
               const match = line.match(/^([a-zA-Z0-9\-_]+)(.*)$/);
@@ -76,6 +77,7 @@ jobs:
                 deps[pkg] = versionSpec;
               }
             });
+            console.log(`Parsed ${Object.keys(deps).length} dependencies`);
             
             const safeUpdates = []; // patch updates
             const compatibilityChecks = []; // minor/major updates
@@ -85,7 +87,10 @@ jobs:
                 const latest = await getLatestVersion(name);
                 const spec = deps[name];
                 const parsed = parseVersionSpec(spec);
-                if (!parsed) return;
+                if (!parsed) {
+                  console.log(`Failed to parse spec for ${name}: ${spec}`);
+                  return;
+                }
                 
                 const currentParts = parsed.version.split('.').map(Number);
                 const latestParts = latest.split('.').map(Number);
@@ -94,6 +99,7 @@ jobs:
                 if (!updateType) return; // No update needed
                 
                 const updateInfo = `${name}: ${parsed.version} → ${latest} (spec: ${spec})`;
+                console.log(`Found update: ${updateInfo} type: ${updateType}`);
                 
                 if (updateType === 'patch') {
                   safeUpdates.push(updateInfo);
@@ -107,9 +113,12 @@ jobs:
             
             await Promise.all(promises);
             
+            console.log(`Safe updates: ${safeUpdates.length}, Compatibility checks: ${compatibilityChecks.length}`);
+            
             // Create issue for safe updates (patch)
             if (safeUpdates.length > 0) {
               const title = 'Safe Dependency Updates Available';
+              console.log(`Checking for existing issue: ${title}`);
               const existingIssues = await github.rest.issues.listForRepo({
                 owner: context.repo.owner,
                 repo: context.repo.repo,
@@ -117,8 +126,10 @@ jobs:
                 labels: ['dependencies']
               });
               const alreadyExists = existingIssues.data.some(issue => issue.title === title);
+              console.log(`Issue already exists: ${alreadyExists}`);
               if (!alreadyExists) {
                 const body = `The following dependencies can be safely updated (patch updates, no compatibility issues expected):\n\n${safeUpdates.map(u => `- ${u}`).join('\n')}\n\nThese updates are backward compatible and can be applied without manual compatibility checks.`;
+                console.log('Creating safe updates issue');
                 await github.rest.issues.create({
                   owner: context.repo.owner,
                   repo: context.repo.repo,
@@ -126,12 +137,14 @@ jobs:
                   body: body,
                   labels: ['dependencies', 'maintenance', 'safe-update']
                 });
+                console.log('Safe updates issue created');
               }
             }
             
             // Create issue for compatibility checks (minor/major)
             if (compatibilityChecks.length > 0) {
               const title = 'Dependency Updates Requiring Compatibility Check';
+              console.log(`Checking for existing issue: ${title}`);
               const existingIssues = await github.rest.issues.listForRepo({
                 owner: context.repo.owner,
                 repo: context.repo.repo,
@@ -139,8 +152,10 @@ jobs:
                 labels: ['dependencies']
               });
               const alreadyExists = existingIssues.data.some(issue => issue.title === title);
+              console.log(`Issue already exists: ${alreadyExists}`);
               if (!alreadyExists) {
                 const body = `The following dependencies have minor or major version updates available and require manual compatibility checks:\n\n${compatibilityChecks.map(u => `- ${u}`).join('\n')}\n\nThese updates may introduce breaking changes (e.g., 1.3.* to 1.4.*). Please review the changelog and test thoroughly before updating.`;
+                console.log('Creating compatibility check issue');
                 await github.rest.issues.create({
                   owner: context.repo.owner,
                   repo: context.repo.repo,
@@ -148,5 +163,6 @@ jobs:
                   body: body,
                   labels: ['dependencies', 'maintenance', 'compatibility-check']
                 });
+                console.log('Compatibility check issue created');
               }
             }
