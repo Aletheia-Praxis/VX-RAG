@@ -45,6 +45,26 @@ jobs:
               });
             }
             
+            // Function to parse version spec and extract current version
+            function parseVersionSpec(spec) {
+              const match = spec.match(/(==|~=|>=|<=|>|<)?(\d+\.\d+\.\d+)/);
+              if (match) {
+                return {
+                  operator: match[1] || '==',
+                  version: match[2]
+                };
+              }
+              return null;
+            }
+            
+            // Function to determine update type
+            function getUpdateType(currentParts, latestParts) {
+              if (latestParts[0] > currentParts[0]) return 'major';
+              if (latestParts[1] > currentParts[1]) return 'minor';
+              if (latestParts[2] > currentParts[2]) return 'patch';
+              return null;
+            }
+            
             // Parse requirements.txt
             const requirements = fs.readFileSync('requirements.txt', 'utf8').split('\n').filter(line => line.trim() && !line.startsWith('#'));
             const deps = {};
@@ -57,24 +77,28 @@ jobs:
               }
             });
             
-            let issues = [];
+            const safeUpdates = []; // patch updates
+            const compatibilityChecks = []; // minor/major updates
+            
             const promises = Object.keys(deps).map(async (name) => {
               try {
                 const latest = await getLatestVersion(name);
-                const currentSpec = deps[name];
-                let currentVersion = null;
+                const spec = deps[name];
+                const parsed = parseVersionSpec(spec);
+                if (!parsed) return;
                 
-                // Extract version from spec: ==X.Y.Z, ~=X.Y.Z, >=X.Y.Z, etc.
-                const versionMatch = currentSpec.match(/(?:==|~=|>=|<=|>|<)(\d+\.\d+\.\d+)/);
-                if (versionMatch) {
-                  currentVersion = versionMatch[1];
-                  const currentParts = currentVersion.split('.').map(Number);
-                  const latestParts = latest.split('.').map(Number);
-                  
-                  // Check if major or minor version differs
-                  if (latestParts[0] > currentParts[0] || (latestParts[0] === currentParts[0] && latestParts[1] > currentParts[1])) {
-                    issues.push(`${name}: ${currentVersion} -> ${latest}`);
-                  }
+                const currentParts = parsed.version.split('.').map(Number);
+                const latestParts = latest.split('.').map(Number);
+                
+                const updateType = getUpdateType(currentParts, latestParts);
+                if (!updateType) return; // No update needed
+                
+                const updateInfo = `${name}: ${parsed.version} → ${latest} (spec: ${spec})`;
+                
+                if (updateType === 'patch') {
+                  safeUpdates.push(updateInfo);
+                } else {
+                  compatibilityChecks.push(updateInfo);
                 }
               } catch (e) {
                 console.log(`Failed to check ${name}: ${e.message}`);
@@ -83,9 +107,9 @@ jobs:
             
             await Promise.all(promises);
             
-            if (issues.length > 0) {
-              const title = 'Outdated Dependencies Detected';
-              // Check if issue already exists
+            // Create issue for safe updates (patch)
+            if (safeUpdates.length > 0) {
+              const title = 'Safe Dependency Updates Available';
               const existingIssues = await github.rest.issues.listForRepo({
                 owner: context.repo.owner,
                 repo: context.repo.repo,
@@ -94,13 +118,35 @@ jobs:
               });
               const alreadyExists = existingIssues.data.some(issue => issue.title === title);
               if (!alreadyExists) {
-                const body = `The following dependencies are significantly outdated (major or minor version changes):\n\n${issues.map(i => `- ${i}`).join('\n')}\n\nPlease update requirements.txt accordingly.`;
+                const body = `The following dependencies can be safely updated (patch updates, no compatibility issues expected):\n\n${safeUpdates.map(u => `- ${u}`).join('\n')}\n\nThese updates are backward compatible and can be applied without manual compatibility checks.`;
                 await github.rest.issues.create({
                   owner: context.repo.owner,
                   repo: context.repo.repo,
                   title: title,
                   body: body,
-                  labels: ['dependencies', 'maintenance']
+                  labels: ['dependencies', 'maintenance', 'safe-update']
+                });
+              }
+            }
+            
+            // Create issue for compatibility checks (minor/major)
+            if (compatibilityChecks.length > 0) {
+              const title = 'Dependency Updates Requiring Compatibility Check';
+              const existingIssues = await github.rest.issues.listForRepo({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                state: 'open',
+                labels: ['dependencies']
+              });
+              const alreadyExists = existingIssues.data.some(issue => issue.title === title);
+              if (!alreadyExists) {
+                const body = `The following dependencies have minor or major version updates available and require manual compatibility checks:\n\n${compatibilityChecks.map(u => `- ${u}`).join('\n')}\n\nThese updates may introduce breaking changes (e.g., 1.3.* to 1.4.*). Please review the changelog and test thoroughly before updating.`;
+                await github.rest.issues.create({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  title: title,
+                  body: body,
+                  labels: ['dependencies', 'maintenance', 'compatibility-check']
                 });
               }
             }
