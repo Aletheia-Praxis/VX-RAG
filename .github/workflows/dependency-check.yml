@@ -2,7 +2,7 @@ name: Dependency Check
 
 on:
   schedule:
-    - cron: '0 0 1 * *'  # Monthly on the 1st day at 00:00 UTC
+    - cron: '0 12 1-7 * 1'  # First Monday of each month at 12:00 UTC
   workflow_dispatch:
 
 permissions:
