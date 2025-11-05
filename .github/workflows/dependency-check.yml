@@ -22,23 +22,36 @@ jobs:
             const fs = require('fs');
             const https = require('https');
             
-            // Function to get latest version from PyPI
-            function getLatestVersion(packageName) {
-              return new Promise((resolve, reject) => {
-                const url = `https://pypi.org/pypi/${packageName}/json`;
-                https.get(url, (res) => {
-                  let data = '';
-                  res.on('data', (chunk) => data += chunk);
-                  res.on('end', () => {
-                    try {
-                      const json = JSON.parse(data);
-                      resolve(json.info.version);
-                    } catch (e) {
-                      reject(e);
-                    }
+            // Function to get latest version from PyPI with retry
+            async function getLatestVersion(packageName, retries = 3) {
+              for (let i = 0; i < retries; i++) {
+                try {
+                  return await new Promise((resolve, reject) => {
+                    const url = `https://pypi.org/pypi/${packageName}/json`;
+                    const req = https.get(url, { timeout: 10000 }, (res) => {
+                      let data = '';
+                      res.on('data', (chunk) => data += chunk);
+                      res.on('end', () => {
+                        try {
+                          const json = JSON.parse(data);
+                          resolve(json.info.version);
+                        } catch (e) {
+                          reject(e);
+                        }
+                      });
+                    });
+                    req.on('timeout', () => {
+                      req.destroy();
+                      reject(new Error('Request timeout'));
+                    });
+                    req.on('error', reject);
                   });
-                }).on('error', reject);
-              });
+                } catch (e) {
+                  if (i === retries - 1) throw e;
+                  console.log(`Retry ${i + 1} for ${packageName}: ${e.message}`);
+                  await new Promise(resolve => setTimeout(resolve, 1000 * (i + 1))); // Exponential backoff
+                }
+              }
             }
             
             // Function to parse version spec and extract current version
@@ -111,18 +124,21 @@ jobs:
             
             console.log(`Safe updates: ${safeUpdates.length}, Compatibility checks: ${compatibilityChecks.length}`);
             
+            // Get all existing open issues with dependencies label once
+            const existingIssues = await github.rest.issues.listForRepo({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              state: 'open',
+              labels: ['dependencies']
+            });
+            const existingTitles = existingIssues.data.map(issue => issue.title);
+            
             // Create issue for safe updates (patch)
             if (safeUpdates.length > 0) {
               const title = 'Safe Dependency Updates Available';
               console.log(`Checking for existing issue: ${title}`);
-              const existingIssues = await github.rest.issues.listForRepo({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                state: 'open',
-                labels: ['dependencies']
-              });
-              const existingIssue = existingIssues.data.find(issue => issue.title === title);
-              if (existingIssue) {
+              if (existingTitles.includes(title)) {
+                const existingIssue = existingIssues.data.find(issue => issue.title === title);
                 console.log(`Closing existing issue #${existingIssue.number}`);
                 await github.rest.issues.update({
                   owner: context.repo.owner,
@@ -147,14 +163,8 @@ jobs:
             if (compatibilityChecks.length > 0) {
               const title = 'Dependency Updates Requiring Compatibility Check';
               console.log(`Checking for existing issue: ${title}`);
-              const existingIssues = await github.rest.issues.listForRepo({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                state: 'open',
-                labels: ['dependencies']
-              });
-              const existingIssue = existingIssues.data.find(issue => issue.title === title);
-              if (existingIssue) {
+              if (existingTitles.includes(title)) {
+                const existingIssue = existingIssues.data.find(issue => issue.title === title);
                 console.log(`Closing existing issue #${existingIssue.number}`);
                 await github.rest.issues.update({
                   owner: context.repo.owner,
