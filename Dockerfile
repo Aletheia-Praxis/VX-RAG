@@ -20,6 +20,15 @@ COPY config/ ./config/
 # Create data directories
 RUN mkdir -p data/raw/md data/raw/pdf data/raw/txt data/processed data/index
 
+# Create non-root user
+RUN groupadd -r appuser && useradd -r -g appuser appuser
+
+# Change ownership of the app directory
+RUN chown -R appuser:appuser /app
+
+# Switch to non-root user
+USER appuser
+
 # Expose port for MCP API
 EXPOSE 5000
 
