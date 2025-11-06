@@ -11,6 +11,7 @@ from ...libs.schemas.mcp_schemas import (
     MCPContextPayload, ContextAssemblyRequest, ContextAssemblyResponse
 )
 from ...libs.utils.token_utils import TokenBudgeter, budget_and_assemble
+from src.utils.config_loader import get_context_assembler_config
 
 logger = logging.getLogger(__name__)
 
@@ -18,16 +19,36 @@ logger = logging.getLogger(__name__)
 class ContextAssembler:
     """Service for assembling MCP-compatible context for LLM queries."""
     
-    def __init__(self, token_budget: int = 2048, model_name: str = "gpt-3.5-turbo"):
+    def __init__(
+        self, 
+        token_budget: Optional[int] = None,
+        model_name: Optional[str] = None,
+        config_path: Optional[str] = None
+    ):
         """
         Initialize context assembler.
         
         Args:
-            token_budget: Default token budget for context
-            model_name: Model name for token counting
+            token_budget: Default token budget for context. If None, loads from config.
+            model_name: Model name for token counting. If None, loads from config.
+            config_path: Path to settings.yaml. If None, uses default location.
         """
+        # Load config if parameters not provided
+        if token_budget is None or model_name is None:
+            config = get_context_assembler_config(config_path)
+            token_budget = token_budget or config['token_budget']
+            model_name = model_name or config['model_name']
+        
+        # Ensure values are set
+        assert token_budget is not None, "token_budget must be set"
+        assert model_name is not None, "model_name must be set"
+        
         self.default_token_budget = token_budget
         self.token_budgeter = TokenBudgeter(model_name)
+        
+        logger.info(
+            f"Initialized context assembler: token_budget={token_budget}, model={model_name}"
+        )
     
     def assemble_context(
         self,
