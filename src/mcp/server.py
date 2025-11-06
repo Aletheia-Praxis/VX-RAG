@@ -16,6 +16,7 @@ from .bridge import get_mcp_bridge
 # Import structured logging and metrics
 from src.utils.logging_config import get_logger, log_query_event, log_service_health
 from src.utils.metrics import get_metrics
+from src.utils.config_loader import get_mcp_config
 
 # Get structured logger and metrics
 logger = get_logger("mcp_server")
@@ -58,15 +59,20 @@ async def query_documents(params: QueryParams) -> str:
         JSON-formatted response with query results, LLM-generated answer, and sources
     """
     start_time = time.time()
+    
+    # Load timeout from config
+    mcp_config = get_mcp_config()
+    query_timeout = mcp_config.get('query_timeout', 600.0)
+    
     try:
         logger.info(f"Processing MCP query: {params.query} (top_k={params.top_k})")
         
-        # Add timeout to prevent hanging (10 minutes safeguard)
+        # Add timeout to prevent hanging
         async def _query_with_timeout() -> Dict[str, Any]:
             return mcp_bridge.query_documents(params.query, params.top_k)
         
-        # Execute with timeout
-        response = await asyncio.wait_for(_query_with_timeout(), timeout=600.0)  # 10 minutes
+        # Execute with timeout loaded from config
+        response = await asyncio.wait_for(_query_with_timeout(), timeout=query_timeout)
         
         # Convert to JSON string for MCP response
         json_response = json.dumps(response, indent=2, ensure_ascii=False)
@@ -86,8 +92,9 @@ async def query_documents(params: QueryParams) -> str:
         
     except asyncio.TimeoutError:
         duration = time.time() - start_time
-        logger.error(f"MCP query timed out after 10 minutes: {params.query}", 
+        logger.error(f"MCP query timed out after {query_timeout}s: {params.query}", 
                     query=params.query, 
+                    timeout=query_timeout,
                     duration_ms=duration * 1000)
         error_response = {
             "error": "Query processing timed out after 10 minutes",
