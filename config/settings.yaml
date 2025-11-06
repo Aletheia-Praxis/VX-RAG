@@ -45,12 +45,13 @@ mcp_host: "0.0.0.0"
 mcp_port: 5000
 mcp_debug: true
 
-# Logging
-log_level: "INFO"
-log_file: "vx_rag.log"
-log_format: "json"           # Options: json, text
-log_structured_events: true  # Enable structured logging for key events
-log_metrics: true            # Enable metrics logging
+# Logging configuration
+logging:
+  log_level: "INFO"
+  log_file: "logs/vx_rag.log"
+  log_format: "json"           # Options: json, text
+  log_structured_events: true  # Enable structured logging for key events
+  log_metrics: true            # Enable metrics logging
 
 # Metrics
 metrics_enabled: true
