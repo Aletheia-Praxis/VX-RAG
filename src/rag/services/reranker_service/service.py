@@ -6,49 +6,56 @@ Provides classes for re-ranking retrieved documents.
 
 from typing import List, Dict, Any, Optional, cast
 import logging
-import yaml
 
 from sentence_transformers import CrossEncoder
+from src.utils.config_loader import get_reranker_config
 
 logger = logging.getLogger(__name__)
 
 class RerankerService:
     """Service for re-ranking documents using cross-encoders."""
     
-    def __init__(self, model_name: Optional[str] = None, config_path: Optional[str] = None):
-        self.config = self._load_config(config_path)
-        if model_name is None:
-            model_name = self.config.get('model_name', "cross-encoder/ms-marco-MiniLM-L-6-v2")
+    def __init__(
+        self, 
+        model_name: Optional[str] = None,
+        device: Optional[str] = None,
+        config_path: Optional[str] = None
+    ):
+        """Initialize the reranker service.
+        
+        Args:
+            model_name: Cross-encoder model name. If None, loads from config.
+            device: Device to use (cpu/cuda). If None, loads from config.
+            config_path: Path to settings.yaml. If None, uses default location.
+        """
+        # Load config if parameters not provided
+        if model_name is None or device is None:
+            config = get_reranker_config(config_path)
+            model_name = model_name or config['model_name']
+            device = device or config['device']
+        
+        # Ensure values are set
+        assert model_name is not None, "model_name must be set"
+        assert device is not None, "device must be set"
         
         self.model_name = model_name
+        self.device = device
+        self.config = get_reranker_config(config_path)
+        
         try:
-            if model_name:
-                self.model = CrossEncoder(model_name)
-                logger.info(f"Initialized cross-encoder model: {model_name}")
-            else:
-                logger.error("No model name provided for cross-encoder")
-                self.model = None
+            self.model = CrossEncoder(model_name, device=device)
+            logger.info(f"Initialized cross-encoder: model={model_name}, device={device}")
         except Exception as e:
             logger.error(f"Failed to load cross-encoder model {model_name}: {e}")
             self.model = None
     
     def _load_config(self, config_path: Optional[str]) -> Dict[str, Any]:
-        """Load configuration from YAML file."""
-        if config_path is None:
-            config_path = "config/settings.yaml"
+        """Load configuration from YAML file.
         
-        try:
-            with open(config_path, 'r', encoding='utf-8') as f:
-                loaded_config = cast(Dict[str, Any], yaml.safe_load(f))
-            if isinstance(loaded_config, dict):
-                reranker_config = loaded_config.get('reranker', {})
-                return cast(Dict[str, Any], reranker_config)
-            else:
-                logger.warning(f"Config file {config_path} does not contain a valid dict")
-                return {}
-        except Exception as e:
-            logger.warning(f"Failed to load config from {config_path}: {e}")
-            return {}
+        DEPRECATED: Use get_reranker_config from config_loader instead.
+        """
+        logger.warning("_load_config is deprecated, use get_reranker_config instead")
+        return get_reranker_config(config_path)
     
     def rerank(self, query: str, documents: List[Dict[str, Any]], top_k: Optional[int] = None) -> List[Dict[str, Any]]:
         """Re-rank documents based on query relevance using cross-encoder.
