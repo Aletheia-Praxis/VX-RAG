@@ -524,3 +524,28 @@ def get_hierarchical_chunker_config(config_path: Optional[str] = None) -> Dict[s
     
     logger.info(f"Loaded hierarchical chunker config: max_chunk_size={chunker_config['max_chunk_size']}")
     return chunker_config
+
+
+def get_duplicate_detection_config(config_path: Optional[str] = None) -> Dict[str, Any]:
+    """
+    Get duplicate detection configuration from settings.yaml.
+    
+    Args:
+        config_path: Path to settings.yaml file
+        
+    Returns:
+        Dictionary with duplicate detection configuration:
+        - similarity_threshold: Threshold for near-duplicate detection (0.0-1.0)
+        - hash_algorithm: Hash algorithm for content hashing
+    """
+    config = load_settings(config_path)
+    
+    duplicate_section = config.get('duplicate_detection', {})
+    
+    duplicate_config = {
+        'similarity_threshold': duplicate_section.get('similarity_threshold', 0.95),
+        'hash_algorithm': duplicate_section.get('hash_algorithm', 'sha256')
+    }
+    
+    logger.info(f"Loaded duplicate detection config: similarity_threshold={duplicate_config['similarity_threshold']}, hash_algorithm={duplicate_config['hash_algorithm']}")
+    return duplicate_config
