@@ -80,6 +80,7 @@ def main() -> None:
             from rag.services.ingest_service.service import PDFIngestAdapter, TXTIngestAdapter, MDIngestAdapter, process_and_save_documents
             from rag.services.duplicate_detection_service.service import DuplicateDetector
             from rag.services.chunker_service.service import Chunker
+            from src.utils.config_loader import get_chunking_metadata, get_embedding_model_name, get_vector_store_type
             from rag.services.embedder_service.service import EmbeddingService
             from rag.services.vectordb_service.service import VectorStoreClient
             
@@ -119,7 +120,8 @@ def main() -> None:
             
             # Step 3: Chunk documents
             print("Step 3: Chunking documents...")
-            chunker = Chunker(chunk_size=1024, chunk_overlap=200, use_semantic_chunking=True)  # Adaptive chunking enabled by default
+            # All chunking parameters loaded from config/settings.yaml
+            chunker = Chunker()
             chunks = chunker.chunk_documents(unique_docs)
             print(f"Created {len(chunks)} chunks from {len(unique_docs)} documents")
             
@@ -131,23 +133,14 @@ def main() -> None:
             # Step 5: Create/update vector index
             print("Step 5: Creating/updating vector index...")
             
-            # Load configuration
-            import yaml
-            index_config: dict[str, Any] = {}
-            if Path(args.config).exists():
-                with open(args.config, 'r', encoding='utf-8') as f:
-                    loaded_config = yaml.safe_load(f)
-                    if isinstance(loaded_config, dict):
-                        index_config = loaded_config
-            
-            # Initialize embedder
+            # Initialize embedder with model from config
             embedder = EmbeddingService(
-                model_name=index_config.get('embedding_model', 'all-MiniLM-L6-v2')
+                model_name=get_embedding_model_name(args.config)
             )
             
-            # Initialize vector store
+            # Initialize vector store with type from config
             vector_config = {'index_dir': str(persist_dir)}
-            store_type = index_config.get('vector_store', 'faiss')
+            store_type = get_vector_store_type(args.config)
             vector_client = VectorStoreClient(store_type=store_type, config=vector_config)
             
             # Convert chunks to LlamaIndex documents for indexing
@@ -167,9 +160,9 @@ def main() -> None:
                 vector_client.save_index()
                 print(f"Index created/updated and saved to {persist_dir}")
                 
-                # Create snapshot with metadata
+                # Create snapshot with metadata from config
                 embed_model_info = {"model_name": embedder.model_name}
-                chunking_params = {"adaptive_chunking": True, "default_chunk_size": 1024, "technical_chunk_size": 384}
+                chunking_params = get_chunking_metadata()
                 vector_client.create_snapshot(None, embed_model_info, chunking_params)
                 print("Index snapshot created")
             else:
@@ -217,27 +210,19 @@ def main() -> None:
         start_time = time.time()
         print(f"Creating index in {args.persist_dir}")
         try:
-            import yaml
             from pathlib import Path
             from llama_index.core import SimpleDirectoryReader
-            
-            # Load configuration
-            index_cmd_config: dict[str, Any] = {}
-            if Path(args.config).exists():
-                with open(args.config, 'r', encoding='utf-8') as f:
-                    loaded_config = yaml.safe_load(f)
-                    if isinstance(loaded_config, dict):
-                        index_cmd_config = loaded_config
             
             logger.info("Starting index creation", persist_dir=args.persist_dir, config_path=args.config)
             
             # Import services
             from rag.services.embedder_service.service import EmbeddingService
             from rag.services.vectordb_service.service import VectorStoreClient
+            from src.utils.config_loader import get_embedding_model_name, get_vector_store_type
             
-            # Initialize embedder
+            # Initialize embedder with model from config
             embedder = EmbeddingService(
-                model_name=index_cmd_config.get('embedding_model', 'all-MiniLM-L6-v2') if isinstance(index_cmd_config, dict) else 'all-MiniLM-L6-v2'
+                model_name=get_embedding_model_name(args.config)
             )
             
             # Load processed documents
@@ -255,11 +240,11 @@ def main() -> None:
             documents = reader.load_data()
             print(f"Loaded {len(documents)} documents from {data_path}")
             
-            # Initialize vector store client
+            # Initialize vector store client with type from config
             vector_config = {
                 'index_dir': args.persist_dir
             }
-            store_type = index_cmd_config.get('vector_store', 'faiss') if isinstance(index_cmd_config, dict) else 'faiss'
+            store_type = get_vector_store_type(args.config)
             vector_client = VectorStoreClient(
                 store_type=store_type,
                 config=vector_config
@@ -305,25 +290,21 @@ def main() -> None:
             from rag.services.reranker_service.service import RerankerService
             from rag.services.embedder_service.service import EmbeddingService
             from rag.services.hybrid_search_service.service import HybridSearchService
+            from src.utils.config_loader import get_embedding_model_name, get_vector_store_type, load_settings
             
-            # Load configuration
-            query_config: dict[str, Any] = {}
-            if Path(args.config).exists():
-                with open(args.config, 'r', encoding='utf-8') as f:
-                    loaded_config = yaml.safe_load(f)
-                    if isinstance(loaded_config, dict):
-                        query_config = loaded_config
+            # Load configuration for index_dir
+            config = load_settings(args.config) if Path(args.config).exists() else {}
             
-            # Initialize embedding service (needed for index loading)
+            # Initialize embedding service with model from config
             embedder = EmbeddingService(
-                model_name=query_config.get('embedding_model', 'all-MiniLM-L6-v2') if isinstance(query_config, dict) else 'all-MiniLM-L6-v2'
+                model_name=get_embedding_model_name(args.config)
             )
             
             # Initialize vector store and load index
             vector_config = {
-                'index_dir': query_config.get('index_dir', './data/index') if isinstance(query_config, dict) else './data/index'
+                'index_dir': config.get('index_dir', './data/index')
             }
-            vector_client = VectorStoreClient(store_type="faiss", config=vector_config)
+            vector_client = VectorStoreClient(store_type=get_vector_store_type(args.config), config=vector_config)
             if not vector_client.load_index(embed_model=embedder.embed_model):
                 print("Failed to load index. Please run 'index' command first.")
                 sys.exit(1)
@@ -340,7 +321,7 @@ def main() -> None:
             hybrid_search_service = HybridSearchService(
                 retriever_service=retriever_service,
                 reranker_service=reranker_service,
-                hybrid_alpha=query_config.get('hybrid_alpha', 0.5)
+                hybrid_alpha=config.get('hybrid_alpha', 0.5)
             )
             
             # Asynchronously retrieve documents
@@ -373,21 +354,17 @@ def main() -> None:
             from pathlib import Path
             from llama_index.core import SimpleDirectoryReader
             
-            # Load configuration
-            update_config: dict[str, Any] = {}
-            if Path(args.config).exists():
-                with open(args.config, 'r', encoding='utf-8') as f:
-                    loaded_config = yaml.safe_load(f)
-                    if isinstance(loaded_config, dict):
-                        update_config = loaded_config
-            
             # Import services
             from rag.services.embedder_service.service import EmbeddingService
             from rag.services.vectordb_service.service import VectorStoreClient
+            from src.utils.config_loader import get_chunking_metadata, get_embedding_model_name, get_vector_store_type, load_settings
             
-            # Initialize embedder
+            # Load configuration for other settings
+            update_config = load_settings(args.config) if Path(args.config).exists() else {}
+            
+            # Initialize embedder with model from config
             embedder = EmbeddingService(
-                model_name=update_config.get('embedding_model', 'all-MiniLM-L6-v2') if isinstance(update_config, dict) else 'all-MiniLM-L6-v2'
+                model_name=get_embedding_model_name(args.config)
             )
             
             # Load new processed documents
@@ -424,7 +401,7 @@ def main() -> None:
             
             # Add documents incrementally
             embed_model_info = {"model_name": embedder.model_name}
-            chunking_params = {"adaptive_chunking": True, "default_chunk_size": 1024, "technical_chunk_size": 256}
+            chunking_params = get_chunking_metadata()
             
             success = vector_client.add_documents_incremental(documents, embedder.embed_model)
             if success:
@@ -442,22 +419,14 @@ def main() -> None:
     elif args.command == "snapshot":
         print(f"Creating snapshot of index in {args.persist_dir}")
         try:
-            import yaml
             from pathlib import Path
             from rag.services.vectordb_service.service import VectorStoreClient
             from rag.services.embedder_service.service import EmbeddingService
-            
-            # Load configuration
-            snapshot_config: dict[str, Any] = {}
-            if Path(args.config).exists():
-                with open(args.config, 'r', encoding='utf-8') as f:
-                    loaded_config = yaml.safe_load(f)
-                    if isinstance(loaded_config, dict):
-                        snapshot_config = loaded_config
+            from src.utils.config_loader import get_chunking_metadata, get_embedding_model_name, get_vector_store_type
             
             # Initialize services for metadata
             embedder = EmbeddingService(
-                model_name=snapshot_config.get('embedding_model', 'all-MiniLM-L6-v2') if isinstance(snapshot_config, dict) else 'all-MiniLM-L6-v2'
+                model_name=get_embedding_model_name(args.config)
             )
             
             # Initialize vector store client and load index
@@ -465,7 +434,7 @@ def main() -> None:
                 'index_dir': args.persist_dir
             }
             vector_client = VectorStoreClient(
-                store_type=snapshot_config.get('vector_store', 'faiss') if isinstance(snapshot_config, dict) else 'faiss',
+                store_type=get_vector_store_type(args.config),
                 config=vector_config
             )
             
@@ -473,9 +442,9 @@ def main() -> None:
                 print(f"Failed to load index from {args.persist_dir}")
                 sys.exit(1)
             
-            # Create snapshot with metadata
+            # Create snapshot with metadata from config
             embed_model_info = {"model_name": embedder.model_name}
-            chunking_params = {"adaptive_chunking": True, "default_chunk_size": 1024, "technical_chunk_size": 256}
+            chunking_params = get_chunking_metadata()
             
             success = vector_client.create_snapshot(args.name, embed_model_info, chunking_params)
             if success:
