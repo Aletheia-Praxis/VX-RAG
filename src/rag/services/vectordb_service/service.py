@@ -15,6 +15,8 @@ from llama_index.core import VectorStoreIndex, StorageContext, load_index_from_s
 from llama_index.vector_stores.faiss import FaissVectorStore
 import faiss
 
+from src.utils.config_loader import get_data_directories
+
 logger = logging.getLogger(__name__)
 
 class VectorStoreClient:
@@ -35,7 +37,17 @@ class VectorStoreClient:
     def __init__(self, store_type: str = "faiss", config: Optional[Dict[str, Any]] = None):
         self.store_type = store_type
         self.config = config or {}
-        self.index_dir = Path(self.config.get('index_dir', 'data/index'))
+        
+        # Load index_dir from config, or use provided value
+        if 'index_dir' in self.config:
+            index_dir = self.config['index_dir']
+        else:
+            dirs = get_data_directories()
+            index_dir = dirs['index_dir']
+        
+        assert index_dir is not None, "index_dir must be set"
+        self.index_dir = Path(index_dir)
+        
         self.index: Optional[VectorStoreIndex] = None
         self.faiss_index: Optional[faiss.Index] = None  # Direct FAISS index access
         
