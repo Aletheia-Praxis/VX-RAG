@@ -73,9 +73,17 @@ reranker:
   enable_metadata_prioritization: true  # Enable metadata-based prioritization
 
 # MCP configuration
-mcp_host: "0.0.0.0"
-mcp_port: 5000
-mcp_debug: true
+mcp:
+  host: "0.0.0.0"
+  port: 5000
+  debug: true
+  query_timeout: 600.0  # Query timeout in seconds (10 minutes)
+
+# API Ingest configuration
+api_ingest:
+  timeout: 30  # Request timeout in seconds
+  retries: 3   # Number of retry attempts
+  backoff_factor: 1  # Exponential backoff factor
 
 # Context Assembler configuration
 context_assembler:
