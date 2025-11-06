@@ -472,3 +472,55 @@ def get_api_ingest_config(config_path: Optional[str] = None) -> Dict[str, Any]:
     
     logger.info(f"Loaded API ingest config: timeout={api_config['timeout']}, retries={api_config['retries']}")
     return api_config
+
+
+def get_faiss_config(config_path: Optional[str] = None) -> Dict[str, Any]:
+    """
+    Get FAISS index configuration from settings.yaml.
+    
+    Args:
+        config_path: Path to settings.yaml file
+        
+    Returns:
+        Dictionary with FAISS configuration:
+        - hnsw_m: Number of neighbors for HNSW graph
+        - metric: Similarity metric (inner_product, L2)
+    """
+    config = load_settings(config_path)
+    
+    faiss_section = config.get('faiss', {})
+    
+    faiss_config = {
+        'hnsw_m': faiss_section.get('hnsw_m', 32),
+        'metric': faiss_section.get('metric', 'inner_product')
+    }
+    
+    logger.info(f"Loaded FAISS config: hnsw_m={faiss_config['hnsw_m']}, metric={faiss_config['metric']}")
+    return faiss_config
+
+
+def get_hierarchical_chunker_config(config_path: Optional[str] = None) -> Dict[str, Any]:
+    """
+    Get hierarchical chunker configuration from settings.yaml.
+    
+    Args:
+        config_path: Path to settings.yaml file
+        
+    Returns:
+        Dictionary with hierarchical chunker configuration:
+        - max_chunk_size: Maximum chunk size
+        - preserve_code_blocks: Whether to preserve code blocks
+        - preserve_tables: Whether to preserve tables
+    """
+    config = load_settings(config_path)
+    
+    adaptive_section = config.get('adaptive_chunking', {})
+    
+    chunker_config = {
+        'max_chunk_size': adaptive_section.get('max_chunk_size', 2000),
+        'preserve_code_blocks': adaptive_section.get('large_code_blocks', {}).get('preserve_integrity', True),
+        'preserve_tables': adaptive_section.get('tables', {}).get('preserve_integrity', True)
+    }
+    
+    logger.info(f"Loaded hierarchical chunker config: max_chunk_size={chunker_config['max_chunk_size']}")
+    return chunker_config
