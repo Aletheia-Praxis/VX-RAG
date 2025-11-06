@@ -11,19 +11,37 @@ from pathlib import Path
 
 from llama_index.retrievers.bm25 import BM25Retriever
 from llama_index.core.schema import Document, BaseNode
+from src.utils.config_loader import get_bm25_config
 
 logger = logging.getLogger(__name__)
 
 class BM25Service:
     """Service for BM25 indexing and retrieval."""
 
-    def __init__(self, index_dir: Optional[str] = None):
-        self.index_dir = Path(index_dir) if index_dir else Path("data/index/bm25")
+    def __init__(self, index_dir: Optional[str] = None, config_path: Optional[str] = None):
+        """Initialize BM25 service.
+        
+        Args:
+            index_dir: Directory for BM25 index. If None, loads from config.
+            config_path: Path to settings.yaml. If None, uses default location.
+        """
+        self.config_path = config_path  # Store for later use
+        
+        if index_dir is None:
+            config = get_bm25_config(config_path)
+            index_dir = config['index_dir']
+        
+        # Ensure value is set
+        assert index_dir is not None, "index_dir must be set"
+        
+        self.index_dir = Path(index_dir)
         self.index_dir.mkdir(parents=True, exist_ok=True)
         self.index_path = self.index_dir / "bm25_index.pkl"
         self.nodes_path = self.index_dir / "bm25_nodes.pkl"
         self.bm25_retriever: Optional[BM25Retriever] = None
         self.nodes: List[BaseNode] = []
+        
+        logger.info(f"Initialized BM25 service: index_dir={self.index_dir}")
 
     def build_index(self, documents: List[Document]) -> None:
         """
@@ -44,9 +62,12 @@ class BM25Service:
             self.nodes = parser.get_nodes_from_documents(documents)
 
             # Create BM25 retriever
+            config = get_bm25_config(self.config_path)
+            similarity_top_k = config.get('similarity_top_k', 20)
+            
             self.bm25_retriever = BM25Retriever.from_defaults(
                 nodes=self.nodes,
-                similarity_top_k=20,  # Default, can be overridden in retrieve
+                similarity_top_k=similarity_top_k,  # Loaded from config
                 verbose=True
             )
 
