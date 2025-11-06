@@ -5,10 +5,12 @@ Provides functionality to identify and handle duplicate documents
 based on content similarity and exact matches.
 """
 
-from typing import List, Dict, Any, Set
+from typing import List, Dict, Any, Set, Optional
 import hashlib
 import logging
 from difflib import SequenceMatcher
+
+from src.utils.config_loader import get_duplicate_detection_config
 
 logger = logging.getLogger(__name__)
 
@@ -22,14 +24,26 @@ class DuplicateDetector:
     - Configurable similarity thresholds
     """
 
-    def __init__(self, similarity_threshold: float = 0.95, hash_algorithm: str = 'sha256'):
+    def __init__(self, similarity_threshold: Optional[float] = None, hash_algorithm: Optional[str] = None, config_path: Optional[str] = None):
         """
         Initialize the duplicate detector.
 
         Args:
-            similarity_threshold: Threshold for near-duplicate detection (0.0-1.0)
-            hash_algorithm: Hash algorithm for content hashing
+            similarity_threshold: Threshold for near-duplicate detection (0.0-1.0). If None, loads from config.
+            hash_algorithm: Hash algorithm for content hashing. If None, loads from config.
+            config_path: Path to settings.yaml. If None, uses default location.
         """
+        # Load from config if parameters not provided
+        if similarity_threshold is None or hash_algorithm is None:
+            config = get_duplicate_detection_config(config_path)
+            if similarity_threshold is None:
+                similarity_threshold = config['similarity_threshold']
+            if hash_algorithm is None:
+                hash_algorithm = config['hash_algorithm']
+        
+        assert similarity_threshold is not None, "similarity_threshold must be set"
+        assert hash_algorithm is not None, "hash_algorithm must be set"
+        
         self.similarity_threshold = similarity_threshold
         self.hash_algorithm = hash_algorithm
 
