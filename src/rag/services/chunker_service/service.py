@@ -13,6 +13,7 @@ from llama_index.core.node_parser import SimpleNodeParser, SentenceSplitter, Tok
 from llama_index.core.schema import Document as LlamaDocument
 
 from ...libs.utils.text_utils import normalize_text
+from src.utils.config_loader import load_chunking_config
 
 logger = logging.getLogger(__name__)
 
@@ -53,34 +54,83 @@ class Chunker:
     Text chunker with adaptive sizing based on content type and metadata preservation.
     
     Supports different chunking strategies based on language and content type.
-    Uses 1024 tokens for general content, 384 tokens for technical content (code, tables).
+    Uses 1024 tokens for general content with adaptive sizing for technical content:
+    - 768 tokens for large code blocks (assembly, scripts)
+    - 512 tokens for tables and structured data
+    - 384 tokens for short technical snippets
+    - 896 tokens for hexdumps and memory dumps
+    
+    Maintains consistent 19.5% overlap across all chunk sizes for cybersecurity content.
     """
     
     parser: Union[SimpleNodeParser, SentenceSplitter, TokenTextSplitter]
     
     def __init__(
         self,
-        chunk_size: int = 1024,
-        chunk_overlap: int = 200,
+        chunk_size: Optional[int] = None,
+        chunk_overlap: Optional[int] = None,
         separator: str = "\n",
         use_semantic_chunking: bool = True,
-        use_hierarchical_chunking: bool = False
+        use_hierarchical_chunking: bool = False,
+        adaptive_config: Optional[Dict[str, Any]] = None,
+        config_path: Optional[str] = None
     ) -> None:
         """
         Initialize the chunker.
         
+        All chunking parameters are loaded from config/settings.yaml by default.
+        You can override them by passing explicit values.
+        
         Args:
-            chunk_size: Default chunk size in tokens
-            chunk_overlap: Overlap between chunks in tokens
+            chunk_size: Default chunk size in tokens. If None, loads from config (default: 1024)
+            chunk_overlap: Overlap between chunks in tokens. If None, loads from config (default: 200)
             separator: Separator for character-based splitting (not used for token splitting)
             use_semantic_chunking: Whether to use sentence-based semantic chunking
             use_hierarchical_chunking: Whether to use hierarchical markdown chunking
+            adaptive_config: Configuration for adaptive chunking by content type. If None, loads from config
+            config_path: Path to settings.yaml. If None, uses default config/settings.yaml
         """
+        # Load config from settings.yaml if parameters not explicitly provided
+        if chunk_size is None or chunk_overlap is None or adaptive_config is None:
+            try:
+                config = load_chunking_config(config_path)
+                if chunk_size is None:
+                    chunk_size = config['chunk_size']
+                    logger.debug(f"Loaded chunk_size from config: {chunk_size}")
+                if chunk_overlap is None:
+                    chunk_overlap = config['chunk_overlap']
+                    logger.debug(f"Loaded chunk_overlap from config: {chunk_overlap}")
+                if adaptive_config is None:
+                    adaptive_config = config['adaptive_chunking']
+                    enabled_status = adaptive_config.get('enabled', False) if isinstance(adaptive_config, dict) else False
+                    logger.debug(f"Loaded adaptive_config from config: enabled={enabled_status}")
+            except (FileNotFoundError, ValueError) as e:
+                logger.warning(f"Failed to load config, using hardcoded defaults: {e}")
+                # Fallback to hardcoded defaults only if config loading fails
+                if chunk_size is None:
+                    chunk_size = 1024
+                if chunk_overlap is None:
+                    chunk_overlap = 200
+                if adaptive_config is None:
+                    adaptive_config = {
+                        'enabled': True,
+                        'large_code_blocks': {'chunk_size': 768, 'chunk_overlap': 150, 'min_lines': 30},
+                        'tables': {'chunk_size': 512, 'chunk_overlap': 100, 'preserve_integrity': True},
+                        'short_snippets': {'chunk_size': 384, 'chunk_overlap': 75, 'max_lines': 15},
+                        'hex_dumps': {'chunk_size': 896, 'chunk_overlap': 175, 'preserve_structure': True}
+                    }
+        
+        # Ensure we have valid values (for type checker)
+        assert chunk_size is not None, "chunk_size must be set"
+        assert chunk_overlap is not None, "chunk_overlap must be set"
+        assert adaptive_config is not None, "adaptive_config must be set"
+        
         self.chunk_size = chunk_size
         self.chunk_overlap = chunk_overlap
         self.separator = separator
         self.use_semantic_chunking = use_semantic_chunking
         self.use_hierarchical_chunking = use_hierarchical_chunking
+        self.adaptive_config = adaptive_config
         
         # Initialize parsers
         if use_hierarchical_chunking:
@@ -141,28 +191,40 @@ class Chunker:
         normalized_text = self._preprocess_text(text, document.get('lang', 'unknown'))
         
         # Detect content type for adaptive chunking
-        content_type = self._detect_content_type(normalized_text)
+        content_analysis = self._analyze_content_type(normalized_text)
+        content_type = content_analysis['type']
+        content_subtype = content_analysis['subtype']
         
-        # Adaptive chunk sizing based on content type
-        if content_type == 'technical':
-            adaptive_chunk_size = 384  # Between 256-512 as per standard
-            logger.debug(f"Detected technical content for document {document.get('id')}, using chunk size {adaptive_chunk_size}")
+        # Adaptive chunk sizing based on detailed content analysis
+        if self.adaptive_config.get('enabled', True):
+            adaptive_chunk_size, adaptive_overlap = self._get_adaptive_chunk_params(
+                content_type, content_subtype, content_analysis
+            )
+            logger.debug(
+                f"Content analysis for document {document.get('id')}: "
+                f"type={content_type}, subtype={content_subtype}, "
+                f"chunk_size={adaptive_chunk_size}, overlap={adaptive_overlap}"
+            )
         else:
-            adaptive_chunk_size = self.chunk_size  # Default 1024
-            logger.debug(f"Detected general content for document {document.get('id')}, using chunk size {adaptive_chunk_size}")
+            adaptive_chunk_size = self.chunk_size
+            adaptive_overlap = self.chunk_overlap
+            logger.debug(
+                f"Adaptive chunking disabled, using default: "
+                f"chunk_size={adaptive_chunk_size}, overlap={adaptive_overlap}"
+            )
         
         # Create adaptive parser if needed
         adaptive_parser: Union[SimpleNodeParser, SentenceSplitter, TokenTextSplitter]
-        if adaptive_chunk_size != self.chunk_size:
+        if adaptive_chunk_size != self.chunk_size or adaptive_overlap != self.chunk_overlap:
             if self.use_semantic_chunking:
                 adaptive_parser = SentenceSplitter(
                     chunk_size=adaptive_chunk_size,
-                    chunk_overlap=self.chunk_overlap
+                    chunk_overlap=adaptive_overlap
                 )
             else:
                 adaptive_parser = TokenTextSplitter(
                     chunk_size=adaptive_chunk_size,
-                    chunk_overlap=self.chunk_overlap
+                    chunk_overlap=adaptive_overlap
                 )
         else:
             adaptive_parser = self.parser
@@ -194,7 +256,9 @@ class Chunker:
                     'node_info': getattr(node, 'node_info', {}),
                     'relationships': getattr(node, 'relationships', {}),
                     'content_type': content_type,
-                    'adaptive_chunk_size': adaptive_chunk_size
+                    'content_subtype': content_subtype,
+                    'adaptive_chunk_size': adaptive_chunk_size,
+                    'adaptive_overlap': adaptive_overlap
                 }
             )
             
@@ -237,8 +301,151 @@ class Chunker:
         
         return text
     
+    def _analyze_content_type(self, text: str) -> Dict[str, Any]:
+        """
+        Analyze content type in detail for adaptive chunking.
+        
+        Args:
+            text: Input text
+            
+        Returns:
+            Dictionary with content analysis:
+            - type: 'general' or 'technical'
+            - subtype: 'large_code_blocks', 'tables', 'short_snippets', 'hex_dumps', or None
+            - metadata: Additional analysis metadata
+        """
+        analysis = {
+            'type': 'general',
+            'subtype': None,
+            'metadata': {}
+        }
+        
+        # Check for hexdumps and memory dumps (high priority)
+        hex_patterns = [
+            r'(?:[0-9A-Fa-f]{2}\s){8,}',  # Hex bytes sequence
+            r'0x[0-9A-Fa-f]+:\s+(?:[0-9A-Fa-f]{2}\s)+',  # Memory address + hex
+            r'[0-9A-Fa-f]{8,}\s+[0-9A-Fa-f]{8,}',  # Hex dump format
+        ]
+        
+        hex_matches = sum(len(re.findall(p, text)) for p in hex_patterns)
+        if hex_matches > 5:  # Significant hex content
+            analysis['type'] = 'technical'
+            analysis['subtype'] = 'hex_dumps'
+            analysis['metadata']['hex_matches'] = hex_matches
+            return analysis
+        
+        # Check for tables (structured data)
+        table_patterns = [
+            r'\|[^\n]+\|[\r\n]+\|[\s\-\|:]+\|[\r\n]+(?:\|[^\n]+\|[\r\n]*)+',  # Markdown tables (multiline)
+            r'<table[\s\S]*?</table>',  # HTML tables
+        ]
+        
+        table_matches = 0
+        for pattern in table_patterns:
+            matches = re.findall(pattern, text, re.MULTILINE | re.DOTALL)
+            table_matches += len(matches)
+        
+        if table_matches > 0:
+            analysis['type'] = 'technical'
+            analysis['subtype'] = 'tables'
+            analysis['metadata']['table_matches'] = table_matches
+            return analysis
+        
+        # Check for code blocks
+        code_block_patterns = [
+            r'```[\s\S]*?```',  # Markdown code blocks
+            r'    [\s\S]*?(?=\n\S|\n\n|$)',  # Indented code blocks
+            r'<code>[\s\S]*?</code>',  # HTML code tags
+            r'<pre>[\s\S]*?</pre>',  # HTML pre tags
+        ]
+        
+        code_blocks = []
+        for pattern in code_block_patterns:
+            code_blocks.extend(re.findall(pattern, text, re.MULTILINE))
+        
+        if code_blocks:
+            # Analyze code block sizes
+            total_code_lines = sum(block.count('\n') for block in code_blocks)
+            avg_code_lines = total_code_lines / len(code_blocks) if code_blocks else 0
+            
+            config_large = self.adaptive_config.get('large_code_blocks', {})
+            config_short = self.adaptive_config.get('short_snippets', {})
+            
+            min_lines_large = config_large.get('min_lines', 30)
+            max_lines_short = config_short.get('max_lines', 15)
+            
+            if avg_code_lines >= min_lines_large:
+                analysis['type'] = 'technical'
+                analysis['subtype'] = 'large_code_blocks'
+                analysis['metadata']['code_blocks'] = len(code_blocks)
+                analysis['metadata']['avg_lines'] = avg_code_lines
+                return analysis
+            elif avg_code_lines > 0 and avg_code_lines <= max_lines_short:
+                analysis['type'] = 'technical'
+                analysis['subtype'] = 'short_snippets'
+                analysis['metadata']['code_blocks'] = len(code_blocks)
+                analysis['metadata']['avg_lines'] = avg_code_lines
+                return analysis
+            else:
+                # Medium-sized code - treat as general with note
+                analysis['type'] = 'technical'
+                analysis['subtype'] = None  # Will use default chunk size
+                analysis['metadata']['code_blocks'] = len(code_blocks)
+                analysis['metadata']['avg_lines'] = avg_code_lines
+                return analysis
+        
+        # Check for technical keywords (lower priority, more selective)
+        # Only trigger on Win32 API and assembly - not common programming keywords
+        high_specificity_keywords = [
+            'VirtualAlloc', 'WriteProcessMemory', 'CreateRemoteThread',
+            'LoadLibrary', 'GetProcAddress', 'RegSetValue', 'RegOpenKey',
+            'mov ', 'push ', 'pop ', 'call ', 'jmp ', 'ret ', 'lea ',
+            'HKEY_LOCAL_MACHINE', 'HKEY_CURRENT_USER',
+        ]
+        
+        keyword_count = sum(1 for keyword in high_specificity_keywords 
+                          if keyword in text)  # Case-sensitive for API names
+        
+        if keyword_count >= 3:  # Require multiple matches
+            analysis['type'] = 'technical'
+            analysis['metadata']['keyword_count'] = keyword_count
+        
+        return analysis
+    
+    def _get_adaptive_chunk_params(
+        self, 
+        content_type: str, 
+        content_subtype: Optional[str],
+        content_analysis: Dict[str, Any]
+    ) -> tuple[int, int]:
+        """
+        Get adaptive chunk size and overlap based on content analysis.
+        
+        Args:
+            content_type: 'general' or 'technical'
+            content_subtype: Specific subtype of technical content
+            content_analysis: Full content analysis from _analyze_content_type
+            
+        Returns:
+            Tuple of (chunk_size, chunk_overlap)
+        """
+        # General content uses defaults
+        if content_type == 'general':
+            return self.chunk_size, self.chunk_overlap
+        
+        # Technical content with specific subtype
+        if content_subtype and content_subtype in self.adaptive_config:
+            config = self.adaptive_config[content_subtype]
+            chunk_size = config.get('chunk_size', self.chunk_size)
+            chunk_overlap = config.get('chunk_overlap', self.chunk_overlap)
+            return chunk_size, chunk_overlap
+        
+        # Technical content without specific subtype - use defaults
+        return self.chunk_size, self.chunk_overlap
+    
     def _detect_content_type(self, text: str) -> str:
         """
+        Legacy method for backward compatibility.
         Detect the content type of the text.
         
         Args:
@@ -247,6 +454,8 @@ class Chunker:
         Returns:
             'technical' if contains code blocks or tables, 'general' otherwise
         """
+        analysis = self._analyze_content_type(text)
+        return analysis['type']
         # Check for code blocks (markdown or other formats)
         code_block_patterns = [
             r'```[\s\S]*?```',               # Markdown code blocks
