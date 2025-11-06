@@ -8,13 +8,44 @@ index_dir: "./data/index"
 
 # Embedding configuration
 embedding_model: "all-MiniLM-L6-v2"
-embedding_device: "cpu"  # Force CPU usage
-embedding_batch_size: 32
+embedding_device: "cpu"     # Force CPU usage
+embedding_batch_size: 10    # Batch size for embedding generation
+embedding_cache_size: 1000  # Maximum number of cached embeddings
+embedding_trust_remote_code: false  # Security: don't trust remote code
 
 # Indexing configuration
+# Default chunking parameters for general content
 chunk_size: 1024
-chunk_overlap: 10
+chunk_overlap: 200     # 19.5% overlap - optimal for cybersecurity dense content
 vector_store: "faiss"
+
+# Adaptive chunking for technical content
+adaptive_chunking:
+  enabled: true
+  
+  # Large code blocks (assembly, disassembly, long scripts)
+  large_code_blocks:
+    chunk_size: 768
+    chunk_overlap: 150  # 19.5% overlap maintained
+    min_lines: 30       # Trigger when code block has 30+ lines
+  
+  # Structured tables (IoCs, network traffic, memory dumps)
+  tables:
+    chunk_size: 512           # Smaller chunks for table rows
+    chunk_overlap: 100        # 19.5% overlap maintained
+    preserve_integrity: true  # Never split tables
+  
+  # Short technical snippets (API calls, registry keys, small code samples)
+  short_snippets:
+    chunk_size: 384    # Smaller chunks for short snippets
+    chunk_overlap: 75  # 19.5% overlap maintained
+    max_lines: 15      # Trigger when code block has <15 lines
+  
+  # Hexdumps and memory dumps (very structured content)
+  hex_dumps:
+    chunk_size: 896     # Slightly smaller for structured hex data
+    chunk_overlap: 175  # 19.5% overlap maintained
+    preserve_structure: true
 
 # Query configuration
 similarity_top_k: 5
@@ -30,6 +61,7 @@ retriever:
 # BM25 configuration
 bm25:
   index_dir: "./data/index/bm25"  # Directory for BM25 index
+  similarity_top_k: 20            # Default for initial retrieval
   enable_persistence: true        # Save/load BM25 index to/from disk
 
 # Reranker configuration
@@ -44,6 +76,13 @@ reranker:
 mcp_host: "0.0.0.0"
 mcp_port: 5000
 mcp_debug: true
+
+# Context Assembler configuration
+context_assembler:
+  token_budget: 2048  # Default token budget for context
+  model_name: "gpt-3.5-turbo"  # Model name for token counting
+  max_items: null  # Maximum number of context items (null = no limit)
+  min_score: null  # Minimum relevance score (null = no limit)
 
 # Logging configuration
 logging:
