@@ -562,18 +562,35 @@ class MarkdownHierarchicalChunker:
     
     def __init__(
         self,
-        max_chunk_size: int = 2000,
-        preserve_code_blocks: bool = True,
-        preserve_tables: bool = True
+        max_chunk_size: Optional[int] = None,
+        preserve_code_blocks: Optional[bool] = None,
+        preserve_tables: Optional[bool] = None,
+        config_path: Optional[str] = None
     ) -> None:
         """
         Initialize the hierarchical chunker.
         
         Args:
-            max_chunk_size: Maximum size of a chunk in characters
-            preserve_code_blocks: Whether to keep code blocks intact
-            preserve_tables: Whether to keep tables intact
+            max_chunk_size: Maximum size of a chunk in characters. If None, loads from config.
+            preserve_code_blocks: Whether to keep code blocks intact. If None, loads from config.
+            preserve_tables: Whether to keep tables intact. If None, loads from config.
+            config_path: Path to settings.yaml. If None, uses default location.
         """
+        # Load from config if parameters not provided
+        if max_chunk_size is None or preserve_code_blocks is None or preserve_tables is None:
+            from src.utils.config_loader import get_hierarchical_chunker_config
+            config = get_hierarchical_chunker_config(config_path)
+            if max_chunk_size is None:
+                max_chunk_size = config['max_chunk_size']
+            if preserve_code_blocks is None:
+                preserve_code_blocks = config['preserve_code_blocks']
+            if preserve_tables is None:
+                preserve_tables = config['preserve_tables']
+        
+        assert max_chunk_size is not None, "max_chunk_size must be set"
+        assert preserve_code_blocks is not None, "preserve_code_blocks must be set"
+        assert preserve_tables is not None, "preserve_tables must be set"
+        
         self.max_chunk_size = max_chunk_size
         self.preserve_code_blocks = preserve_code_blocks
         self.preserve_tables = preserve_tables
