@@ -326,7 +326,9 @@ def main() -> None:
             
             # Asynchronously retrieve documents
             async def do_search() -> List[Dict[str, Any]]:
-                result = await hybrid_search_service.asearch(args.query, top_k=5)
+                # Use top_k from config (retriever.semantic_top_k or similarity_top_k)
+                top_k = config.get('similarity_top_k', 5)
+                result = await hybrid_search_service.asearch(args.query, top_k=top_k)
                 return cast(List[Dict[str, Any]], result)
 
             retrieved_docs = asyncio.run(do_search())
