@@ -5,7 +5,6 @@ Provides classes for document retrieval operations.
 """
 
 from typing import List, Dict, Any, Optional, cast
-import yaml
 import importlib.util
 
 from llama_index.core import VectorStoreIndex
@@ -15,6 +14,7 @@ from llama_index.retrievers.bm25 import BM25Retriever
 # Import structured logging and metrics
 from src.utils.logging_config import get_logger
 from src.utils.metrics import get_metrics
+from src.utils.config_loader import get_retriever_config, get_bm25_config, get_reranker_config
 
 logger = get_logger("retriever_service")
 metrics = get_metrics()
@@ -34,7 +34,8 @@ class RetrieverService:
         self.hybrid_retriever: Optional[BaseRetriever] = None
         self.bm25_service: Optional[Any] = None
         self.reranker = None
-        self.config = self._load_config(config_path)
+        self.config_path = config_path
+        self.config = get_retriever_config(config_path)
         self._initialize_services()
     
     def _initialize_services(self) -> None:
@@ -42,8 +43,8 @@ class RetrieverService:
         # Initialize BM25 service if available
         if _bm25_available:
             from ..bm25_service.service import BM25Service as BM25ServiceClass
-            bm25_config = self.config.get('bm25', {})
-            index_dir = bm25_config.get('index_dir', 'data/index/bm25')
+            bm25_config = get_bm25_config(self.config_path)
+            index_dir = bm25_config['index_dir']
             self.bm25_service = BM25ServiceClass(index_dir=index_dir)
             logger.info("Initialized BM25 service")
         else:
@@ -54,35 +55,26 @@ class RetrieverService:
     
     def _initialize_reranker(self) -> None:
         """Initialize the reranker if configured."""
-        reranker_config = self.config.get('reranker', {})
+        reranker_config = get_reranker_config(self.config_path)
         if reranker_config.get('enable_metadata_prioritization', False):
             try:
                 from sentence_transformers import CrossEncoder
-                model_name = reranker_config.get('model_name', 'cross-encoder/ms-marco-MiniLM-L-6-v2')
-                self.reranker = CrossEncoder(model_name)
-                logger.info(f"Initialized reranker with model: {model_name}")
+                model_name = reranker_config['model_name']
+                device = reranker_config['device']
+                self.reranker = CrossEncoder(model_name, device=device)
+                logger.info(f"Initialized reranker: model={model_name}, device={device}")
             except ImportError:
                 logger.warning("sentence_transformers not available, reranker disabled")
             except Exception as e:
                 logger.warning(f"Failed to initialize reranker: {e}")
     
     def _load_config(self, config_path: Optional[str]) -> Dict[str, Any]:
-        """Load configuration from YAML file."""
-        if config_path is None:
-            config_path = "config/settings.yaml"
+        """Load configuration from YAML file.
         
-        try:
-            with open(config_path, 'r', encoding='utf-8') as f:
-                loaded_config = cast(Dict[str, Any], yaml.safe_load(f))
-            if isinstance(loaded_config, dict):
-                retriever_config = loaded_config.get('retriever', {})
-                return cast(Dict[str, Any], retriever_config)
-            else:
-                logger.warning(f"Config file {config_path} does not contain a valid dict")
-                return {}
-        except Exception as e:
-            logger.warning(f"Failed to load config from {config_path}: {e}")
-            return {}
+        DEPRECATED: Use get_retriever_config from config_loader instead.
+        """
+        logger.warning("_load_config is deprecated, use get_retriever_config instead")
+        return get_retriever_config(config_path)
     
     def set_index(self, index: VectorStoreIndex) -> None:
         """Set the index for retrieval."""
