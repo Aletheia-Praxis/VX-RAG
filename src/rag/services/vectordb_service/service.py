@@ -15,7 +15,7 @@ from llama_index.core import VectorStoreIndex, StorageContext, load_index_from_s
 from llama_index.vector_stores.faiss import FaissVectorStore
 import faiss
 
-from src.utils.config_loader import get_data_directories
+from src.utils.config_loader import get_data_directories, get_faiss_config
 
 logger = logging.getLogger(__name__)
 
@@ -82,14 +82,20 @@ class VectorStoreClient:
             d = len(test_embedding)
             logger.info(f"Embedding dimension: {d}")
             
+            # Load FAISS configuration
+            faiss_config = get_faiss_config()
+            hnsw_m = faiss_config['hnsw_m']
+            metric = faiss_config['metric']
+            
             """
             Initialize FAISS HNSW index
             The technical standard requires HNSW for its high-speed, high-recall retrieval capabilities.
-            "HNSW32" is a standard configuration for HNSW. The number 32 represents the number of neighbors
-            for each node in the graph. METRIC_INNER_PRODUCT is used for cosine similarity,
+            The hnsw_m parameter represents the number of neighbors for each node in the graph.
+            METRIC_INNER_PRODUCT is used for cosine similarity,
             as required by the technical standard for normalized embeddings.
             """
-            faiss_index = faiss.IndexHNSWFlat(d, 32, faiss.METRIC_INNER_PRODUCT)
+            metric_type = faiss.METRIC_INNER_PRODUCT if metric == 'inner_product' else faiss.METRIC_L2
+            faiss_index = faiss.IndexHNSWFlat(d, hnsw_m, metric_type)
             vector_store = FaissVectorStore(faiss_index=faiss_index)
 
             # Create storage context
