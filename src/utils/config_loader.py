@@ -416,3 +416,59 @@ def get_data_directories(config_path: Optional[str] = None) -> Dict[str, str]:
     
     logger.info(f"Loaded data directories: index_dir={data_dirs['index_dir']}")
     return data_dirs
+
+
+def get_mcp_config(config_path: Optional[str] = None) -> Dict[str, Any]:
+    """
+    Get MCP server configuration from settings.yaml.
+    
+    Args:
+        config_path: Path to settings.yaml file
+        
+    Returns:
+        Dictionary with MCP configuration:
+        - host: Server host address
+        - port: Server port number
+        - debug: Debug mode flag
+        - query_timeout: Query timeout in seconds
+    """
+    config = load_settings(config_path)
+    
+    mcp_section = config.get('mcp', {})
+    
+    mcp_config = {
+        'host': mcp_section.get('host', '0.0.0.0'),
+        'port': mcp_section.get('port', 5000),
+        'debug': mcp_section.get('debug', True),
+        'query_timeout': mcp_section.get('query_timeout', 600.0)
+    }
+    
+    logger.info(f"Loaded MCP config: host={mcp_config['host']}, port={mcp_config['port']}, query_timeout={mcp_config['query_timeout']}")
+    return mcp_config
+
+
+def get_api_ingest_config(config_path: Optional[str] = None) -> Dict[str, Any]:
+    """
+    Get API ingest configuration from settings.yaml.
+    
+    Args:
+        config_path: Path to settings.yaml file
+        
+    Returns:
+        Dictionary with API ingest configuration:
+        - timeout: Request timeout in seconds
+        - retries: Number of retry attempts
+        - backoff_factor: Exponential backoff factor
+    """
+    config = load_settings(config_path)
+    
+    api_section = config.get('api_ingest', {})
+    
+    api_config = {
+        'timeout': api_section.get('timeout', 30),
+        'retries': api_section.get('retries', 3),
+        'backoff_factor': api_section.get('backoff_factor', 1)
+    }
+    
+    logger.info(f"Loaded API ingest config: timeout={api_config['timeout']}, retries={api_config['retries']}")
+    return api_config
