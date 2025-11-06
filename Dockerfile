@@ -26,9 +26,6 @@ WORKDIR /app
 COPY src/ ./src/
 COPY config/ ./config/
 
-# Create data directories
-RUN mkdir -p data/raw/md data/raw/pdf data/raw/txt data/processed data/index
-
 # Create non-root user
 RUN groupadd -r appuser && useradd -r -g appuser appuser
 
