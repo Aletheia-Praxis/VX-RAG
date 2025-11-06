@@ -4,7 +4,7 @@ Ingest Service implementation.
 Provides classes and functions for document ingestion.
 """
 
-from typing import List, Dict, Any, TYPE_CHECKING
+from typing import List, Dict, Any, TYPE_CHECKING, Optional
 import logging
 import os
 from pathlib import Path
@@ -16,6 +16,7 @@ from docling.document_converter import DocumentConverter
 
 from ..duplicate_detection_service import DuplicateDetector
 from ...libs.utils.text_utils import normalize_text, detect_language
+from src.utils.config_loader import get_api_ingest_config
 
 logger = logging.getLogger(__name__)
 
@@ -260,18 +261,30 @@ class MDIngestAdapter(IngestAdapter):
 
 
 class APIIngestAdapter(IngestAdapter):
-    """Adapter for loading data from JSON APIs."""
+    """Adapter for loading data from JSON API endpoints."""
     
-    def __init__(self, timeout: int = 30, retries: int = 3) -> None:
+    def __init__(self, timeout: Optional[int] = None, retries: Optional[int] = None, config_path: Optional[str] = None) -> None:
         """
         Initialize API adapter.
         
         Args:
-            timeout: Request timeout in seconds
-            retries: Number of retry attempts
+            timeout: Request timeout in seconds. If None, loads from config.
+            retries: Number of retry attempts. If None, loads from config.
+            config_path: Path to settings.yaml. If None, uses default location.
         """
+        if timeout is None or retries is None:
+            config = get_api_ingest_config(config_path)
+            if timeout is None:
+                timeout = config['timeout']
+            if retries is None:
+                retries = config['retries']
+        
+        assert timeout is not None, "timeout must be set"
+        assert retries is not None, "retries must be set"
+        
         self.timeout = timeout
         self.retries = retries
+        self.backoff_factor = get_api_ingest_config(config_path).get('backoff_factor', 1)
     
     def load_data(self, source: str) -> List[Dict[str, Any]]:
         """
@@ -288,11 +301,11 @@ class APIIngestAdapter(IngestAdapter):
         from urllib3.util.retry import Retry
         
         try:
-            # Setup retry strategy
+            # Setup retry strategy with config values
             retry_strategy = Retry(
                 total=self.retries,
                 status_forcelist=[429, 500, 502, 503, 504],
-                backoff_factor=1
+                backoff_factor=self.backoff_factor
             )
             adapter = HTTPAdapter(max_retries=retry_strategy)
             
