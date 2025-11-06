@@ -19,9 +19,15 @@ chunk_size: 1024
 chunk_overlap: 200     # 19.5% overlap - optimal for cybersecurity dense content
 vector_store: "faiss"
 
+# FAISS Index configuration
+faiss:
+  hnsw_m: 32               # Number of neighbors for HNSW graph (higher = better recall, more memory)
+  metric: "inner_product"  # Similarity metric: inner_product (cosine), L2
+
 # Adaptive chunking for technical content
 adaptive_chunking:
   enabled: true
+  max_chunk_size: 2000  # Maximum chunk size for hierarchical chunker
   
   # Large code blocks (assembly, disassembly, long scripts)
   large_code_blocks:
