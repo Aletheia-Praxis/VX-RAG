@@ -1,6 +1,5 @@
 """Test logging configuration."""
 
-import pytest
 from pathlib import Path
 from unittest.mock import patch
 from src.utils.logging_config import get_logger, StructuredLogger, load_logging_config
