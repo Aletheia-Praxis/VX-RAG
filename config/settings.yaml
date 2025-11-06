@@ -98,6 +98,11 @@ context_assembler:
   max_items: null  # Maximum number of context items (null = no limit)
   min_score: null  # Minimum relevance score (null = no limit)
 
+# Duplicate detection configuration
+duplicate_detection:
+  similarity_threshold: 0.95  # Threshold for near-duplicate detection (0.0-1.0)
+  hash_algorithm: "sha256"    # Hash algorithm for content hashing
+
 # Logging configuration
 logging:
   log_level: "INFO"
