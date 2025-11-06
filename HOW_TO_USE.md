@@ -8,6 +8,33 @@ This guide explains how to use the VX-RAG system for processing and searching wi
 - Dependencies installed: `pip install -r requirements.txt`
 - Documents in PDF, TXT, or Markdown formats
 
+## Running with Docker
+
+For containerized deployment, use the provided Dockerfile. To ensure data persistence, mount the `data` directory as a volume from your host machine.
+
+1. Build the Docker image:
+
+    ```bash
+    docker build -t vx-rag .
+    ```
+
+2. Create the data directories on your host:
+
+    ```bash
+    mkdir -p data/raw/pdf data/raw/txt data/raw/md data/processed data/index
+    ```
+
+3. Run the container with volume mounting:
+
+    ```bash
+    docker run -v $(pwd)/data:/app/data -p 5000:5000 vx-rag
+    ```
+
+   - `-v $(pwd)/data:/app/data`: Mounts the local `data` directory to `/app/data` in the container for persistence
+   - `-p 5000:5000`: Exposes the MCP API port
+
+Note: The container runs as a non-root user for security. Ensure the mounted volume has appropriate permissions if needed.
+
 ## Step 1: Prepare Your Documents
 
 1. Create directories for raw documents:
