@@ -80,7 +80,11 @@ class StructuredLogger:
         if log_file:
             log_path = Path(log_file)
             log_path.parent.mkdir(parents=True, exist_ok=True)
-            file_handler = logging.FileHandler(log_path, encoding='utf-8')
+            # Add timestamp to filename for versioning on each run
+            timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+            log_filename = f"{log_path.stem}_{timestamp}{log_path.suffix}"
+            versioned_log_path = log_path.parent / log_filename
+            file_handler = logging.FileHandler(versioned_log_path, encoding='utf-8')
             file_handler.setFormatter(formatter)
             self.logger.addHandler(file_handler)
 
