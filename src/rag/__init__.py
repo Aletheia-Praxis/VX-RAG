@@ -46,12 +46,13 @@ class RAGSystem:
             logger.error(f"Failed to initialize RAG system: {e}")
             raise
     
-    def build_index(self, documents_dir: str = "data/processed") -> bool:
+    def build_index(self, documents_dir: Optional[str] = None) -> bool:
         """
         Build the vector index from processed documents.
         
         Args:
-            documents_dir: Directory containing processed text files
+            documents_dir: Directory containing processed text files. 
+                           If None, uses path from settings.yaml.
             
         Returns:
             True if successful
@@ -59,6 +60,14 @@ class RAGSystem:
         if self.vector_store is None or self.embedding_service is None:
             logger.error("Required services not initialized")
             return False
+        
+        # Load documents_dir from config if not provided
+        if documents_dir is None:
+            from src.utils.config_loader import get_data_directories
+            dirs = get_data_directories()
+            documents_dir = dirs['processed_data_dir']
+        
+        assert documents_dir is not None, "documents_dir must be set"
         
         try:
             from llama_index.core import SimpleDirectoryReader
