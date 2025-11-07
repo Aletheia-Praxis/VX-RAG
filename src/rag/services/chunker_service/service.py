@@ -317,7 +317,7 @@ class Chunker:
             - subtype: 'large_code_blocks', 'tables', 'short_snippets', 'hex_dumps', or None
             - metadata: Additional analysis metadata
         """
-        analysis = {
+        analysis: Dict[str, Any] = {
             'type': 'general',
             'subtype': None,
             'metadata': {}
@@ -458,7 +458,7 @@ class Chunker:
             'technical' if contains code blocks or tables, 'general' otherwise
         """
         analysis = self._analyze_content_type(text)
-        return analysis['type']
+        return str(analysis['type'])
         # Check for code blocks (markdown or other formats)
         code_block_patterns = [
             r'```[\s\S]*?```',               # Markdown code blocks
