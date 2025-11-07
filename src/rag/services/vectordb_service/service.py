@@ -456,14 +456,12 @@ class VectorStoreClient:
                     with open(file_path, 'rb') as f:
                         file_content = f.read()
                     
-                    # Calculate both MD5 and SHA256
-                    md5_hash = hashlib.md5(file_content, usedforsecurity=False).hexdigest()
+                    # Calculate SHA256 checksum
                     sha256_hash = hashlib.sha256(file_content).hexdigest()
                     
                     # Store relative path from snapshot directory
                     rel_path = file_path.relative_to(snapshot_dir)
                     manifest["files"][str(rel_path)] = {
-                        "md5": md5_hash,
                         "sha256": sha256_hash,
                         "size": len(file_content)
                     }
@@ -547,19 +545,13 @@ class VectorStoreClient:
                     with open(file_path, 'rb') as f:
                         file_content = f.read()
                     
-                    # Check MD5
-                    actual_md5 = hashlib.md5(file_content, usedforsecurity=False).hexdigest()
-                    expected_md5 = expected_hashes.get("md5")
-                    
                     # Check SHA256
                     actual_sha256 = hashlib.sha256(file_content).hexdigest()
                     expected_sha256 = expected_hashes.get("sha256")
                     
-                    if actual_md5 != expected_md5 or actual_sha256 != expected_sha256:
+                    if actual_sha256 != expected_sha256:
                         verification_results["failed_files"].append({
                             "file": file_path_str,
-                            "expected_md5": expected_md5,
-                            "actual_md5": actual_md5,
                             "expected_sha256": expected_sha256,
                             "actual_sha256": actual_sha256
                         })
