@@ -121,9 +121,12 @@ class Chunker:
                     }
         
         # Ensure we have valid values (for type checker)
-        assert chunk_size is not None, "chunk_size must be set"
-        assert chunk_overlap is not None, "chunk_overlap must be set"
-        assert adaptive_config is not None, "adaptive_config must be set"
+        if chunk_size is None:
+            raise ValueError("chunk_size must be set")
+        if chunk_overlap is None:
+            raise ValueError("chunk_overlap must be set")
+        if adaptive_config is None:
+            raise ValueError("adaptive_config must be set")
         
         self.chunk_size = chunk_size
         self.chunk_overlap = chunk_overlap
@@ -587,9 +590,12 @@ class MarkdownHierarchicalChunker:
             if preserve_tables is None:
                 preserve_tables = config['preserve_tables']
         
-        assert max_chunk_size is not None, "max_chunk_size must be set"
-        assert preserve_code_blocks is not None, "preserve_code_blocks must be set"
-        assert preserve_tables is not None, "preserve_tables must be set"
+        if max_chunk_size is None:
+            raise ValueError("max_chunk_size must be set")
+        if preserve_code_blocks is None:
+            raise ValueError("preserve_code_blocks must be set")
+        if preserve_tables is None:
+            raise ValueError("preserve_tables must be set")
         
         self.max_chunk_size = max_chunk_size
         self.preserve_code_blocks = preserve_code_blocks

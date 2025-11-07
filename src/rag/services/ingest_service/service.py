@@ -279,8 +279,10 @@ class APIIngestAdapter(IngestAdapter):
             if retries is None:
                 retries = config['retries']
         
-        assert timeout is not None, "timeout must be set"
-        assert retries is not None, "retries must be set"
+        if timeout is None:
+            raise ValueError("timeout must be set")
+        if retries is None:
+            raise ValueError("retries must be set")
         
         self.timeout = timeout
         self.retries = retries

@@ -35,8 +35,10 @@ class RerankerService:
             device = device or config['device']
         
         # Ensure values are set
-        assert model_name is not None, "model_name must be set"
-        assert device is not None, "device must be set"
+        if model_name is None:
+            raise ValueError("model_name must be set")
+        if device is None:
+            raise ValueError("device must be set")
         
         self.model_name = model_name
         self.device = device

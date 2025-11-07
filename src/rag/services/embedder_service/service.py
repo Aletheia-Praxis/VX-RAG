@@ -46,10 +46,14 @@ class EmbeddingService:
             trust_remote_code = trust_remote_code if trust_remote_code is not None else config['embedding_trust_remote_code']
         
         # Ensure values are set
-        assert model_name is not None, "model_name must be set"
-        assert cache_size is not None, "cache_size must be set"
-        assert batch_size is not None, "batch_size must be set"
-        assert trust_remote_code is not None, "trust_remote_code must be set"
+        if model_name is None:
+            raise ValueError("model_name must be set")
+        if cache_size is None:
+            raise ValueError("cache_size must be set")
+        if batch_size is None:
+            raise ValueError("batch_size must be set")
+        if trust_remote_code is None:
+            raise ValueError("trust_remote_code must be set")
         
         self.model_name = model_name
         self.cache_size = cache_size

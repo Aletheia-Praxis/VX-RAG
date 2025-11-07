@@ -40,8 +40,10 @@ class ContextAssembler:
             model_name = model_name or config['model_name']
         
         # Ensure values are set
-        assert token_budget is not None, "token_budget must be set"
-        assert model_name is not None, "model_name must be set"
+        if token_budget is None:
+            raise ValueError("token_budget must be set")
+        if model_name is None:
+            raise ValueError("model_name must be set")
         
         self.default_token_budget = token_budget
         self.token_budgeter = TokenBudgeter(model_name)

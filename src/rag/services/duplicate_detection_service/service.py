@@ -41,8 +41,10 @@ class DuplicateDetector:
             if hash_algorithm is None:
                 hash_algorithm = config['hash_algorithm']
         
-        assert similarity_threshold is not None, "similarity_threshold must be set"
-        assert hash_algorithm is not None, "hash_algorithm must be set"
+        if similarity_threshold is None:
+            raise ValueError("similarity_threshold must be set")
+        if hash_algorithm is None:
+            raise ValueError("hash_algorithm must be set")
         
         self.similarity_threshold = similarity_threshold
         self.hash_algorithm = hash_algorithm

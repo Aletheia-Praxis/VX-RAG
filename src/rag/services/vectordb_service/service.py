@@ -45,7 +45,8 @@ class VectorStoreClient:
             dirs = get_data_directories()
             index_dir = dirs['index_dir']
         
-        assert index_dir is not None, "index_dir must be set"
+        if index_dir is None:
+            raise ValueError("index_dir must be set")
         self.index_dir = Path(index_dir)
         
         self.index: Optional[VectorStoreIndex] = None

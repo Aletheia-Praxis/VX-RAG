@@ -67,7 +67,8 @@ class RAGSystem:
             dirs = get_data_directories()
             documents_dir = dirs['processed_data_dir']
         
-        assert documents_dir is not None, "documents_dir must be set"
+        if documents_dir is None:
+            raise ValueError("documents_dir must be set")
         
         try:
             from llama_index.core import SimpleDirectoryReader
