@@ -219,7 +219,7 @@ def get_embedding_model_name(config_path: Optional[str] = None) -> str:
     """
     try:
         config = load_settings(config_path)
-        return config.get('embedding_model', 'all-MiniLM-L6-v2')
+        return str(config.get('embedding_model', 'all-MiniLM-L6-v2'))
     except (FileNotFoundError, ValueError) as e:
         logger.warning(f"Failed to load config, using default: {e}")
         return 'all-MiniLM-L6-v2'
@@ -263,7 +263,7 @@ def get_vector_store_type(config_path: Optional[str] = None) -> str:
     """
     try:
         config = load_settings(config_path)
-        return config.get('vector_store', 'faiss')
+        return str(config.get('vector_store', 'faiss'))
     except (FileNotFoundError, ValueError) as e:
         logger.warning(f"Failed to load config, using default: {e}")
         return 'faiss'
