@@ -80,9 +80,9 @@ reranker:
 
 # MCP configuration
 mcp:
-  host: "0.0.0.0"
-  port: 5000
-  debug: true
+  host: "127.0.0.1"
+  port: 25191  # The MCP server port is 2025, 29th day, 10th month (October), i.e. the date of creation of the repository.
+  debug: true  # Enable debug mode
   query_timeout: 600.0  # Query timeout in seconds (10 minutes)
 
 # API Ingest configuration
