@@ -437,8 +437,8 @@ def get_mcp_config(config_path: Optional[str] = None) -> Dict[str, Any]:
     mcp_section = config.get('mcp', {})
     
     mcp_config = {
-        'host': mcp_section.get('host', '0.0.0.0'),
-        'port': mcp_section.get('port', 5000),
+        'host': mcp_section.get('host', '127.0.0.1'),
+        'port': mcp_section.get('port', 25191),
         'debug': mcp_section.get('debug', True),
         'query_timeout': mcp_section.get('query_timeout', 600.0)
     }
