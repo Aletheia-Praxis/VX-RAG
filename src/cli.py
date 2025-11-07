@@ -283,7 +283,6 @@ def main() -> None:
         print(f"Querying: {args.query}")
         try:
             import asyncio
-            import yaml
             from pathlib import Path
             from rag.services.vectordb_service.service import VectorStoreClient
             from rag.services.retriever_service.service import RetrieverService
@@ -352,7 +351,6 @@ def main() -> None:
     elif args.command == "update-index":
         print(f"Updating index in {args.persist_dir} with documents from {args.data_dir}")
         try:
-            import yaml
             from pathlib import Path
             from llama_index.core import SimpleDirectoryReader
             
