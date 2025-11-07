@@ -459,50 +459,6 @@ class Chunker:
         """
         analysis = self._analyze_content_type(text)
         return str(analysis['type'])
-        # Check for code blocks (markdown or other formats)
-        code_block_patterns = [
-            r'```[\s\S]*?```',               # Markdown code blocks
-            r'    [\s\S]*?(?=\n\S|\n\n|$)',  # Indented code blocks
-            r'<code>[\s\S]*?</code>',        # HTML code tags
-            r'<pre>[\s\S]*?</pre>',          # HTML pre tags
-        ]
-        
-        # Check for tables
-        table_patterns = [
-            r'\|.*\|\n\|[\s\-\|:]+\|\n(?:\|.*\|\n)*',  # Markdown tables
-            r'<table[\s\S]*?</table>',                 # HTML tables
-        ]
-        
-        # Check for technical keywords that indicate code-like content
-        technical_keywords = [
-            'function', 'class', 'def ', 'import ', 'from ', 'return ', 
-            'if ', 'for ', 'while ', 'try:', 'except:', 'with ',
-            'SELECT ', 'INSERT ', 'UPDATE ', 'DELETE ', 'CREATE ', 'DROP ',
-            'public static', 'private ', 'protected ', 'interface ', 'extends ',
-            'function(', 'const ', 'let ', 'var ', '=>', 'async ', 'await '
-        ]
-        
-        # Count technical elements
-        technical_score = 0
-        
-        # Check code blocks
-        for pattern in code_block_patterns:
-            if re.findall(pattern, text, re.IGNORECASE | re.MULTILINE):
-                technical_score += 10
-        
-        # Check tables
-        for pattern in table_patterns:
-            if re.findall(pattern, text, re.IGNORECASE | re.MULTILINE):
-                technical_score += 5
-        
-        # Check technical keywords (but not too many to avoid false positives)
-        keyword_count = sum(1 for keyword in technical_keywords 
-                          if keyword.lower() in text.lower())
-        if keyword_count > 2:  # Lower threshold for considering it technical
-            technical_score += keyword_count // 2  # Less weight for keywords
-        
-        # Determine content type
-        return 'technical' if technical_score >= 10 else 'general'
     
     def get_chunking_stats(self, chunks: List[Dict[str, Any]]) -> Dict[str, Any]:
         """
