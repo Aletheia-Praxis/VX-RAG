@@ -4,7 +4,7 @@ Reranker Service implementation.
 Provides classes for re-ranking retrieved documents.
 """
 
-from typing import List, Dict, Any, Optional, cast
+from typing import List, Dict, Any, Optional
 import logging
 
 from sentence_transformers import CrossEncoder
