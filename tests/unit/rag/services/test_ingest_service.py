@@ -6,7 +6,7 @@ from unittest.mock import patch, MagicMock
 from pathlib import Path
 import tempfile
 
-from rag.services.ingest_service.service import PDFIngestAdapter, TXTIngestAdapter, MDIngestAdapter, save_processed_text
+from src.rag.services.ingest_service.service import PDFIngestAdapter, TXTIngestAdapter, MDIngestAdapter, save_processed_text
 
 
 class TestPDFIngestAdapter:
@@ -25,26 +25,38 @@ class TestPDFIngestAdapter:
             result = adapter.load_data(temp_dir)
             assert result == []
     
-    @patch('rag.services.ingest_service.service.SimpleDirectoryReader')
-    def test_load_data_success(self, mock_reader: MagicMock) -> None:
+    @patch('src.rag.services.ingest_service.service.DocumentConverter')
+    def test_load_data_success(self, mock_converter_class: MagicMock) -> None:
         """Test successful PDF loading."""
-        # Mock document
-        mock_doc = MagicMock()
-        mock_doc.id_ = "test_id"
-        mock_doc.text = "Test content"
-        mock_doc.metadata = {"file_path": "/test.pdf"}
+        # Mock converter instance
+        mock_converter = MagicMock()
+        mock_converter_class.return_value = mock_converter
         
-        mock_reader_instance = MagicMock()
-        mock_reader_instance.load_data.return_value = [mock_doc]
-        mock_reader.return_value = mock_reader_instance
+        # Mock conversion result
+        mock_result = MagicMock()
+        mock_document = MagicMock()
+        mock_document.export_to_markdown.return_value = "Test content"
+        mock_document.pages = [MagicMock()]  # One page
+        mock_result.document = mock_document
+        mock_converter.convert.return_value = mock_result
         
-        adapter = PDFIngestAdapter()
-        result = adapter.load_data("/test/dir")
-        
-        assert len(result) == 1
-        assert result[0]['id'] == "test_id"
-        assert result[0]['text'] == "Test content"
-        assert result[0]['metadata']['file_type'] == 'pdf'
+        # Mock utility functions
+        with patch('src.rag.services.ingest_service.service.normalize_text', return_value="Test content"), \
+             patch('src.rag.services.ingest_service.service.detect_language', return_value="en"):
+            
+            adapter = PDFIngestAdapter()
+            
+            # Create temp dir with a pdf file
+            with tempfile.TemporaryDirectory() as temp_dir:
+                pdf_file = Path(temp_dir) / "test.pdf"
+                pdf_file.write_text("")  # Empty file, since we're mocking
+                
+                result = adapter.load_data(temp_dir)
+                
+                assert len(result) == 1
+                assert result[0]['id'] == "test.pdf_0"
+                assert result[0]['text'] == "Test content"
+                assert result[0]['metadata']['file_type'] == 'pdf'
 
 
 class TestTXTIngestAdapter:
@@ -90,11 +102,15 @@ class TestSaveProcessedText:
             {
                 'id': 'test1',
                 'text': 'Test content 1',
+                'source': 'test.pdf',
+                'lang': 'en',
                 'metadata': {'title': 'Test 1'}
             },
             {
                 'id': 'test2',
                 'text': 'Test content 2',
+                'source': 'test2.pdf',
+                'lang': 'en',
                 'metadata': {'title': 'Test 2'}
             }
         ]
