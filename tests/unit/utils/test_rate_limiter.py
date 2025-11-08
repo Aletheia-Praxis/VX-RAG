@@ -148,13 +148,23 @@ async def test_concurrent_limit_enforcement(rate_limiter: RateLimiter) -> None:
         await asyncio.sleep(0.2)
         active_count -= 1
     
-    # Submit many requests
+    # Submit many requests - some will succeed, some will fail due to queue limits
     tasks = [
         rate_limiter.execute(f"req_{i}", concurrent_handler)
         for i in range(10)
     ]
     
-    await asyncio.gather(*tasks)
+    # Gather results, expecting some RuntimeErrors for queue full
+    results = await asyncio.gather(*tasks, return_exceptions=True)
+    
+    # Count successful vs failed requests
+    successful = sum(1 for r in results if not isinstance(r, Exception))
+    failed = sum(1 for r in results if isinstance(r, RuntimeError) and "queue is full" in str(r))
+    
+    # Should have some successful and some failed requests
+    assert successful > 0
+    assert failed > 0
+    assert successful + failed == 10
     
     # Max active should not exceed concurrent limit
     assert max_active <= rate_limiter.max_concurrent
