@@ -8,15 +8,26 @@ from typing import List, Dict, Any, TYPE_CHECKING, Optional
 import logging
 import os
 from pathlib import Path
+import re
 
 if TYPE_CHECKING:
     import pandas as pd
 
 from docling.document_converter import DocumentConverter
+from docling.datamodel.pipeline_options import PdfPipelineOptions
+from docling.datamodel.base_models import InputFormat
+from docling.document_converter import PdfFormatOption
 
 from ..duplicate_detection_service import DuplicateDetector
 from ...libs.utils.text_utils import normalize_text, detect_language
-from src.utils.config_loader import get_api_ingest_config
+from src.utils.config_loader import get_api_ingest_config, get_paddle_ocr_config
+
+# Lazy import PaddleOCR service
+try:
+    from ..paddle_ocr_service import PaddleOCRService
+    PADDLE_OCR_AVAILABLE = True
+except ImportError:
+    PADDLE_OCR_AVAILABLE = False
 
 logger = logging.getLogger(__name__)
 
@@ -31,16 +42,194 @@ class IngestAdapter:
 class PDFIngestAdapter(IngestAdapter):
     """Adapter for loading PDF documents using Docling for local parsing."""
     
-    def __init__(self) -> None:
+    def __init__(self, config_path: Optional[str] = None) -> None:
         """
-        Initialize PDF adapter with Docling.
+        Initialize PDF adapter with Docling and PaddleOCR.
         Enables OCR for scanned documents as required by the standard.
+        
+        Args:
+            config_path: Path to settings.yaml file
         """
         # Enable OCR for scanned documents (required by standard)
         os.environ['DOCLING_DO_OCR'] = 'true'
         
-        # Initialize Docling DocumentConverter
-        self.converter = DocumentConverter()
+        # Load PaddleOCR configuration
+        self.ocr_config = get_paddle_ocr_config(config_path)
+        self.ocr_enabled = self.ocr_config['enabled'] and PADDLE_OCR_AVAILABLE
+        
+        # Initialize PaddleOCR service if enabled
+        self.ocr_service: Optional[PaddleOCRService] = None
+        if self.ocr_enabled:
+            try:
+                self.ocr_service = PaddleOCRService(
+                    lang=self.ocr_config['lang'],
+                    use_gpu=self.ocr_config['use_gpu'],
+                    use_angle_cls=self.ocr_config['use_angle_cls'],
+                    show_log=self.ocr_config['show_log'],
+                    det_model_dir=self.ocr_config['det_model_dir'],
+                    rec_model_dir=self.ocr_config['rec_model_dir'],
+                    cls_model_dir=self.ocr_config['cls_model_dir'],
+                    use_space_char=self.ocr_config['use_space_char'],
+                    enable_mkldnn=self.ocr_config['enable_mkldnn'],
+                    cpu_threads=self.ocr_config['cpu_threads'],
+                    min_confidence=self.ocr_config['min_confidence']
+                )
+                logger.info("PaddleOCR service initialized successfully")
+            except Exception as e:
+                logger.warning(f"Failed to initialize PaddleOCR: {e}. Image text extraction disabled.")
+                self.ocr_enabled = False
+        else:
+            if not PADDLE_OCR_AVAILABLE:
+                logger.info("PaddleOCR not available. Install with: pip install paddleocr paddlepaddle")
+            else:
+                logger.info("PaddleOCR disabled in configuration")
+        
+        # Configure Docling to extract images
+        pipeline_options = PdfPipelineOptions()
+        pipeline_options.generate_picture_images = True  # Enable image extraction
+        pipeline_options.images_scale = 2.0  # Higher resolution for better OCR
+        
+        # Initialize Docling DocumentConverter with image extraction enabled
+        self.converter = DocumentConverter(
+            format_options={
+                InputFormat.PDF: PdfFormatOption(
+                    pipeline_options=pipeline_options
+                )
+            }
+        )
+    
+    def _process_images_with_ocr(
+        self,
+        markdown_text: str,
+        document: Any,
+        pdf_file: Path
+    ) -> str:
+        """
+        Process images from Docling document with PaddleOCR.
+        
+        Extracts text from images and replaces <!-- image --> placeholders
+        with extracted text or code.
+        
+        Args:
+            markdown_text: Original markdown text from Docling
+            document: Docling document object with pictures
+            pdf_file: Path to source PDF file
+            
+        Returns:
+            Markdown text with image placeholders replaced by extracted text
+        """
+        if not hasattr(document, 'pictures') or not document.pictures:
+            logger.info("No pictures found in document")
+            return markdown_text
+        
+        # Type guard for OCR service
+        if self.ocr_service is None:
+            logger.warning("OCR service not initialized, skipping image processing")
+            return markdown_text
+        
+        logger.info(f"Processing {len(document.pictures)} images with PaddleOCR")
+        
+        # Create directory for extracted images if needed
+        pdf_images_dir: Optional[Path] = None
+        if self.ocr_config['save_extracted_images']:
+            images_dir = Path(str(self.ocr_config['extracted_images_dir']))
+            pdf_images_dir = images_dir / pdf_file.stem
+            pdf_images_dir.mkdir(parents=True, exist_ok=True)
+        
+        # Extract text from each image
+        image_texts: List[str] = []
+        for idx, picture in enumerate(document.pictures):
+            try:
+                # Get image from picture object
+                if hasattr(picture, 'image') and hasattr(picture.image, 'pil_image'):
+                    pil_image = picture.image.pil_image
+                    
+                    # Save image if enabled
+                    if self.ocr_config['save_extracted_images'] and pdf_images_dir:
+                        image_path = pdf_images_dir / f"image_{idx}.png"
+                        pil_image.save(str(image_path))
+                        logger.debug(f"Saved image to {image_path}")
+                    
+                    # Extract text with OCR
+                    extracted_data = self.ocr_service.extract_text_from_image(
+                        pil_image,
+                        return_confidence=True
+                    )
+                    
+                    # Handle return type properly
+                    if isinstance(extracted_data, dict):
+                        extracted_text = str(extracted_data.get('text', ''))
+                        confidence = float(extracted_data.get('confidence', 0.0))
+                    else:
+                        extracted_text = str(extracted_data)
+                        confidence = 0.0
+                    
+                    if extracted_text.strip():
+                        # Check if extracted text is code
+                        is_code = self.ocr_service.is_code_image(extracted_text)
+                        
+                        # Format extracted text
+                        formatted_text = self.ocr_service.format_extracted_text(
+                            extracted_text,
+                            format_type=str(self.ocr_config['image_placeholder_format']),
+                            is_code=is_code
+                        )
+                        
+                        image_texts.append(formatted_text)
+                        logger.info(
+                            f"Extracted {'code' if is_code else 'text'} from image {idx} "
+                            f"(confidence: {confidence:.2f})"
+                        )
+                    else:
+                        logger.warning(f"No text extracted from image {idx}")
+                        image_texts.append("")
+                        
+                else:
+                    logger.warning(f"Cannot access image data for picture {idx}")
+                    image_texts.append("")
+                    
+            except Exception as e:
+                logger.error(f"Failed to process image {idx}: {e}")
+                image_texts.append("")
+        
+        # Replace image placeholders with extracted text
+        if self.ocr_config['replace_image_placeholders'] and image_texts:
+            markdown_text = self._replace_image_placeholders(markdown_text, image_texts)
+        
+        return markdown_text
+    
+    def _replace_image_placeholders(self, markdown_text: str, image_texts: List[str]) -> str:
+        """
+        Replace <!-- image --> placeholders with extracted text.
+        
+        Args:
+            markdown_text: Original markdown text
+            image_texts: List of extracted text from images
+            
+        Returns:
+            Markdown text with placeholders replaced
+        """
+        # Find all <!-- image --> markers
+        pattern = r'<!--\s*image\s*-->'
+        matches = list(re.finditer(pattern, markdown_text, re.IGNORECASE))
+        
+        if not matches:
+            logger.info("No <!-- image --> placeholders found in markdown")
+            return markdown_text
+        
+        logger.info(f"Found {len(matches)} image placeholders to replace")
+        
+        # Replace placeholders from end to start to preserve positions
+        result = markdown_text
+        for idx, match in enumerate(reversed(matches)):
+            # Get corresponding image text (reverse index)
+            text_idx = len(matches) - idx - 1
+            if text_idx < len(image_texts):
+                replacement = image_texts[text_idx]
+                result = result[:match.start()] + replacement + result[match.end():]
+                logger.debug(f"Replaced placeholder at position {match.start()} with extracted text")
+        
+        return result
     
     def load_data(self, source: str) -> List[Dict[str, Any]]:
         """
@@ -84,6 +273,15 @@ class PDFIngestAdapter(IngestAdapter):
                     
                     # Export to markdown
                     markdown_text = conversion_result.document.export_to_markdown()
+                    
+                    # Process images with PaddleOCR if enabled
+                    if self.ocr_enabled and self.ocr_service:
+                        markdown_text = self._process_images_with_ocr(
+                            markdown_text,
+                            conversion_result.document,
+                            pdf_file
+                        )
+                    
                     normalized_text = normalize_text(markdown_text)
                     lang = detect_language(normalized_text)
                     
@@ -94,6 +292,9 @@ class PDFIngestAdapter(IngestAdapter):
                     
                     # Get page count from Docling document
                     page_count = len(conversion_result.document.pages) if hasattr(conversion_result.document, 'pages') else None
+                    
+                    # Count images processed
+                    images_processed = len(conversion_result.document.pictures) if hasattr(conversion_result.document, 'pictures') else 0
                     
                     result.append({
                         'id': f"{pdf_file.name}_0",
@@ -109,11 +310,13 @@ class PDFIngestAdapter(IngestAdapter):
                             'page_count': page_count,
                             'category': 'document',
                             'parsed_with': 'docling',
-                            'content_type': 'markdown'  # Indicates structured markdown content
+                            'content_type': 'markdown',
+                            'ocr_enabled': self.ocr_enabled,
+                            'images_processed': images_processed
                         }
                     })
                     
-                    logger.info(f"Successfully parsed PDF: {pdf_file}")
+                    logger.info(f"Successfully parsed PDF: {pdf_file} (processed {images_processed} images)")
                     
                 except Exception as e:
                     logger.error(f"Failed to parse PDF {pdf_file} with Docling: {e}")
