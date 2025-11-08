@@ -13,10 +13,10 @@ class TestChunker:
     def test_init_default(self) -> None:
         """Test Chunker initialization with default parameters."""
         chunker = Chunker()
-        assert chunker.chunk_size == 1500
+        assert chunker.chunk_size == 1024
         assert chunker.chunk_overlap == 200
         assert chunker.separator == "\n"
-        assert not chunker.use_semantic_chunking
+        assert chunker.use_semantic_chunking
 
     def test_init_custom(self) -> None:
         """Test Chunker initialization with custom parameters."""
