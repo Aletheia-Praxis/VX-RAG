@@ -116,6 +116,25 @@ metrics_enabled: true
 metrics_log_interval: 300    # Log metrics every 5 minutes (in seconds)
 metrics_file: "metrics.log"  # File to log metrics
 
+# PaddleOCR configuration
+paddle_ocr:
+  enabled: true                          # Enable PaddleOCR for image text extraction
+  lang: "en"                             # OCR language (en, ch, fr, german, korean, japan)
+  use_gpu: false                         # Use GPU acceleration (requires CUDA)
+  use_angle_cls: true                    # Enable text angle classification
+  show_log: false                        # Show PaddleOCR logs
+  det_model_dir: null                    # Path to custom detection model (null = default)
+  rec_model_dir: null                    # Path to custom recognition model (null = default)
+  cls_model_dir: null                    # Path to custom classification model (null = default)
+  use_space_char: true                   # Recognize space characters
+  enable_mkldnn: false                   # Enable MKLDNN acceleration
+  cpu_threads: 4                         # Number of CPU threads for inference
+  min_confidence: 0.5                    # Minimum confidence threshold for OCR results
+  save_extracted_images: true            # Save extracted images to disk
+  extracted_images_dir: "./data/extracted_images"  # Directory for extracted images
+  replace_image_placeholders: true       # Replace <!-- image --> markers with extracted text
+  image_placeholder_format: "markdown"   # Format for image placeholders (markdown, html, plain)
+
 # Environment variables (set externally)
 # LLM_API_KEY: your_llm_api_key
 # MCP_API_KEY: your_mcp_api_key
