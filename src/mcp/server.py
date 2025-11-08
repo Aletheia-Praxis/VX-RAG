@@ -73,7 +73,7 @@ async def query_documents(params: QueryParams) -> str:
     
     try:
         logger.info(
-            f"Processing MCP query with rate limiting",
+            "Processing MCP query with rate limiting",
             request_id=request_id,
             query=params.query,
             top_k=params.top_k,
@@ -129,7 +129,7 @@ async def query_documents(params: QueryParams) -> str:
         # Queue full error
         duration = time.time() - start_time
         logger.error(
-            f"MCP query queue full",
+            "MCP query queue full",
             request_id=request_id,
             query=params.query,
             error=str(e),
@@ -145,7 +145,7 @@ async def query_documents(params: QueryParams) -> str:
     except Exception as e:
         duration = time.time() - start_time
         logger.error(
-            f"MCP query failed",
+            "MCP query failed",
             request_id=request_id,
             query=params.query, 
             duration_ms=duration * 1000, 
