@@ -64,12 +64,12 @@ class TestRetrieverService:
     def test_load_config_invalid_file(self):
         """Test loading invalid config file."""
         service = RetrieverService()
-        config = service._load_config("nonexistent_file.yaml")
-        assert config == {}
+        with pytest.raises(FileNotFoundError, match="Configuration file not found"):
+            service._load_config("nonexistent_file.yaml")
 
+    @patch('llama_index.core.retrievers.QueryFusionRetriever')
     @patch('src.rag.services.retriever_service.service.VectorIndexRetriever')
-    @patch('src.rag.services.retriever_service.service.QueryFusionRetriever')
-    def test_set_index(self, mock_query_fusion, mock_vector_retriever, mock_index):
+    def test_set_index(self, mock_vector_retriever, mock_query_fusion, mock_index):
         """Test setting index and initializing retrievers."""
         # Setup mocks
         mock_vector_retriever.return_value = Mock()
