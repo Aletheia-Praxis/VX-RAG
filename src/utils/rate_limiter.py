@@ -145,7 +145,7 @@ class RateLimiter:
         if self._semaphore.locked():
             # Concurrent limit reached, queue the request
             logger.info(
-                f"Concurrent limit reached, queueing request",
+                "Concurrent limit reached, queueing request",
                 request_id=request_id,
                 queue_size=len(self._queue),
             )
@@ -154,7 +154,7 @@ class RateLimiter:
                 if len(self._queue) >= self.queue_size:
                     self._rejected_requests += 1
                     logger.warning(
-                        f"Queue full, rejecting request",
+                        "Queue full, rejecting request",
                         request_id=request_id,
                         queue_size=len(self._queue),
                     )
@@ -177,7 +177,7 @@ class RateLimiter:
         # Execute request with semaphore
         async with self._semaphore:
             try:
-                logger.info(f"Executing request", request_id=request_id)
+                logger.info("Executing request", request_id=request_id)
                 
                 result = await asyncio.wait_for(
                     handler(*args, **kwargs),
@@ -185,14 +185,14 @@ class RateLimiter:
                 )
                 
                 self._completed_requests += 1
-                logger.info(f"Request completed", request_id=request_id)
+                logger.info("Request completed", request_id=request_id)
                 
                 return result
                 
             except asyncio.TimeoutError:
                 self._timed_out_requests += 1
                 logger.error(
-                    f"Request timed out",
+                    "Request timed out",
                     request_id=request_id,
                     timeout=timeout,
                 )
@@ -200,7 +200,7 @@ class RateLimiter:
             
             except Exception as e:
                 logger.error(
-                    f"Request failed",
+                    "Request failed",
                     request_id=request_id,
                     error=str(e),
                     exc_info=True,
@@ -228,7 +228,7 @@ class RateLimiter:
                         self._queue.remove(request)
                 
                 logger.error(
-                    f"Request timed out while waiting in queue",
+                    "Request timed out while waiting in queue",
                     request_id=request.request_id,
                     wait_time=time.time() - wait_start,
                 )
@@ -277,7 +277,7 @@ class RateLimiter:
                 self._queue.remove(req)
                 self._timed_out_requests += 1
                 logger.warning(
-                    f"Removed expired request from queue",
+                    "Removed expired request from queue",
                     request_id=req.request_id,
                     queued_time=time.time() - req.queued_at,
                 )
