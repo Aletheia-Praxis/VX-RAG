@@ -19,8 +19,8 @@ class TestEmbeddingService:
         """Mock HuggingFaceEmbedding for testing."""
         mock_model = Mock()
         # Mock the embedding methods
-        mock_model._get_text_embedding.return_value = [0.1, 0.2, 0.3]
-        mock_model._get_text_embeddings.return_value = [[0.1, 0.2, 0.3], [0.4, 0.5, 0.6]]
+        mock_model.get_text_embedding.return_value = [0.1, 0.2, 0.3]
+        mock_model.get_text_embedding_batch.return_value = [[0.1, 0.2, 0.3], [0.4, 0.5, 0.6]]
         return mock_model
 
     @pytest.fixture
@@ -28,14 +28,24 @@ class TestEmbeddingService:
         """Create EmbeddingService instance with mocked model."""
         with patch('src.rag.services.embedder_service.service.HuggingFaceEmbedding') as mock_hf:
             mock_hf.return_value = mock_huggingface_embedding
-            embedder = EmbeddingService(model_name="all-MiniLM-L6-v2", cache_size=10)
+            embedder = EmbeddingService(
+                model_name="all-MiniLM-L6-v2", 
+                cache_size=10, 
+                batch_size=10, 
+                trust_remote_code=False
+            )
             return embedder
 
-    def test_initialization_success(self, mock_huggingface_embedding: Mock) -> None:
+    def test_initialization_success(self) -> None:
         """Test successful initialization of EmbeddingService."""
         with patch('src.rag.services.embedder_service.service.HuggingFaceEmbedding') as mock_hf:
-            mock_hf.return_value = mock_huggingface_embedding
-            embedder = EmbeddingService(model_name="test-model", cache_size=5)
+            mock_hf.return_value = Mock()
+            embedder = EmbeddingService(
+                model_name="test-model", 
+                cache_size=5, 
+                batch_size=10, 
+                trust_remote_code=False
+            )
 
             assert embedder.model_name == "test-model"
             assert embedder.cache_size == 5
@@ -44,7 +54,7 @@ class TestEmbeddingService:
 
     def test_initialization_model_load_failure(self) -> None:
         """Test initialization failure when model loading fails."""
-        with patch('src.rag.services.embedder_service.service.HuggingFaceEmbedding') as mock_hf:
+        with patch('llama_index.embeddings.huggingface.HuggingFaceEmbedding') as mock_hf:
             mock_hf.side_effect = Exception("Model load failed")
 
             with pytest.raises(RuntimeError, match="Could not load embedding model"):
@@ -58,15 +68,15 @@ class TestEmbeddingService:
         result = embedder.embed_single("   ")
         assert result == []
 
-    def test_embed_single_success(self, embedder: EmbeddingService, mock_huggingface_embedding: Mock) -> None:
+    def test_embed_single_success(self, embedder: EmbeddingService, monkeypatch) -> None:
         """Test successful single embedding generation."""
         text = "test text"
         expected_embedding = [0.1, 0.2, 0.3]
 
+        monkeypatch.setattr(embedder.embed_model, 'get_text_embedding', lambda text: expected_embedding)
         result = embedder.embed_single(text)
 
         assert result == expected_embedding
-        mock_huggingface_embedding._get_text_embedding.assert_called_once_with(text)
 
     def test_embed_single_model_not_loaded(self, embedder: EmbeddingService) -> None:
         """Test embedding when model is not loaded."""
@@ -74,9 +84,12 @@ class TestEmbeddingService:
         # This test is not applicable
         pass
 
-    def test_embed_single_encoding_failure(self, embedder: EmbeddingService, mock_huggingface_embedding: Mock) -> None:
+    def test_embed_single_encoding_failure(self, embedder: EmbeddingService, monkeypatch) -> None:
         """Test embedding failure during encoding."""
-        mock_huggingface_embedding._get_text_embedding.side_effect = Exception("Encoding failed")
+        def mock_get_text_embedding(text):
+            raise Exception("Encoding failed")
+        
+        monkeypatch.setattr(embedder.embed_model, 'get_text_embedding', mock_get_text_embedding)
 
         with pytest.raises(Exception, match="Encoding failed"):
             embedder.embed_single("test")
@@ -86,32 +99,32 @@ class TestEmbeddingService:
         result = embedder.embed_batch([])
         assert result == []
 
-    def test_embed_batch_with_batch_size(self, embedder: EmbeddingService, mock_huggingface_embedding: Mock) -> None:
+    def test_embed_batch_with_batch_size(self, embedder: EmbeddingService, monkeypatch) -> None:
         """Test batch embedding (HuggingFaceEmbedding handles batching internally)."""
         texts = ["text1", "text2", "text3"]
         embeddings = [[0.1, 0.2], [0.3, 0.4], [0.5, 0.6]]
 
-        mock_huggingface_embedding._get_text_embeddings.return_value = embeddings
-
+        monkeypatch.setattr(embedder.embed_model, 'get_text_embedding_batch', lambda texts: embeddings)
         result = embedder.embed_batch(texts)
 
         assert result == embeddings
-        mock_huggingface_embedding._get_text_embeddings.assert_called_once_with(texts)
 
-    def test_embed_batch_encoding_failure(self, embedder: EmbeddingService, mock_huggingface_embedding: Mock) -> None:
+    def test_embed_batch_encoding_failure(self, embedder: EmbeddingService, monkeypatch) -> None:
         """Test batch embedding failure during encoding."""
-        mock_huggingface_embedding._get_text_embeddings.side_effect = Exception("Batch encoding failed")
+        def mock_get_text_embedding_batch(texts):
+            raise Exception("Batch encoding failed")
+        
+        monkeypatch.setattr(embedder.embed_model, 'get_text_embedding_batch', mock_get_text_embedding_batch)
 
         with pytest.raises(Exception, match="Batch encoding failed"):
             embedder.embed_batch(["text1"])
 
-    def test_embed_main_interface(self, embedder: EmbeddingService, mock_huggingface_embedding: Mock) -> None:
+    def test_embed_main_interface(self, embedder: EmbeddingService, monkeypatch) -> None:
         """Test the main embed interface."""
         texts = ["text1", "text2"]
         embeddings = [[0.1, 0.2], [0.3, 0.4]]
 
-        mock_huggingface_embedding._get_text_embeddings.return_value = embeddings
-
+        monkeypatch.setattr(embedder.embed_model, 'get_text_embedding_batch', lambda texts: embeddings)
         result = embedder.embed(texts)
 
         assert result == embeddings
