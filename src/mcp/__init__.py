@@ -6,6 +6,5 @@ for integrating with external LLMs and IDEs.
 """
 
 from .bridge import MCPBridge, get_mcp_bridge
-from .server import mcp
 
-__all__ = ["MCPBridge", "get_mcp_bridge", "mcp"]
+__all__ = ["MCPBridge", "get_mcp_bridge"]
