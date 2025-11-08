@@ -9,9 +9,7 @@ from typing import TYPE_CHECKING
 from src.utils.rate_limiter import RateLimiter, get_rate_limiter
 
 if TYPE_CHECKING:
-    from _pytest.fixtures import FixtureRequest
-    from _pytest.logging import LogCaptureFixture
-    from pytest_mock.plugin import MockerFixture
+    pass
 
 
 @pytest.fixture

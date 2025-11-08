@@ -9,16 +9,13 @@ from typing import TYPE_CHECKING
 
 from src.utils.task_queue import (
     TaskQueue,
-    Task,
     TaskStatus,
     TaskPriority,
     get_task_queue,
 )
 
 if TYPE_CHECKING:
-    from _pytest.fixtures import FixtureRequest
-    from _pytest.logging import LogCaptureFixture
-    from pytest_mock.plugin import MockerFixture
+    pass
 
 
 @pytest.fixture
