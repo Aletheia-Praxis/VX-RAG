@@ -52,7 +52,7 @@ class TestRerankerService:
             service = RerankerService(config_path=temp_config_file)
             assert service.config['model_name'] == 'cross-encoder/test-model'
             assert service.config['top_k'] == 3
-            mock_cross_encoder.assert_called_with('cross-encoder/test-model')
+            mock_cross_encoder.assert_called_with('cross-encoder/test-model', device='cpu')
 
     def test_init_with_custom_model(self):
         """Test initialization with custom model name."""
@@ -61,7 +61,7 @@ class TestRerankerService:
 
             service = RerankerService(model_name="custom-model")
             assert service.model_name == "custom-model"
-            mock_cross_encoder.assert_called_with("custom-model")
+            mock_cross_encoder.assert_called_with("custom-model", device='cpu')
 
     def test_init_model_failure(self):
         """Test initialization when model loading fails."""
@@ -81,8 +81,8 @@ class TestRerankerService:
     def test_load_config_invalid_file(self):
         """Test loading invalid config file."""
         service = RerankerService()
-        config = service._load_config("nonexistent_file.yaml")
-        assert config == {}
+        with pytest.raises(FileNotFoundError, match="Configuration file not found"):
+            service._load_config("nonexistent_file.yaml")
 
     def test_rerank_with_model(self):
         """Test reranking with loaded model."""
