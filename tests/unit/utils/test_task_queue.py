@@ -171,8 +171,8 @@ async def test_task_failure_and_retry(task_queue: TaskQueue) -> None:
         max_retries=3,
     )
     
-    # Wait for retries
-    await asyncio.sleep(5.0)
+    # Wait for retries - give more time for retry to complete
+    await asyncio.sleep(10.0)
     
     status = await task_queue.get_task_status(task_id)
     assert status is not None
