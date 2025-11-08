@@ -4,12 +4,15 @@ Retriever Service implementation.
 Provides classes for document retrieval operations.
 """
 
-from typing import List, Dict, Any, Optional, cast
+from typing import List, Dict, Any, Optional, cast, TYPE_CHECKING
 import importlib.util
 
 from llama_index.core import VectorStoreIndex
 from llama_index.core.retrievers import VectorIndexRetriever, BaseRetriever
 from llama_index.retrievers.bm25 import BM25Retriever
+
+if TYPE_CHECKING:
+    from sentence_transformers import CrossEncoder
 
 # Import structured logging and metrics
 from src.utils.logging_config import get_logger
@@ -33,7 +36,7 @@ class RetrieverService:
         self.bm25_retriever: Optional[BM25Retriever] = None
         self.hybrid_retriever: Optional[BaseRetriever] = None
         self.bm25_service: Optional[Any] = None
-        self.reranker = None
+        self.reranker: Optional['CrossEncoder'] = None
         self.config_path = config_path
         self.config = get_retriever_config(config_path)
         self._initialize_services()
