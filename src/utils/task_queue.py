@@ -22,7 +22,7 @@ from dataclasses import dataclass, asdict
 from datetime import datetime
 from enum import Enum
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional, Coroutine
+from typing import Any, Callable, Dict, List, Optional, Coroutine, Tuple
 from collections import deque
 
 from src.utils.logging_config import get_logger
@@ -70,9 +70,9 @@ class Task:
     """
     task_id: str
     name: str
-    func: Callable
-    args: tuple = ()
-    kwargs: Optional[dict] = None
+    func: Callable[..., Any]
+    args: Tuple[Any, ...] = ()
+    kwargs: Optional[Dict[str, Any]] = None
     priority: TaskPriority = TaskPriority.NORMAL
     status: TaskStatus = TaskStatus.PENDING
     result: Any = None
@@ -83,7 +83,7 @@ class Task:
     retries: int = 3
     max_retries: int = 3
     
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         """Initialize timestamps and kwargs."""
         if self.created_at is None:
             self.created_at = time.time()
@@ -168,7 +168,7 @@ class TaskQueue:
         self.enable_persistence = enable_persistence
         
         # Task queue (priority queue)
-        self._queue: asyncio.PriorityQueue = asyncio.PriorityQueue()
+        self._queue: asyncio.PriorityQueue[Task] = asyncio.PriorityQueue()
         
         # Task registry (all tasks by ID)
         self._tasks: Dict[str, Task] = {}
@@ -252,9 +252,9 @@ class TaskQueue:
     async def submit_task(
         self,
         name: str,
-        func: Callable,
-        args: tuple = (),
-        kwargs: Optional[dict] = None,
+        func: Callable[..., Any],
+        args: Tuple[Any, ...] = (),
+        kwargs: Optional[Dict[str, Any]] = None,
         priority: TaskPriority = TaskPriority.NORMAL,
         max_retries: int = 3,
     ) -> str:

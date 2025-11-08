@@ -14,7 +14,7 @@ For single-user local system, provides:
 import asyncio
 import time
 from dataclasses import dataclass
-from typing import Any, Callable, Coroutine, Optional, Dict
+from typing import Any, Callable, Coroutine, Optional, Dict, Tuple
 from collections import deque
 
 from src.utils.logging_config import get_logger
@@ -27,8 +27,8 @@ class QueuedRequest:
     """Represents a queued request."""
     request_id: str
     handler: Callable[..., Coroutine[Any, Any, Any]]
-    args: tuple
-    kwargs: dict
+    args: Tuple[Any, ...]
+    kwargs: Dict[str, Any]
     queued_at: float
     timeout: float
     
@@ -112,8 +112,8 @@ class RateLimiter:
         self,
         request_id: str,
         handler: Callable[..., Coroutine[Any, Any, Any]],
-        args: tuple = (),
-        kwargs: Optional[dict] = None,
+        args: Tuple[Any, ...] = (),
+        kwargs: Optional[Dict[str, Any]] = None,
         timeout: Optional[float] = None,
     ) -> Any:
         """
