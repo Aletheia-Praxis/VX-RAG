@@ -48,7 +48,7 @@ class TaskPriority(int, Enum):
 
 
 @dataclass
-class Task:
+class QueueTask:
     """
     Represents a single task in the queue.
     
@@ -109,7 +109,7 @@ class Task:
             'max_retries': self.max_retries,
         }
     
-    def __lt__(self, other: 'Task') -> bool:
+    def __lt__(self, other: 'QueueTask') -> bool:
         """Compare tasks by priority for priority queue."""
         # Higher priority first, then older tasks first
         if self.priority != other.priority:
@@ -168,20 +168,20 @@ class TaskQueue:
         self.enable_persistence = enable_persistence
         
         # Task queue (priority queue)
-        self._queue: asyncio.PriorityQueue[Task] = asyncio.PriorityQueue()
+        self._queue: asyncio.PriorityQueue[QueueTask] = asyncio.PriorityQueue()
         
         # Task registry (all tasks by ID)
-        self._tasks: Dict[str, Task] = {}
+        self._tasks: Dict[str, QueueTask] = {}
         
         # Currently running tasks
-        self._running_tasks: Dict[str, asyncio.Task] = {}
+        self._running_tasks: Dict[str, asyncio.Task[Any]] = {}
         
         # Thread pool for CPU-bound operations
         self._executor = ThreadPoolExecutor(max_workers=max_workers)
         
         # Control flags
         self._running = False
-        self._worker_task: Optional[asyncio.Task] = None
+        self._worker_task: Optional[asyncio.Task[Any]] = None
         
         # Semaphore for rate limiting
         self._concurrency_semaphore = asyncio.Semaphore(max_concurrent_tasks)
@@ -274,7 +274,7 @@ class TaskQueue:
         """
         task_id = str(uuid.uuid4())
         
-        task = Task(
+        task = QueueTask(
             task_id=task_id,
             name=name,
             func=func,
@@ -395,7 +395,7 @@ class TaskQueue:
         
         logger.info("TaskQueue worker loop stopped")
     
-    async def _execute_task(self, task: Task) -> None:
+    async def _execute_task(self, task: QueueTask) -> None:
         """
         Execute a single task with retry logic.
         
