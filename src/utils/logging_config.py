@@ -111,19 +111,23 @@ class StructuredLogger:
 
     def info(self, message: str, **kwargs: Any) -> None:
         """Log info message."""
-        self.logger.info(message, extra=kwargs if kwargs else None)
+        exc_info = kwargs.pop('exc_info', None)
+        self.logger.info(message, exc_info=exc_info, extra=kwargs if kwargs else None)
 
     def error(self, message: str, **kwargs: Any) -> None:
         """Log error message."""
-        self.logger.error(message, extra=kwargs if kwargs else None)
+        exc_info = kwargs.pop('exc_info', None)
+        self.logger.error(message, exc_info=exc_info, extra=kwargs if kwargs else None)
 
     def warning(self, message: str, **kwargs: Any) -> None:
         """Log warning message."""
-        self.logger.warning(message, extra=kwargs if kwargs else None)
+        exc_info = kwargs.pop('exc_info', None)
+        self.logger.warning(message, exc_info=exc_info, extra=kwargs if kwargs else None)
 
     def debug(self, message: str, **kwargs: Any) -> None:
         """Log debug message."""
-        self.logger.debug(message, extra=kwargs if kwargs else None)
+        exc_info = kwargs.pop('exc_info', None)
+        self.logger.debug(message, exc_info=exc_info, extra=kwargs if kwargs else None)
 
 
 # Global instance
