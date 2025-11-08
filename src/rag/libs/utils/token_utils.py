@@ -153,18 +153,7 @@ def budget_and_assemble(
     # Extract documents from results (handle different formats)
     documents = []
     for result in results:
-        if isinstance(result, dict):
-            # Assume result has document structure
-            documents.append(result)
-        else:
-            # Try to extract from object attributes
-            doc = {
-                'id': getattr(result, 'id', str(id(result))),
-                'text': getattr(result, 'text', str(result)),
-                'score': getattr(result, 'score', None),
-                'metadata': getattr(result, 'metadata', {})
-            }
-            documents.append(doc)
+        documents.append(result)
     
     # Select documents within budget
     selected_docs, total_tokens = budgeter.select_documents_by_budget(
