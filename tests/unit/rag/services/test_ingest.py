@@ -10,7 +10,6 @@ from src.rag.services.ingest_service.service import (
     PDFIngestAdapter, TXTIngestAdapter, MDIngestAdapter,
     APIIngestAdapter, DatabaseIngestAdapter, save_processed_text
 )
-from llama_index.core import Document
 
 
 @pytest.fixture
