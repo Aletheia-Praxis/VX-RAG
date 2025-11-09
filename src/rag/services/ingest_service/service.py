@@ -168,13 +168,15 @@ class PDFIngestAdapter(IngestAdapter):
                         # Check if extracted text is code
                         is_code = self.ocr_service.is_code_image(extracted_text)
                         
-                        # Format extracted text
-                        formatted_text = self.ocr_service.format_extracted_text(
-                            extracted_text,
-                            format_type=str(self.ocr_config['image_placeholder_format']),
-                            is_code=is_code
-                        )
-                        
+                        # Format extracted text:
+                        # - Code: ```code```
+                        # - Plain text from image: ```text```
+                        # This keeps markdown structure while clearly marking OCR content
+                        if is_code:
+                            formatted_text = f"\n```\n{extracted_text}\n```\n"
+                        else:
+                            formatted_text = f"\n```text\n{extracted_text}\n```\n"
+
                         image_texts.append(formatted_text)
                         logger.info(
                             f"Extracted {'code' if is_code else 'text'} from image {idx} "
