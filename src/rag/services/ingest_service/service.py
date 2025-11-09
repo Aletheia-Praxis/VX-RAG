@@ -165,21 +165,13 @@ class PDFIngestAdapter(IngestAdapter):
                         confidence = 0.0
                     
                     if extracted_text.strip():
-                        # Check if extracted text is code
-                        is_code = self.ocr_service.is_code_image(extracted_text)
+                        # Format as code block (same as Docling does for code)
+                        # No special markers - just plain code block
+                        formatted_text = f"\n```\n{extracted_text}\n```\n"
                         
-                        # Format extracted text:
-                        # - Code: ```code```
-                        # - Plain text from image: ```text```
-                        # This keeps markdown structure while clearly marking OCR content
-                        if is_code:
-                            formatted_text = f"\n```\n{extracted_text}\n```\n"
-                        else:
-                            formatted_text = f"\n```text\n{extracted_text}\n```\n"
-
                         image_texts.append(formatted_text)
                         logger.info(
-                            f"Extracted {'code' if is_code else 'text'} from image {idx} "
+                            f"Extracted text from image {idx} "
                             f"(confidence: {confidence:.2f})"
                         )
                     else:
