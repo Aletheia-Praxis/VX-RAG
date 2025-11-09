@@ -167,3 +167,38 @@ class TestRetrieverService:
 
             mock_retrieve.assert_called_once_with("test query", 5, None, search_type="hybrid")
             assert results == [{"text": "test", "score": 0.8}]
+    
+    def test_apply_metadata_boost_to_nodes(self):
+        """Test metadata boost application to nodes."""
+        service = RetrieverService()
+        
+        # Create mock nodes
+        node1 = Mock()
+        node1.score = 0.8
+        node1.metadata = {"source": "docs", "lang": "en"}
+        
+        node2 = Mock()
+        node2.score = 0.7
+        node2.metadata = {}
+        
+        node3 = Mock()
+        node3.score = 0.9
+        node3.metadata = {"source": "docs", "lang": "en", "topic": "security"}
+        
+        nodes = [node1, node2, node3]
+        
+        result = service._apply_metadata_boost_to_nodes(nodes)
+        
+        # Verify boost was applied
+        # Node1 with 2 fields: 0.8 * (1 + 0.1 * 2) = 0.8 * 1.2 = 0.96
+        assert abs(result[0].score - 0.96) < 0.01
+        # Node2 with 0 fields: 0.7 (unchanged)
+        assert result[1].score == 0.7
+        # Node3 with 3 fields: 0.9 * (1 + 0.1 * 3) = 0.9 * 1.3 = 1.17
+        assert abs(result[2].score - 1.17) < 0.01
+    
+    def test_apply_metadata_boost_to_nodes_empty(self):
+        """Test metadata boost with empty node list."""
+        service = RetrieverService()
+        result = service._apply_metadata_boost_to_nodes([])
+        assert result == []
