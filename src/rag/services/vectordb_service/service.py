@@ -90,10 +90,26 @@ class VectorStoreClient:
             
             """
             Initialize FAISS HNSW index
+            
             The technical standard requires HNSW for its high-speed, high-recall retrieval capabilities.
             The hnsw_m parameter represents the number of neighbors for each node in the graph.
-            METRIC_INNER_PRODUCT is used for cosine similarity,
-            as required by the technical standard for normalized embeddings.
+            
+            METRIC_INNER_PRODUCT is used for cosine similarity computation.
+            
+            Important: Vector Normalization
+
+            METRIC_INNER_PRODUCT with normalized vectors is mathematically equivalent to cosine similarity:
+            
+                For vectors a, b where ||a|| = ||b|| = 1:
+                cosine_similarity(a, b) = (a · b) / (||a|| × ||b||) = a · b = inner_product(a, b)
+            
+            The embedding model (all-MiniLM-L6-v2) automatically normalizes all vectors through its
+            built-in 'Normalize' module. This has been verified empirically (see tests).
+            
+            Therefore, explicit vector normalization is NOT required before adding to the index.
+            The vectors are already normalized by the embedding model.
+            
+            If changing the embedding model, verify that it produces normalized embeddings.
             """
             metric_type = faiss.METRIC_INNER_PRODUCT if metric == 'inner_product' else faiss.METRIC_L2
             faiss_index = faiss.IndexHNSWFlat(d, hnsw_m, metric_type)
