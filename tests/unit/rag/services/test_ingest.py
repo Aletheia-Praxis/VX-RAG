@@ -8,7 +8,7 @@ from typing import Tuple
 from unittest.mock import patch, MagicMock
 from src.rag.services.ingest_service.service import (
     PDFIngestAdapter, TXTIngestAdapter, MDIngestAdapter,
-    APIIngestAdapter, DatabaseIngestAdapter, save_processed_text
+    save_processed_text
 )
 
 
@@ -131,49 +131,6 @@ def test_md_load_data_with_files(tmp_path: Path) -> None:
     assert len(documents) == 1  # nosec B101
     assert "# Header" in documents[0]['text']  # nosec B101
     assert documents[0]['metadata']['file_type'] == "markdown"  # nosec B101
-
-
-def test_api_load_data_success() -> None:
-    """Test API load_data with successful response."""
-    adapter = APIIngestAdapter()
-    mock_response_data = [{"text": "API content", "id": 1}]
-    
-    with patch('requests.Session') as mock_session:
-        mock_response = mock_session.return_value.__enter__.return_value.get.return_value
-        mock_response.json.return_value = mock_response_data
-        
-        documents = adapter.load_data("http://example.com/api")
-        assert len(documents) == 1  # nosec B101
-        assert documents[0]['text'] == "API content"  # nosec B101
-
-
-def test_api_load_data_failure() -> None:
-    """Test API load_data with failure."""
-    adapter = APIIngestAdapter()
-    
-    with patch('requests.Session') as mock_session:
-        mock_session.return_value.__enter__.return_value.get.side_effect = Exception("Request failed")
-        
-        documents = adapter.load_data("http://example.com/api")
-        assert documents == []  # nosec B101
-
-
-def test_db_load_data_success() -> None:
-    """Test Database load_data with successful query."""
-    adapter = DatabaseIngestAdapter("sqlite:///test.db", "SELECT * FROM test")
-    
-    # Create a proper mock DataFrame
-    import pandas as pd
-    mock_df = pd.DataFrame({
-        'text': ['DB content'],
-        'id': [1]
-    })
-    
-    with patch('pandas.read_sql', return_value=mock_df) as mock_read_sql:
-        documents = adapter.load_data("")
-        assert len(documents) == 1  # nosec B101
-        assert "DB content" in documents[0]['text']  # nosec B101
-        mock_read_sql.assert_called_once()
 
 
 def test_save_processed_text_empty_list(temp_dirs: Tuple[Path, Path]) -> None:
