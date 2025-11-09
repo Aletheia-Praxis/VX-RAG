@@ -2,6 +2,25 @@
 
 This module provides the EmbeddingService class that uses LlamaIndex's
 HuggingFaceEmbedding to generate embeddings for text chunks.
+
+Important: Vector Normalization
+
+The default embedding model (all-MiniLM-L6-v2) automatically normalizes all output
+vectors to unit length (L2 norm = 1.0). This is achieved through a 'Normalize' module
+in the model's architecture.
+
+This automatic normalization is critical for the RAG system because:
+1. The FAISS index uses METRIC_INNER_PRODUCT for similarity search
+2. For normalized vectors: inner_product(a, b) = cosine_similarity(a, b)
+3. This equivalence only holds when ||a|| = ||b|| = 1.0
+
+Therefore, explicit vector normalization in the code is NOT required when using
+all-MiniLM-L6-v2 or other models with built-in normalization.
+
+If changing the embedding model in the future, verify that the new model also
+produces normalized embeddings by checking:
+- The model's architecture includes a normalization layer
+- Test embeddings have L2 norm ≈ 1.0
 """
 
 import logging
