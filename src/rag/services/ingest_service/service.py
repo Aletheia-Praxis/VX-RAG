@@ -20,7 +20,12 @@ from docling.document_converter import PdfFormatOption
 
 from ..duplicate_detection_service import DuplicateDetector
 from ...libs.utils.text_utils import normalize_text, detect_language
-from src.utils.config_loader import get_api_ingest_config, get_paddle_ocr_config
+from ..boilerplate_removal_service import remove_boilerplate
+from src.utils.config_loader import (
+    get_api_ingest_config,
+    get_paddle_ocr_config,
+    get_boilerplate_removal_config
+)
 
 # Lazy import PaddleOCR service
 try:
@@ -56,6 +61,10 @@ class PDFIngestAdapter(IngestAdapter):
         # Load PaddleOCR configuration
         self.ocr_config = get_paddle_ocr_config(config_path)
         self.ocr_enabled = self.ocr_config['enabled'] and PADDLE_OCR_AVAILABLE
+        
+        # Load boilerplate removal configuration
+        self.boilerplate_config = get_boilerplate_removal_config(config_path)
+        self.boilerplate_enabled = self.boilerplate_config['enabled']
         
         # Initialize PaddleOCR service if enabled
         self.ocr_service: Optional[PaddleOCRService] = None
@@ -281,7 +290,17 @@ class PDFIngestAdapter(IngestAdapter):
                             pdf_file
                         )
                     
-                    normalized_text = normalize_text(markdown_text)
+                    # Remove boilerplate AFTER OCR but BEFORE normalization
+                    # This ensures OCR patterns (<!-- image -->) are preserved during OCR processing
+                    if self.boilerplate_enabled:
+                        aggressive_mode = self.boilerplate_config['aggressive_mode']
+                        cleaned_text = remove_boilerplate(markdown_text, aggressive_mode=aggressive_mode)
+                        logger.debug(f"Boilerplate removal applied (aggressive={aggressive_mode})")
+                    else:
+                        cleaned_text = markdown_text
+                        logger.debug("Boilerplate removal disabled")
+                    
+                    normalized_text = normalize_text(cleaned_text)
                     lang = detect_language(normalized_text)
                     
                     # Extract basic metadata from file
