@@ -85,12 +85,6 @@ mcp:
   debug: true  # Enable debug mode
   query_timeout: 600.0  # Query timeout in seconds (10 minutes)
 
-# API Ingest configuration
-api_ingest:
-  timeout: 30  # Request timeout in seconds
-  retries: 3   # Number of retry attempts
-  backoff_factor: 1  # Exponential backoff factor
-
 # Context Assembler configuration
 context_assembler:
   token_budget: 2048  # Default token budget for context
