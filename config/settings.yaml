@@ -134,6 +134,16 @@ paddle_ocr:
   extracted_images_dir: "./data/extracted_images"  # Directory for extracted images
   replace_image_placeholders: true       # Replace <!-- image --> markers with extracted text
 
-# Environment variables (set externally)
-# LLM_API_KEY: your_llm_api_key
-# MCP_API_KEY: your_mcp_api_key
+# Boilerplate removal configuration
+boilerplate_removal:
+  enabled: true                        # Enable aggressive boilerplate removal
+  aggressive_mode: true                # Use aggressive patterns (recommended for blog posts)
+  position: "after_ocr"                # Apply after OCR but before normalization
+  patterns:
+    remove_html_comments: true         # Remove <!-- image --> and similar
+    remove_blog_metadata: true         # Remove blog URLs, author footers
+    remove_footer_timestamps: true     # Remove date footers
+    remove_navigation: true            # Remove breadcrumbs and nav elements
+    remove_social_sharing: true        # Remove social media elements
+    preserve_code_blocks: true         # Always preserve ```code``` blocks
+    preserve_markdown_structure: true  # Always preserve ## headers and lists
