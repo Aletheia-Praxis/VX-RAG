@@ -16,21 +16,21 @@ def test_imports():
     print("Testing imports...")
     
     try:
-        from src.rag.services.paddle_ocr_service import PaddleOCRService
+        from src.rag.services.paddle_ocr_service import PaddleOCRService  # noqa: F401
         print("[PASS] PaddleOCRService imported successfully")
     except ImportError as e:
         print(f"[FAIL] Failed to import PaddleOCRService: {e}")
         return False
     
     try:
-        from src.rag.services.ingest_service import PDFIngestAdapter
+        from src.rag.services.ingest_service import PDFIngestAdapter  # noqa: F401
         print("[PASS] PDFIngestAdapter imported successfully")
     except ImportError as e:
         print(f"[FAIL] Failed to import PDFIngestAdapter: {e}")
         return False
     
     try:
-        from src.utils.config_loader import get_paddle_ocr_config
+        from src.utils.config_loader import get_paddle_ocr_config  # noqa: F401
         print("[PASS] get_paddle_ocr_config imported successfully")
     except ImportError as e:
         print(f"[FAIL] Failed to import get_paddle_ocr_config: {e}")
