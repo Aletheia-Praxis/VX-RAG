@@ -57,10 +57,13 @@ class HybridSearchService:
         # Combine results
         combined_results = self._combine_results(vector_results, bm25_results, self.hybrid_alpha)
 
-        # Rerank if reranker is available
+        # Apply metadata boost if reranker is available and enabled
         if self.reranker_service:
+            logger.info("Applying metadata boost to combined results.")
+            combined_results = self.reranker_service.apply_metadata_boost(combined_results)
+            
+            # Rerank with cross-encoder
             logger.info("Reranking combined results.")
-            # Assuming reranker_service has a `rerank` method
             combined_results = self.reranker_service.rerank(query, combined_results)
 
         return combined_results[:top_k]
