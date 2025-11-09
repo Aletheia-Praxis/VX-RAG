@@ -64,8 +64,10 @@ class PaddleOCRService:
         self.cpu_threads = cpu_threads
         self.min_confidence = min_confidence
         
-        self.ocr = None
+        self.ocr: Any = None  # Will be initialized in _initialize_ocr()
         self._initialize_ocr()
+        # After _initialize_ocr(), self.ocr is guaranteed to be a PaddleOCR instance
+        # (or __init__ will raise an exception)
     
     def _initialize_ocr(self) -> None:
         """Initialize PaddleOCR engine."""
@@ -116,15 +118,11 @@ class PaddleOCRService:
         Returns:
             Extracted text string or dict with text and confidence scores
         """
-        if self.ocr is None:
-            logger.error("OCR engine not initialized")
-            return "" if not return_confidence else {"text": "", "confidence": 0.0}
+        # Convert image to appropriate format
+        img_array = self._prepare_image(image)
         
         try:
-            # Convert image to appropriate format
-            img_array = self._prepare_image(image)
-            
-            # Perform OCR
+            # Perform OCR (self.ocr is guaranteed to be initialized in __init__)
             result = self.ocr.ocr(img_array, cls=self.use_angle_cls)
             
             if not result or not result[0]:
