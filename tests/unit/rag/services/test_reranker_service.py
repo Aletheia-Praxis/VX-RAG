@@ -198,3 +198,59 @@ class TestRerankerService:
 
             # Document from 2023 should have higher priority
             assert result[0]['priority_score'] >= result[1]['priority_score']
+    
+    def test_apply_metadata_boost_basic(self):
+        """Test basic metadata boost application."""
+        with patch('src.rag.services.reranker_service.service.CrossEncoder') as mock_cross_encoder:
+            mock_cross_encoder.return_value = Mock()
+
+            service = RerankerService()
+            documents = [
+                {"text": "doc1", "score": 0.8, "metadata": {"source": "docs", "lang": "en"}},
+                {"text": "doc2", "score": 0.7, "metadata": {}},
+                {"text": "doc3", "score": 0.9, "metadata": {"source": "docs", "lang": "en", "topic": "security"}}
+            ]
+
+            result = service.apply_metadata_boost(documents, boost_factor=0.1)
+
+            # Verify boost was applied
+            assert 'metadata_boost_applied' in result[0]
+            assert 'metadata_boost_applied' not in result[1]  # No metadata
+            assert 'metadata_boost_applied' in result[2]
+            
+            # Doc with 2 fields: 0.8 * (1 + 0.1 * 2) = 0.8 * 1.2 = 0.96
+            assert abs(result[0]['score'] - 0.96) < 0.01
+            # Doc with 0 fields: 0.7 (unchanged)
+            assert result[1]['score'] == 0.7
+            # Doc with 3 fields: 0.9 * (1 + 0.1 * 3) = 0.9 * 1.3 = 1.17
+            assert abs(result[2]['score'] - 1.17) < 0.01
+    
+    def test_apply_metadata_boost_empty_documents(self):
+        """Test metadata boost with empty document list."""
+        with patch('src.rag.services.reranker_service.service.CrossEncoder') as mock_cross_encoder:
+            mock_cross_encoder.return_value = Mock()
+
+            service = RerankerService()
+            result = service.apply_metadata_boost([])
+
+            assert result == []
+    
+    def test_apply_metadata_boost_custom_fields(self):
+        """Test metadata boost with custom priority fields."""
+        with patch('src.rag.services.reranker_service.service.CrossEncoder') as mock_cross_encoder:
+            mock_cross_encoder.return_value = Mock()
+
+            service = RerankerService()
+            documents = [
+                {"text": "doc1", "score": 0.8, "metadata": {"custom_field": "value", "another": "data"}},
+            ]
+
+            result = service.apply_metadata_boost(
+                documents, 
+                boost_factor=0.2, 
+                priority_fields=["custom_field", "another"]
+            )
+
+            # Doc with 2 custom fields: 0.8 * (1 + 0.2 * 2) = 0.8 * 1.4 = 1.12
+            assert abs(result[0]['score'] - 1.12) < 0.01
+            assert result[0]['metadata_boost_applied'] == 1.4
