@@ -2,6 +2,15 @@
 Ingest Service implementation.
 
 Provides classes and functions for document ingestion.
+
+Supported adapters (per technical standard):
+- PDFIngestAdapter: Parses PDF documents using Docling with OCR support
+- TXTIngestAdapter: Loads plain text documents  
+- MDIngestAdapter: Loads Markdown documents
+
+The system focuses exclusively on local file formats as specified in the
+VX-RAG technical standard. API and Database adapters are explicitly excluded
+as they are not required for the Vx Underground document collection.
 """
 
 from typing import List, Dict, Any, TYPE_CHECKING, Optional
@@ -22,7 +31,6 @@ from ..duplicate_detection_service import DuplicateDetector
 from ...libs.utils.text_utils import normalize_text, detect_language
 from ..boilerplate_removal_service import remove_boilerplate
 from src.utils.config_loader import (
-    get_api_ingest_config,
     get_paddle_ocr_config,
     get_boilerplate_removal_config
 )
@@ -479,204 +487,6 @@ class MDIngestAdapter(IngestAdapter):
         except Exception as e:
             logger.error(f"Failed to load MD documents from {raw_md_dir}: {e}")
             return []
-
-
-class APIIngestAdapter(IngestAdapter):
-    """Adapter for loading data from JSON API endpoints."""
-    
-    def __init__(self, timeout: Optional[int] = None, retries: Optional[int] = None, config_path: Optional[str] = None) -> None:
-        """
-        Initialize API adapter.
-        
-        Args:
-            timeout: Request timeout in seconds. If None, loads from config.
-            retries: Number of retry attempts. If None, loads from config.
-            config_path: Path to settings.yaml. If None, uses default location.
-        """
-        if timeout is None or retries is None:
-            config = get_api_ingest_config(config_path)
-            if timeout is None:
-                timeout = config['timeout']
-            if retries is None:
-                retries = config['retries']
-        
-        if timeout is None:
-            raise ValueError("timeout must be set")
-        if retries is None:
-            raise ValueError("retries must be set")
-        
-        self.timeout = timeout
-        self.retries = retries
-        self.backoff_factor = get_api_ingest_config(config_path).get('backoff_factor', 1)
-    
-    def load_data(self, source: str) -> List[Dict[str, Any]]:
-        """
-        Load data from JSON API endpoint.
-        
-        Args:
-            source: API endpoint URL
-            
-        Returns:
-            List of document dictionaries with unified format
-        """
-        import requests
-        from requests.adapters import HTTPAdapter
-        from urllib3.util.retry import Retry
-        
-        try:
-            # Setup retry strategy with config values
-            retry_strategy = Retry(
-                total=self.retries,
-                status_forcelist=[429, 500, 502, 503, 504],
-                backoff_factor=self.backoff_factor
-            )
-            adapter = HTTPAdapter(max_retries=retry_strategy)
-            
-            with requests.Session() as session:
-                session.mount("http://", adapter)
-                session.mount("https://", adapter)
-                
-                logger.info(f"Fetching data from API: {source}")
-                response = session.get(source, timeout=self.timeout)
-                response.raise_for_status()
-                
-                data = response.json()
-                
-                # Assume data is a list of items or a single item
-                if isinstance(data, list):
-                    items = data
-                elif isinstance(data, dict):
-                    items = [data]
-                else:
-                    logger.error(f"Unexpected API response format from {source}")
-                    return []
-                
-                result = []
-                for i, item in enumerate(items):
-                    # Extract text from item (customize based on API structure)
-                    text = self._extract_text_from_item(item)
-                    if text:
-                        normalized_text = normalize_text(text)
-                        lang = detect_language(normalized_text)
-                        
-                        result.append({
-                            'id': f"{source}_{i}",
-                            'source': source,
-                            'text': normalized_text,
-                            'lang': lang,
-                            'metadata': {
-                                'api_url': source,
-                                'item_index': i,
-                                'raw_data': item
-                            }
-                        })
-                
-                logger.info(f"Successfully loaded {len(result)} items from API: {source}")
-                return result
-                
-        except Exception as e:
-            logger.error(f"Failed to load data from API {source}: {e}")
-            return []
-    
-    def _extract_text_from_item(self, item: Dict[str, Any]) -> str:
-        """
-        Extract text content from API item.
-        Customize this method based on the API response structure.
-        
-        Args:
-            item: API response item
-            
-        Returns:
-            Extracted text
-        """
-        # Default implementation: look for common text fields
-        text_fields = ['text', 'content', 'description', 'body', 'message']
-        for field in text_fields:
-            if field in item:
-                value = item[field]
-                if isinstance(value, str):
-                    return value
-        
-        # If no text field found, convert the whole item to string
-        return str(item)
-
-
-class DatabaseIngestAdapter(IngestAdapter):
-    """Adapter for loading data from databases."""
-    
-    def __init__(self, connection_string: str, query: str) -> None:
-        """
-        Initialize database adapter.
-        
-        Args:
-            connection_string: Database connection string
-            query: SQL query to execute
-        """
-        self.connection_string = connection_string
-        self.query = query
-    
-    def load_data(self, source: str) -> List[Dict[str, Any]]:
-        """
-        Load data from database using the configured query.
-        
-        Args:
-            source: Ignored for database adapter (uses configured connection)
-            
-        Returns:
-            List of document dictionaries with unified format
-        """
-        try:
-            import pandas as pd
-            
-            logger.info("Connecting to database and executing query")
-            df = pd.read_sql(self.query, self.connection_string)
-            
-            result = []
-            for idx, row in df.iterrows():
-                # Convert row to text (customize based on schema)
-                text = self._row_to_text(row)
-                if text:
-                    normalized_text = normalize_text(text)
-                    lang = detect_language(normalized_text)
-                    
-                    result.append({
-                        'id': f"db_{idx}",
-                        'source': self.connection_string.split('@')[-1] if '@' in self.connection_string else 'database',
-                        'text': normalized_text,
-                        'lang': lang,
-                        'metadata': {
-                            'db_connection': self.connection_string,
-                            'query': self.query,
-                            'row_index': idx,
-                            'raw_row': row.to_dict()
-                        }
-                    })
-            
-            logger.info(f"Successfully loaded {len(result)} rows from database")
-            return result
-            
-        except Exception as e:
-            logger.error(f"Failed to load data from database: {e}")
-            return []
-    
-    def _row_to_text(self, row: "pd.Series") -> str:
-        """
-        Convert database row to text content.
-        Customize this method based on your database schema.
-        
-        Args:
-            row: Pandas Series representing a database row
-            
-        Returns:
-            Extracted text
-        """
-        # Default: concatenate all string columns
-        text_parts = []
-        for col, value in row.items():
-            if isinstance(value, str) and value.strip():
-                text_parts.append(f"{col}: {value}")
-        
-        return ' '.join(text_parts)
 
 
 def process_and_save_documents(documents: List[Dict[str, Any]], processed_dir: Path) -> int:
