@@ -105,6 +105,79 @@ class RerankerService:
             logger.error(f"Failed to rerank documents: {e}")
             return documents
     
+    def apply_metadata_boost(
+        self,
+        documents: List[Dict[str, Any]],
+        boost_factor: Optional[float] = None,
+        priority_fields: Optional[List[str]] = None
+    ) -> List[Dict[str, Any]]:
+        """Apply metadata-based score boosting to documents.
+        
+        This method boosts the relevance scores of documents that have
+        important metadata fields populated. This helps prioritize documents
+        with richer context.
+        
+        Args:
+            documents: List of documents with 'score' and 'metadata' fields
+            boost_factor: Multiplicative boost factor (default from config)
+            priority_fields: List of metadata fields to check (e.g., ['source', 'lang', 'topic'])
+        
+        Returns:
+            Documents with boosted scores
+        """
+        if not documents:
+            return documents
+        
+        # Resolve numeric boost value (guard against None and bad types)
+        try:
+            if boost_factor is None:
+                bf_raw = self.config.get('metadata_boost', 0.1)
+            else:
+                bf_raw = boost_factor
+            # Ensure we have a float to multiply with integers
+            boost_value: float = float(bf_raw) if bf_raw is not None else 0.1
+        except (TypeError, ValueError):
+            logger.warning("Invalid metadata_boost value (%s), defaulting to 0.1", bf_raw)
+            boost_value = 0.1
+        
+        if priority_fields is None:
+            # Default priority fields for VX-RAG cybersecurity documents
+            priority_fields = ['source', 'lang', 'topic', 'author', 'year']
+        
+        try:
+            for doc in documents:
+                metadata = doc.get('metadata', {})
+                current_score = doc.get('score', 0.0)
+                
+                # Count how many priority fields are present and non-empty
+                populated_fields = sum(
+                    1 for field in priority_fields
+                    if field in metadata and metadata[field]
+                )
+                
+                # Apply boost: score * (1 + boost_value * populated_fields)
+                # Example: 0.8 * (1 + 0.1 * 3) = 0.8 * 1.3 = 1.04
+                if populated_fields > 0:
+                    boost_multiplier = 1.0 + (boost_value * populated_fields)
+                    boosted_score = current_score * boost_multiplier
+                    doc['score'] = boosted_score
+                    doc['metadata_boost_applied'] = boost_multiplier
+                    
+                    logger.debug(
+                        f"Applied metadata boost: {current_score:.4f} -> {boosted_score:.4f} "
+                        f"(fields: {populated_fields}, multiplier: {boost_multiplier:.2f})"
+                    )
+            
+            logger.info(
+                f"Applied metadata boost to {len(documents)} documents "
+                f"(factor={boost_value}, fields={priority_fields})"
+            )
+            return documents
+            
+        except Exception as e:
+            logger.error(f"Failed to apply metadata boost: {e}")
+            return documents
+    
     def prioritize_by_metadata(self, documents: List[Dict[str, Any]], priority_rules: Dict[str, Any]) -> List[Dict[str, Any]]:
         """Prioritize documents based on metadata rules.
         
