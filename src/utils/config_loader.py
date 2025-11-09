@@ -575,7 +575,6 @@ def get_paddle_ocr_config(config_path: Optional[str] = None) -> Dict[str, Any]:
         - save_extracted_images: Save extracted images to disk
         - extracted_images_dir: Directory for extracted images
         - replace_image_placeholders: Replace <!-- image --> markers with extracted text
-        - image_placeholder_format: Format for image placeholders
     """
     config = load_settings(config_path)
     
@@ -596,8 +595,7 @@ def get_paddle_ocr_config(config_path: Optional[str] = None) -> Dict[str, Any]:
         'min_confidence': ocr_section.get('min_confidence', 0.5),
         'save_extracted_images': ocr_section.get('save_extracted_images', True),
         'extracted_images_dir': ocr_section.get('extracted_images_dir', './data/extracted_images'),
-        'replace_image_placeholders': ocr_section.get('replace_image_placeholders', True),
-        'image_placeholder_format': ocr_section.get('image_placeholder_format', 'markdown')
+        'replace_image_placeholders': ocr_section.get('replace_image_placeholders', True)
     }
     
     logger.info(
