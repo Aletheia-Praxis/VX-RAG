@@ -137,7 +137,7 @@ class PDFIngestAdapter(IngestAdapter):
             pdf_images_dir.mkdir(parents=True, exist_ok=True)
         
         # Extract text from each image
-        image_texts: List[str] = []
+        image_texts: List[Optional[str]] = []
         for idx, picture in enumerate(document.pictures):
             try:
                 # Get image from picture object
@@ -175,16 +175,17 @@ class PDFIngestAdapter(IngestAdapter):
                             f"(confidence: {confidence:.2f})"
                         )
                     else:
-                        logger.warning(f"No text extracted from image {idx}")
-                        image_texts.append("")
+                        # No text found - keep placeholder as is
+                        logger.info(f"No text extracted from image {idx}, keeping <!-- image --> placeholder")
+                        image_texts.append(None)
                         
                 else:
                     logger.warning(f"Cannot access image data for picture {idx}")
-                    image_texts.append("")
+                    image_texts.append(None)
                     
             except Exception as e:
                 logger.error(f"Failed to process image {idx}: {e}")
-                image_texts.append("")
+                image_texts.append(None)
         
         # Replace image placeholders with extracted text
         if self.ocr_config['replace_image_placeholders'] and image_texts:
@@ -192,16 +193,16 @@ class PDFIngestAdapter(IngestAdapter):
         
         return markdown_text
     
-    def _replace_image_placeholders(self, markdown_text: str, image_texts: List[str]) -> str:
+    def _replace_image_placeholders(self, markdown_text: str, image_texts: List[Optional[str]]) -> str:
         """
         Replace <!-- image --> placeholders with extracted text.
         
         Args:
             markdown_text: Original markdown text
-            image_texts: List of extracted text from images
+            image_texts: List of extracted text from images (None = keep placeholder)
             
         Returns:
-            Markdown text with placeholders replaced
+            Markdown text with placeholders replaced (or kept if no text extracted)
         """
         # Find all <!-- image --> markers
         pattern = r'<!--\s*image\s*-->'
@@ -220,8 +221,12 @@ class PDFIngestAdapter(IngestAdapter):
             text_idx = len(matches) - idx - 1
             if text_idx < len(image_texts):
                 replacement = image_texts[text_idx]
-                result = result[:match.start()] + replacement + result[match.end():]
-                logger.debug(f"Replaced placeholder at position {match.start()} with extracted text")
+                # Only replace if text was extracted (not None)
+                if replacement is not None:
+                    result = result[:match.start()] + replacement + result[match.end():]
+                    logger.debug(f"Replaced placeholder at position {match.start()} with extracted text")
+                else:
+                    logger.debug(f"Keeping <!-- image --> placeholder at position {match.start()} (no text extracted)")
         
         return result
     
