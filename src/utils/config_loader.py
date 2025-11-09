@@ -603,3 +603,43 @@ def get_paddle_ocr_config(config_path: Optional[str] = None) -> Dict[str, Any]:
         f"lang={ocr_config['lang']}, use_gpu={ocr_config['use_gpu']}"
     )
     return ocr_config
+
+
+def get_boilerplate_removal_config(config_path: Optional[str] = None) -> Dict[str, Any]:
+    """
+    Get boilerplate removal configuration from settings.yaml.
+    
+    Args:
+        config_path: Path to settings.yaml file
+        
+    Returns:
+        Dictionary with boilerplate removal configuration:
+        - enabled: Enable aggressive boilerplate removal
+        - aggressive_mode: Use aggressive patterns
+        - position: When to apply (after_ocr, before_normalization)
+        - patterns: Dictionary of pattern-specific flags
+    """
+    config = load_settings(config_path)
+    
+    boilerplate_section = config.get('boilerplate_removal', {})
+    
+    boilerplate_config = {
+        'enabled': boilerplate_section.get('enabled', True),
+        'aggressive_mode': boilerplate_section.get('aggressive_mode', True),
+        'position': boilerplate_section.get('position', 'after_ocr'),
+        'patterns': boilerplate_section.get('patterns', {
+            'remove_html_comments': True,
+            'remove_blog_metadata': True,
+            'remove_footer_timestamps': True,
+            'remove_navigation': True,
+            'remove_social_sharing': True,
+            'preserve_code_blocks': True,
+            'preserve_markdown_structure': True
+        })
+    }
+    
+    logger.info(
+        f"Loaded boilerplate removal config: enabled={boilerplate_config['enabled']}, "
+        f"aggressive_mode={boilerplate_config['aggressive_mode']}"
+    )
+    return boilerplate_config
