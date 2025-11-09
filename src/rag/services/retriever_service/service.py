@@ -216,8 +216,11 @@ class RetrieverService:
             # Limit to top_k
             nodes = nodes[:top_k]
             
-            # Apply reranking if available
+            # Apply metadata boost and reranking if available
             if self.reranker and len(nodes) > 1:
+                # Apply metadata boost before reranking
+                nodes = self._apply_metadata_boost_to_nodes(nodes)
+                # Then rerank with cross-encoder
                 nodes = self._rerank_nodes(query, nodes)
             
             # Extract results
@@ -254,6 +257,50 @@ class RetrieverService:
                         error=str(e), 
                         duration_ms=duration * 1000)
             return []
+    
+    def _apply_metadata_boost_to_nodes(self, nodes: List[Any]) -> List[Any]:
+        """Apply metadata-based score boosting to nodes.
+        
+        Args:
+            nodes: List of nodes with scores and metadata
+            
+        Returns:
+            Nodes with boosted scores
+        """
+        try:
+            reranker_config = get_reranker_config(self.config_path)
+            boost_factor = reranker_config.get('metadata_boost', 0.1)
+            
+            # Default priority fields for VX-RAG
+            priority_fields = ['source', 'lang', 'topic', 'author', 'year']
+            
+            for node in nodes:
+                metadata = node.metadata
+                current_score = getattr(node, 'score', 0.0)
+                
+                # Count populated priority fields
+                populated_fields = sum(
+                    1 for field in priority_fields
+                    if field in metadata and metadata[field]
+                )
+                
+                # Apply boost
+                if populated_fields > 0:
+                    boost_multiplier = 1.0 + (boost_factor * populated_fields)
+                    boosted_score = current_score * boost_multiplier
+                    node.score = boosted_score
+                    
+                    logger.debug(
+                        f"Metadata boost applied to node: {current_score:.4f} -> {boosted_score:.4f} "
+                        f"(fields: {populated_fields}, multiplier: {boost_multiplier:.2f})"
+                    )
+            
+            logger.info(f"Applied metadata boost to {len(nodes)} nodes (factor={boost_factor})")
+            return nodes
+            
+        except Exception as e:
+            logger.warning(f"Failed to apply metadata boost: {e}, returning original nodes")
+            return nodes
     
     def _rerank_nodes(self, query: str, nodes: List[Any]) -> List[Any]:
         """Rerank nodes using cross-encoder."""
