@@ -447,33 +447,6 @@ def get_mcp_config(config_path: Optional[str] = None) -> Dict[str, Any]:
     return mcp_config
 
 
-def get_api_ingest_config(config_path: Optional[str] = None) -> Dict[str, Any]:
-    """
-    Get API ingest configuration from settings.yaml.
-    
-    Args:
-        config_path: Path to settings.yaml file
-        
-    Returns:
-        Dictionary with API ingest configuration:
-        - timeout: Request timeout in seconds
-        - retries: Number of retry attempts
-        - backoff_factor: Exponential backoff factor
-    """
-    config = load_settings(config_path)
-    
-    api_section = config.get('api_ingest', {})
-    
-    api_config = {
-        'timeout': api_section.get('timeout', 30),
-        'retries': api_section.get('retries', 3),
-        'backoff_factor': api_section.get('backoff_factor', 1)
-    }
-    
-    logger.info(f"Loaded API ingest config: timeout={api_config['timeout']}, retries={api_config['retries']}")
-    return api_config
-
-
 def get_faiss_config(config_path: Optional[str] = None) -> Dict[str, Any]:
     """
     Get FAISS index configuration from settings.yaml.
