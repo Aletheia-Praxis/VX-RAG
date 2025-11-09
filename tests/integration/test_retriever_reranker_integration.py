@@ -188,3 +188,64 @@ class TestRetrieverRerankerIntegration:
             # Test hybrid_search method
             hybrid_results = retriever.hybrid_search("test query", top_k=2)
             assert len(hybrid_results) == 2
+    
+    def test_metadata_boost_integration(self, mock_index, sample_nodes):
+        """Test metadata boost in integrated workflow."""
+        with patch('src.rag.services.retriever_service.service.VectorIndexRetriever') as mock_vector_retriever, \
+             patch('llama_index.core.retrievers.QueryFusionRetriever') as mock_query_fusion:
+
+            mock_retriever_instance = Mock()
+            mock_retriever_instance.retrieve.return_value = sample_nodes
+            mock_vector_retriever.return_value = mock_retriever_instance
+            mock_query_fusion.return_value = mock_retriever_instance
+
+            # Setup retriever with reranker
+            with patch('src.rag.services.reranker_service.service.CrossEncoder') as mock_cross_encoder:
+                mock_model = Mock()
+                mock_model.predict.return_value = [0.9, 0.6, 0.8]
+                mock_cross_encoder.return_value = mock_model
+
+                retriever = RetrieverService()
+                retriever.set_index(mock_index)
+
+                # Test that metadata boost is applied before reranking
+                query = "security best practices"
+                results = retriever.retrieve(query, top_k=3, search_type="semantic")
+
+                # Verify that results were returned
+                assert len(results) == 3
+
+                # The first node should have best score after reranking
+                # (score is replaced by reranker, so we can't check boost directly here)
+                # But we can verify the workflow completed without errors
+                assert 'score' in results[0]
+                assert 'metadata' in results[0]
+    
+    def test_reranker_metadata_boost_integration(self):
+        """Test RerankerService metadata boost integration."""
+        with patch('src.rag.services.reranker_service.service.CrossEncoder') as mock_cross_encoder:
+            mock_cross_encoder.return_value = Mock()
+
+            reranker = RerankerService()
+            
+            # Test documents with varying metadata
+            documents = [
+                {"text": "doc1", "score": 0.7, "metadata": {"source": "docs", "lang": "en"}},
+                {"text": "doc2", "score": 0.8, "metadata": {}},
+                {"text": "doc3", "score": 0.75, "metadata": {"source": "docs", "lang": "en", "topic": "security"}}
+            ]
+
+            # Apply metadata boost
+            boosted_docs = reranker.apply_metadata_boost(documents)
+
+            # Verify boost was applied correctly
+            # Doc1: 0.7 * (1 + 0.1 * 2) = 0.7 * 1.2 = 0.84
+            assert abs(boosted_docs[0]['score'] - 0.84) < 0.01
+            # Doc2: 0.8 (unchanged - no metadata)
+            assert boosted_docs[1]['score'] == 0.8
+            # Doc3: 0.75 * (1 + 0.1 * 3) = 0.75 * 1.3 = 0.975
+            assert abs(boosted_docs[2]['score'] - 0.975) < 0.01
+
+            # After boost, doc3 should have highest score
+            sorted_docs = sorted(boosted_docs, key=lambda x: x['score'], reverse=True)
+            assert sorted_docs[0]['text'] == 'doc3'
