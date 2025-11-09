@@ -5,16 +5,12 @@ Provides OCR functionality using PaddleOCR to extract text and code from images.
 """
 
 import logging
-from typing import List, Dict, Any, Optional, Union, TYPE_CHECKING
+from typing import List, Dict, Any, Optional, Union
 from pathlib import Path
 import numpy as np
 from PIL import Image
 import io
 import base64
-
-if TYPE_CHECKING:
-    # Type hints only - actual import happens at runtime
-    from paddleocr import PaddleOCR  # type: ignore[import-not-found]
 
 logger = logging.getLogger(__name__)
 
