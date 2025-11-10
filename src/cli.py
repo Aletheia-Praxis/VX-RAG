@@ -191,12 +191,12 @@ def main() -> None:
         start_time = time.time()
         try:
             from pathlib import Path
-            from rag.services.ingest_service.service import PDFIngestAdapter, TXTIngestAdapter, MDIngestAdapter, process_and_save_documents
-            from rag.services.duplicate_detection_service.service import DuplicateDetector
-            from rag.services.chunker_service.service import Chunker
+            from src.rag.services.ingest_service.service import PDFIngestAdapter, TXTIngestAdapter, MDIngestAdapter, process_and_save_documents
+            from src.rag.services.duplicate_detection_service.service import DuplicateDetector
+            from src.rag.services.chunker_service.service import Chunker
             from src.utils.config_loader import get_chunking_metadata, get_embedding_model_name, get_vector_store_type, load_settings
-            from rag.services.embedder_service.service import EmbeddingService
-            from rag.services.vectordb_service.service import VectorStoreClient
+            from src.rag.services.embedder_service.service import EmbeddingService
+            from src.rag.services.vectordb_service.service import VectorStoreClient
             
             data_path = Path(args.data_dir)
             processed_dir = Path("./data/processed")
@@ -235,7 +235,7 @@ def main() -> None:
             if paddle_ocr_config.get('enabled', False):
                 print("Step 1.5: Processing images with OCR...")
                 try:
-                    from rag.services.paddle_ocr_service.service import PaddleOCRService
+                    from src.rag.services.paddle_ocr_service.service import PaddleOCRService
                     
                     ocr_service = PaddleOCRService(
                         lang=paddle_ocr_config.get('lang', 'en'),
@@ -271,7 +271,7 @@ def main() -> None:
             if boilerplate_config.get('enabled', False):
                 print("Step 1.6: Removing boilerplate content...")
                 try:
-                    from rag.services.boilerplate_removal_service.service import BoilerplateRemovalService
+                    from src.rag.services.boilerplate_removal_service.service import BoilerplateRemovalService
                     
                     boilerplate_service = BoilerplateRemovalService(
                         aggressive_mode=boilerplate_config.get('aggressive_mode', True)
@@ -353,7 +353,7 @@ def main() -> None:
             
             # Step 6: Build BM25 index for hybrid search
             print("Step 6: Building BM25 index for hybrid search...")
-            from rag.services.retriever_service.service import RetrieverService
+            from src.rag.services.retriever_service.service import RetrieverService
             
             retriever_service = RetrieverService(index=index, config_path=args.config)
             retriever_service.build_bm25_index(llama_docs)
@@ -397,8 +397,8 @@ def main() -> None:
             logger.info("Starting index creation", persist_dir=args.persist_dir, config_path=args.config)
             
             # Import services
-            from rag.services.embedder_service.service import EmbeddingService
-            from rag.services.vectordb_service.service import VectorStoreClient
+            from src.rag.services.embedder_service.service import EmbeddingService
+            from src.rag.services.vectordb_service.service import VectorStoreClient
             from src.utils.config_loader import get_embedding_model_name, get_vector_store_type
             
             # Initialize embedder with model from config
@@ -465,11 +465,11 @@ def main() -> None:
         try:
             import asyncio
             from pathlib import Path
-            from rag.services.vectordb_service.service import VectorStoreClient
-            from rag.services.retriever_service.service import RetrieverService
-            from rag.services.reranker_service.service import RerankerService
-            from rag.services.embedder_service.service import EmbeddingService
-            from rag.services.hybrid_search_service.service import HybridSearchService
+            from src.rag.services.vectordb_service.service import VectorStoreClient
+            from src.rag.services.retriever_service.service import RetrieverService
+            from src.rag.services.reranker_service.service import RerankerService
+            from src.rag.services.embedder_service.service import EmbeddingService
+            from src.rag.services.hybrid_search_service.service import HybridSearchService
             from src.utils.config_loader import get_embedding_model_name, get_vector_store_type, load_settings
             
             # Load configuration for index_dir
@@ -518,7 +518,7 @@ def main() -> None:
                 sys.exit(0)
             
             # Use context assembler to organize results
-            from rag.services.assembler_service.service import ContextAssembler
+            from src.rag.services.assembler_service.service import ContextAssembler
             
             assembler = ContextAssembler(config_path=args.config)
             payload = assembler.assemble_context(
@@ -584,8 +584,8 @@ def main() -> None:
             from llama_index.core import SimpleDirectoryReader
             
             # Import services
-            from rag.services.embedder_service.service import EmbeddingService
-            from rag.services.vectordb_service.service import VectorStoreClient
+            from src.rag.services.embedder_service.service import EmbeddingService
+            from src.rag.services.vectordb_service.service import VectorStoreClient
             from src.utils.config_loader import get_chunking_metadata, get_embedding_model_name, get_vector_store_type, load_settings
             
             # Load configuration for other settings
@@ -649,8 +649,8 @@ def main() -> None:
         print(f"Creating snapshot of index in {args.persist_dir}")
         try:
             from pathlib import Path
-            from rag.services.vectordb_service.service import VectorStoreClient
-            from rag.services.embedder_service.service import EmbeddingService
+            from src.rag.services.vectordb_service.service import VectorStoreClient
+            from src.rag.services.embedder_service.service import EmbeddingService
             from src.utils.config_loader import get_chunking_metadata, get_embedding_model_name, get_vector_store_type
             
             # Initialize services for metadata
@@ -690,7 +690,7 @@ def main() -> None:
     elif args.command == "verify-snapshot":
         print(f"Verifying snapshot '{args.name}' in {args.persist_dir}")
         try:
-            from rag.services.vectordb_service.service import VectorStoreClient
+            from src.rag.services.vectordb_service.service import VectorStoreClient
             
             # Initialize vector store client
             vector_config = {
@@ -918,11 +918,11 @@ def main() -> None:
         try:
             import asyncio
             from pathlib import Path
-            from rag.services.vectordb_service.service import VectorStoreClient
-            from rag.services.retriever_service.service import RetrieverService
-            from rag.services.reranker_service.service import RerankerService
-            from rag.services.embedder_service.service import EmbeddingService
-            from rag.services.hybrid_search_service.service import HybridSearchService
+            from src.rag.services.vectordb_service.service import VectorStoreClient
+            from src.rag.services.retriever_service.service import RetrieverService
+            from src.rag.services.reranker_service.service import RerankerService
+            from src.rag.services.embedder_service.service import EmbeddingService
+            from src.rag.services.hybrid_search_service.service import HybridSearchService
             from src.utils.config_loader import get_embedding_model_name, get_vector_store_type, load_settings
             
             # Load configuration
@@ -1004,7 +1004,7 @@ def main() -> None:
         print(f"Cleaning boilerplate from documents in {args.data_dir}")
         try:
             from pathlib import Path
-            from rag.services.boilerplate_removal_service.service import BoilerplateRemovalService
+            from src.rag.services.boilerplate_removal_service.service import BoilerplateRemovalService
             from src.utils.config_loader import load_settings
             
             data_path = Path(args.data_dir)
@@ -1071,3 +1071,4 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+
