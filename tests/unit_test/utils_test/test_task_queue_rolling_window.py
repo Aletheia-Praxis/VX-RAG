@@ -11,8 +11,6 @@ from pathlib import Path
 
 from src.utils.task_queue import (
     TaskQueue,
-    TaskStatus,
-    TaskPriority,
 )
 
 
