@@ -1,0 +1,8 @@
+# Ignore test data but keep structure
+*
+
+# Keep README files
+!README.md
+
+# Keep .gitignore files
+!.gitignore
