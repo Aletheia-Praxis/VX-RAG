@@ -134,6 +134,73 @@ async def run_ingestion_pipeline(
         summary['parsed'] = len(all_docs)
         logger.info(f"Total documents parsed: {len(all_docs)}")
         
+        # Step 1.5: OCR Processing (if enabled) (35%)
+        from src.utils.config_loader import load_settings
+        config = load_settings(config_path) if Path(config_path).exists() else {}
+        paddle_ocr_config = config.get('paddle_ocr', {})
+        
+        if paddle_ocr_config.get('enabled', False):
+            if progress_callback:
+                await progress_callback(35, "Processing images with OCR...")
+            
+            try:
+                from rag.services.paddle_ocr_service.service import PaddleOCRService
+                
+                ocr_service = PaddleOCRService(
+                    lang=paddle_ocr_config.get('lang', 'en'),
+                    use_gpu=paddle_ocr_config.get('use_gpu', False),
+                    use_angle_cls=paddle_ocr_config.get('use_angle_cls', True),
+                    show_log=paddle_ocr_config.get('show_log', False),
+                    cpu_threads=paddle_ocr_config.get('cpu_threads', 4),
+                    min_confidence=paddle_ocr_config.get('min_confidence', 0.5)
+                )
+                
+                # Process documents with image placeholders
+                ocr_count = 0
+                for doc in all_docs:
+                    text = doc.get('text', '')
+                    if '<!-- image -->' in text or '<image>' in text:
+                        logger.info(f"Document {doc.get('id', 'unknown')} contains image placeholders")
+                        ocr_count += 1
+                
+                logger.info(f"OCR processing completed: {ocr_count} documents with image placeholders")
+                
+            except ImportError:
+                logger.warning("PaddleOCR not installed, skipping OCR processing")
+            except Exception as e:
+                logger.error(f"OCR processing error: {e}")
+        
+        # Step 1.6: Boilerplate Removal (if enabled) (37%)
+        boilerplate_config = config.get('boilerplate_removal', {})
+        
+        if boilerplate_config.get('enabled', False):
+            if progress_callback:
+                await progress_callback(37, "Removing boilerplate content...")
+            
+            try:
+                from rag.services.boilerplate_removal_service.service import BoilerplateRemovalService
+                
+                boilerplate_service = BoilerplateRemovalService(
+                    aggressive_mode=boilerplate_config.get('aggressive_mode', True)
+                )
+                
+                total_removed = 0
+                for doc in all_docs:
+                    text = doc.get('text', '')
+                    original_length = len(text)
+                    cleaned_text = await asyncio.to_thread(
+                        boilerplate_service.remove_boilerplate,
+                        text
+                    )
+                    doc['text'] = cleaned_text
+                    removed = original_length - len(cleaned_text)
+                    total_removed += removed
+                
+                logger.info(f"Boilerplate removal completed: {total_removed} chars removed")
+                
+            except Exception as e:
+                logger.error(f"Boilerplate removal error: {e}")
+        
         # Step 2: Deduplication (40%)
         if progress_callback:
             await progress_callback(40, "Removing duplicates...")
