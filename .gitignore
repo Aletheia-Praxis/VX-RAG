@@ -241,3 +241,6 @@ data/index/*.json
 
 # Raw markdown files
 data/raw/md/*.md
+
+# BM25 index files
+data/index/bm25/*.pkl
