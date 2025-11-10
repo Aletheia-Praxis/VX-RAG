@@ -32,6 +32,8 @@ def main() -> None:
                               help="Directory to persist index")
     ingest_parser.add_argument("--config", type=str, default="config/settings.yaml",
                               help="Configuration file path")
+    ingest_parser.add_argument("--background", "-b", action="store_true",
+                              help="Run ingestion in background (non-blocking)")
 
     # Index command
     index_parser = subparsers.add_parser("index", help="Create index")
@@ -70,10 +72,95 @@ def main() -> None:
     verify_parser.add_argument("--persist-dir", type=str, default="./data/index",
                               help="Directory containing index")
     verify_parser.add_argument("--name", type=str, required=True, help="Snapshot name to verify")
+    
+    # Task status command
+    status_parser = subparsers.add_parser("status", help="Check status of background task")
+    status_parser.add_argument("task_id", type=str, help="Task ID to check")
+    
+    # Cancel task command
+    cancel_parser = subparsers.add_parser("cancel", help="Cancel background task")
+    cancel_parser.add_argument("task_id", type=str, help="Task ID to cancel")
+    
+    # List tasks command
+    list_parser = subparsers.add_parser("list-tasks", help="List all tasks")
+    list_parser.add_argument(
+        "--filter",
+        choices=["all", "pending", "running", "completed", "failed", "cancelled"],
+        default="all",
+        help="Filter tasks by status"
+    )
+    
+    # Cleanup tasks command
+    cleanup_parser = subparsers.add_parser("cleanup", help="Cleanup old tasks (manual)")
+    cleanup_parser.add_argument(
+        "--all-completed",
+        action="store_true",
+        help="Remove all completed tasks"
+    )
+    cleanup_parser.add_argument(
+        "--all-failed",
+        action="store_true",
+        help="Remove all failed tasks"
+    )
+    cleanup_parser.add_argument(
+        "--all-cancelled",
+        action="store_true",
+        help="Remove all cancelled tasks"
+    )
 
     args = parser.parse_args()
 
     if args.command == "ingest":
+        # Check if background mode requested
+        if args.background:
+            # Background mode: submit task to queue and return immediately
+            print("Starting background ingestion...")
+            
+            import asyncio
+            from pathlib import Path
+            from src.utils.task_queue import get_task_queue, TaskPriority
+            from src.rag.services.ingest_service.background_ingest import run_ingestion_pipeline
+            
+            async def submit_background_ingest() -> str:
+                """Submit ingestion as background task."""
+                queue = get_task_queue(
+                    max_workers=4,
+                    max_concurrent_tasks=2,
+                    max_completed_tasks=100,
+                    max_failed_tasks=50,
+                )
+                
+                # Start queue if not running
+                if not queue._running:
+                    await queue.start()
+                
+                # Submit task with retry=2 (optimistic: if success no retries, if fail 2 retries)
+                task_id = await queue.submit_task(
+                    name=f"ingest_{Path(args.data_dir).name}",
+                    func=run_ingestion_pipeline,
+                    kwargs={
+                        'data_dir': args.data_dir,
+                        'persist_dir': args.persist_dir,
+                        'config_path': args.config,
+                    },
+                    priority=TaskPriority.HIGH,
+                    max_retries=2,  # 1 attempt + 2 retries if failed
+                )
+                
+                return task_id
+            
+            # Execute submission
+            task_id = asyncio.run(submit_background_ingest())
+            
+            print(f"Ingestion started in background")
+            print(f"Task ID: {task_id}")
+            print(f"\nUse the following commands:")
+            print(f"  vx-rag status {task_id}")
+            print(f"  vx-rag cancel {task_id}")
+            print(f"  vx-rag list-tasks")
+            sys.exit(0)
+        
+        # Synchronous mode: blocking execution
         start_time = time.time()
         try:
             from pathlib import Path
@@ -491,6 +578,153 @@ def main() -> None:
         except Exception as e:
             print(f"Error verifying snapshot: {e}")
             sys.exit(1)
+    
+    elif args.command == "status":
+        """Check status of background task."""
+        import asyncio
+        from datetime import datetime
+        from src.utils.task_queue import get_task_queue
+        
+        async def check_status() -> None:
+            queue = get_task_queue()
+            
+            status = await queue.get_task_status(args.task_id)
+            
+            if not status:
+                print(f"Task {args.task_id} not found")
+                sys.exit(1)
+            
+            print(f"\nTask Status Report")
+            print(f"{'=' * 70}")
+            print(f"  ID:       {status['task_id']}")
+            print(f"  Name:     {status['name']}")
+            print(f"  Status:   {status['status'].upper()}")
+            print(f"  Priority: {status['priority']}")
+            
+            if status.get('created_at'):
+                created = datetime.fromtimestamp(status['created_at'])
+                print(f"  Created:  {created.strftime('%Y-%m-%d %H:%M:%S')}")
+            
+            if status['status'] == 'running' and status.get('started_at'):
+                elapsed = time.time() - status['started_at']
+                print(f"  Running:  {elapsed:.1f} seconds")
+            
+            if status['status'] == 'completed' and status.get('result'):
+                import json
+                try:
+                    result = json.loads(status['result']) if isinstance(status['result'], str) else status['result']
+                    print(f"\n  Results:")
+                    print(f"    Parsed:   {result.get('parsed', 0)} docs")
+                    print(f"    Unique:   {result.get('unique', 0)} docs")
+                    print(f"    Chunks:   {result.get('chunks', 0)}")
+                    print(f"    Duration: {result.get('duration', 0):.2f}s")
+                except:
+                    print(f"\n  Result: {status['result']}")
+            
+            if status['status'] == 'failed' and status.get('error'):
+                print(f"\n  Error: {status['error']}")
+            
+            print(f"{'=' * 70}\n")
+        
+        asyncio.run(check_status())
+    
+    elif args.command == "cancel":
+        """Cancel background task."""
+        import asyncio
+        from src.utils.task_queue import get_task_queue
+        
+        async def cancel_task() -> None:
+            queue = get_task_queue()
+            
+            success = await queue.cancel_task(args.task_id)
+            
+            if success:
+                print(f"Task {args.task_id} cancelled successfully")
+            else:
+                print(f"Failed to cancel task {args.task_id}")
+                print("Task may be already completed or not found")
+                sys.exit(1)
+        
+        asyncio.run(cancel_task())
+    
+    elif args.command == "list-tasks":
+        """List all tasks with optional filtering."""
+        import asyncio
+        from src.utils.task_queue import get_task_queue
+        
+        async def list_all_tasks() -> None:
+            queue = get_task_queue()
+            
+            stats = queue.get_queue_stats()
+            
+            print(f"\nTask Queue Statistics")
+            print(f"{'=' * 70}")
+            print(f"  Total Tasks:          {stats['total_tasks']}")
+            print(f"  Pending:              {stats['pending']}")
+            print(f"  Running:              {stats['running']}")
+            print(f"  Completed:            {stats['completed']}")
+            print(f"  Failed:               {stats['failed']}")
+            print(f"  Cancelled:            {stats['cancelled']}")
+            print(f"  Queue Size:           {stats['queue_size']}")
+            print(f"  Max Completed Limit:  {stats['max_completed_tasks']}")
+            print(f"  Max Failed Limit:     {stats['max_failed_tasks']}")
+            print(f"{'=' * 70}\n")
+            
+            if stats['running'] > 0 or stats['pending'] > 0:
+                print("Note: Use 'vx-rag status <task_id>' for detailed task information")
+                print()
+        
+        asyncio.run(list_all_tasks())
+    
+    elif args.command == "cleanup":
+        """Manual cleanup of old tasks."""
+        import asyncio
+        from src.utils.task_queue import get_task_queue, TaskStatus
+        
+        async def cleanup_tasks() -> None:
+            queue = get_task_queue()
+            
+            removed_count = 0
+            
+            if args.all_completed:
+                tasks_to_remove = [
+                    task_id for task_id, task in queue._tasks.items()
+                    if task.status == TaskStatus.COMPLETED
+                ]
+                for task_id in tasks_to_remove:
+                    del queue._tasks[task_id]
+                    removed_count += 1
+                print(f"Removed {removed_count} completed tasks")
+            
+            if args.all_failed:
+                tasks_to_remove = [
+                    task_id for task_id, task in queue._tasks.items()
+                    if task.status == TaskStatus.FAILED
+                ]
+                for task_id in tasks_to_remove:
+                    del queue._tasks[task_id]
+                    removed_count += 1
+                print(f"Removed {removed_count} failed tasks")
+            
+            if args.all_cancelled:
+                tasks_to_remove = [
+                    task_id for task_id, task in queue._tasks.items()
+                    if task.status == TaskStatus.CANCELLED
+                ]
+                for task_id in tasks_to_remove:
+                    del queue._tasks[task_id]
+                    removed_count += 1
+                print(f"Removed {removed_count} cancelled tasks")
+            
+            if removed_count == 0:
+                print("No tasks to cleanup. Use flags: --all-completed, --all-failed, --all-cancelled")
+            else:
+                # Save state after cleanup
+                if queue.enable_persistence:
+                    await queue._save_state()
+                print(f"Total tasks removed: {removed_count}")
+        
+        asyncio.run(cleanup_tasks())
 
     else:
         parser.print_help()
