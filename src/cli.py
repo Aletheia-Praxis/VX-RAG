@@ -133,6 +133,7 @@ def handle_ingest(args: argparse.Namespace) -> None:
         TXTIngestAdapter, 
         MDIngestAdapter
     )
+    from src.rag.services.duplicate_detection_service.service import DuplicateDetector
     
     start_time = time.time()
     data_path = Path(args.data_dir)
@@ -142,42 +143,55 @@ def handle_ingest(args: argparse.Namespace) -> None:
         logger.error("Ingestion failed: data directory not found", data_dir=str(data_path))
         sys.exit(1)
     
-    logger.info("Starting document parsing", data_dir=str(data_path))
-    print(f"\n[Step 1/1] Parsing documents from {data_path}...")
+    logger.info("Starting ingestion pipeline", data_dir=str(data_path))
     
-    # Initialize adapters
+    # Step 1: Parse documents
+    print(f"\n[Step 1/2] Parsing documents from {data_path}...")
+    
     pdf_adapter = PDFIngestAdapter()
     txt_adapter = TXTIngestAdapter()
     md_adapter = MDIngestAdapter()
     
-    # Parse documents by type
     pdf_docs = pdf_adapter.load_data(str(data_path / "pdf"))
     txt_docs = txt_adapter.load_data(str(data_path / "txt"))
     md_docs = md_adapter.load_data(str(data_path / "md"))
     
-    # Combine all documents
     all_docs = pdf_docs + txt_docs + md_docs
     
-    # Display results
-    print(f"\nParsing Results:")
-    print(f"  PDF documents:   {len(pdf_docs)}")
-    print(f"  TXT documents:   {len(txt_docs)}")
-    print(f"  MD documents:    {len(md_docs)}")
-    print(f"  {'='*40}")
-    print(f"  Total documents: {len(all_docs)}")
+    print(f"  PDF: {len(pdf_docs)}, TXT: {len(txt_docs)}, MD: {len(md_docs)}")
+    print(f"  Total parsed: {len(all_docs)} documents")
     
+    # Step 2: Remove duplicates
+    print(f"\n[Step 2/2] Removing duplicates...")
+    
+    detector = DuplicateDetector(config_path=args.config)
+    unique_docs = detector.remove_duplicates(all_docs)
+    
+    duplicates_removed = len(all_docs) - len(unique_docs)
+    print(f"  Duplicates removed: {duplicates_removed}")
+    print(f"  Unique documents: {len(unique_docs)}")
+    
+    # Summary
     duration = time.time() - start_time
-    logger.info("Document parsing completed", 
-               pdf=len(pdf_docs), 
-               txt=len(txt_docs), 
-               md=len(md_docs), 
-               total=len(all_docs),
+    
+    print(f"\n{'='*50}")
+    print(f"Ingestion Summary:")
+    print(f"{'='*50}")
+    print(f"  Documents parsed:     {len(all_docs)}")
+    print(f"  Duplicates removed:   {duplicates_removed}")
+    print(f"  Unique documents:     {len(unique_docs)}")
+    print(f"  Duration:             {duration:.2f}s")
+    print(f"{'='*50}\n")
+    
+    logger.info("Ingestion pipeline completed", 
+               parsed=len(all_docs), 
+               duplicates_removed=duplicates_removed,
+               unique=len(unique_docs),
                duration_ms=duration * 1000)
     
     metrics.increment("ingestion_documents_parsed_total", len(all_docs))
-    metrics.histogram("ingestion_parsing_duration_ms", duration * 1000)
-    
-    print(f"\nCompleted in {duration:.2f}s")
+    metrics.increment("ingestion_duplicates_removed_total", duplicates_removed)
+    metrics.histogram("ingestion_pipeline_duration_ms", duration * 1000)
 
 
 def handle_index(args: argparse.Namespace) -> None:
