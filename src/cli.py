@@ -235,16 +235,9 @@ def main() -> None:
             if paddle_ocr_config.get('enabled', False):
                 print("Step 1.5: Processing images with OCR...")
                 try:
-                    from src.rag.services.paddle_ocr_service.service import PaddleOCRService
-                    
-                    ocr_service = PaddleOCRService(
-                        lang=paddle_ocr_config.get('lang', 'en'),
-                        use_gpu=paddle_ocr_config.get('use_gpu', False),
-                        use_angle_cls=paddle_ocr_config.get('use_angle_cls', True),
-                        show_log=paddle_ocr_config.get('show_log', False),
-                        cpu_threads=paddle_ocr_config.get('cpu_threads', 4),
-                        min_confidence=paddle_ocr_config.get('min_confidence', 0.5)
-                    )
+                    # Note: OCR service is available but not yet fully implemented
+                    # Currently only detecting image placeholders
+                    # from src.rag.services.paddle_ocr_service.service import PaddleOCRService
                     
                     # Process documents with <!-- image --> placeholders
                     ocr_count = 0
