@@ -145,3 +145,60 @@ class TestEmbeddingService:
         # For EmbeddingService, model is always loaded in __init__
         # This test is not applicable
         pass
+
+    def test_embeddings_are_normalized(self) -> None:
+        """Test that embeddings are automatically normalized to unit length.
+        
+        This test verifies that the embedding model (all-MiniLM-L6-v2) automatically
+        normalizes all output vectors to unit length (L2 norm = 1.0).
+        
+        This is critical because:
+        1. FAISS index uses METRIC_INNER_PRODUCT
+        2. For normalized vectors, inner product = cosine similarity
+        3. Without normalization, METRIC_INNER_PRODUCT would not give cosine similarity
+        
+        The all-MiniLM-L6-v2 model includes a 'Normalize' module in its architecture
+        that ensures all embeddings have L2 norm = 1.0.
+        """
+        import numpy as np
+        
+        # Initialize real model (not mocked) for this test
+        embedder = EmbeddingService(
+            model_name="all-MiniLM-L6-v2",
+            cache_size=10,
+            batch_size=10,
+            trust_remote_code=False
+        )
+        
+        # Test various texts to ensure normalization is consistent
+        test_texts = [
+            "test",
+            "malware analysis",
+            "cybersecurity research document",
+            "APT group uses zero-day exploit for credential harvesting",
+            "a" * 100,  # Long repetitive text
+        ]
+        
+        for text in test_texts:
+            # Generate embedding
+            embedding = embedder.embed_single(text)
+            
+            # Calculate L2 norm
+            norm = np.linalg.norm(embedding)
+            
+            # Assert that norm is very close to 1.0
+            # Using tolerance of 1e-6 for floating point comparison
+            assert abs(norm - 1.0) < 1e-6, (
+                f"Embedding for text '{text[:50]}...' is not normalized. "
+                f"Expected norm=1.0, got norm={norm:.10f}"
+            )
+        
+        # Test batch embeddings as well
+        batch_embeddings = embedder.embed_batch(test_texts)
+        
+        for i, embedding in enumerate(batch_embeddings):
+            norm = np.linalg.norm(embedding)
+            assert abs(norm - 1.0) < 1e-6, (
+                f"Batch embedding {i} for text '{test_texts[i][:50]}...' is not normalized. "
+                f"Expected norm=1.0, got norm={norm:.10f}"
+            )
