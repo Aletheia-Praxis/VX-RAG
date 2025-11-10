@@ -20,7 +20,7 @@ from pathlib import Path
 import re
 
 if TYPE_CHECKING:
-    import pandas as pd
+    pass
 
 from docling.document_converter import DocumentConverter
 from docling.datamodel.pipeline_options import PdfPipelineOptions
