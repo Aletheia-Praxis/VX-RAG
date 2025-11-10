@@ -12,14 +12,14 @@ from typing import Generator, Any
 
 import pytest
 
+# Import test configuration utilities
+from config_test.test_logging import configure_test_logging, get_test_config_path
+
 # Add src and tests directory to path for imports
 project_root = Path(__file__).parent.parent
 tests_root = Path(__file__).parent
 sys.path.insert(0, str(project_root / "src"))
 sys.path.insert(0, str(tests_root))
-
-# Import test configuration utilities
-from config_test.test_logging import configure_test_logging, get_test_config_path
 
 # Set environment variable to use test configuration
 os.environ["VX_RAG_TEST_MODE"] = "true"
