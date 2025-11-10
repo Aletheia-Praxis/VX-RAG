@@ -1,0 +1,5 @@
+# Ignore all log files
+*.log
+
+# Keep this README
+!README.md
