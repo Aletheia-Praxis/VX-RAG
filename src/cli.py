@@ -667,7 +667,7 @@ def main() -> None:
                 config=vector_config
             )
             
-            if not vector_client.load_index():
+            if not vector_client.load_index(embed_model=embedder.embed_model):
                 print(f"Failed to load index from {args.persist_dir}")
                 sys.exit(1)
             
@@ -940,9 +940,6 @@ def main() -> None:
                 print("Failed to load index. Please run 'index' command first.")
                 sys.exit(1)
             
-            retriever_service = RetrieverService(index=vector_client.index, config_path=args.config)
-            reranker_service = RerankerService(config_path=args.config)
-            
             print(f"\n{'='*80}")
             print("Search Strategy Benchmark")
             print(f"{'='*80}\n")
@@ -952,6 +949,12 @@ def main() -> None:
             for alpha in alphas:
                 strategy_name = "Pure BM25" if alpha == 0.0 else "Pure Vector" if alpha == 1.0 else f"Hybrid (α={alpha})"
                 print(f"Testing {strategy_name}...")
+                
+                # Create fresh services for each test
+                retriever_service = RetrieverService(index=vector_client.index, config_path=args.config)
+                if vector_client.index:
+                    retriever_service.set_index(vector_client.index)  # Ensure index is set
+                reranker_service = RerankerService(config_path=args.config)
                 
                 hybrid_search = HybridSearchService(
                     retriever_service=retriever_service,
