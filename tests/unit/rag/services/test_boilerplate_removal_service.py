@@ -4,7 +4,6 @@ Unit tests for boilerplate removal service.
 Tests aggressive boilerplate removal while preserving technical content.
 """
 
-import pytest
 from src.rag.services.boilerplate_removal_service import (
     BoilerplateRemovalService,
     remove_boilerplate,
