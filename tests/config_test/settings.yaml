@@ -1,0 +1,135 @@
+# VX-RAG Test Configuration
+# Separate configuration for test environment to avoid polluting production logs
+
+# Data directories (use test-specific directories)
+data_dir: "./tests/test_data"
+raw_data_dir: "./tests/test_data/raw"
+processed_data_dir: "./tests/test_data/processed"
+index_dir: "./tests/test_data/index"
+
+# Embedding configuration
+embedding_model: "all-MiniLM-L6-v2"
+embedding_device: "cpu"
+embedding_batch_size: 10
+embedding_cache_size: 1000
+embedding_trust_remote_code: false
+
+# Indexing configuration
+chunk_size: 1024
+chunk_overlap: 200
+vector_store: "faiss"
+
+# FAISS Index configuration
+faiss:
+  hnsw_m: 32
+  metric: "inner_product"
+
+# Adaptive chunking for technical content
+adaptive_chunking:
+  enabled: true
+  max_chunk_size: 2000
+  large_code_blocks:
+    chunk_size: 768
+    chunk_overlap: 150
+    min_lines: 30
+  tables:
+    chunk_size: 512
+    chunk_overlap: 100
+    preserve_integrity: true
+  short_snippets:
+    chunk_size: 384
+    chunk_overlap: 75
+    max_lines: 15
+  hex_dumps:
+    chunk_size: 896
+    chunk_overlap: 175
+    preserve_structure: true
+
+# Query configuration
+similarity_top_k: 5
+query_temperature: 0.1
+
+# Retriever configuration
+retriever:
+  semantic_top_k: 20
+  hybrid_alpha: 0.5
+  metadata_filters: []
+  enable_hybrid: true
+
+# BM25 configuration
+bm25:
+  index_dir: "./tests/test_data/index/bm25"
+  similarity_top_k: 20
+  enable_persistence: true
+
+# Reranker configuration
+reranker:
+  model_name: "cross-encoder/ms-marco-MiniLM-L-6-v2"
+  top_k: 5
+  device: "cpu"
+  metadata_boost: 0.1
+  enable_metadata_prioritization: true
+
+# MCP configuration
+mcp:
+  host: "127.0.0.1"
+  port: 25191
+  debug: true
+  query_timeout: 600.0
+
+# Context Assembler configuration
+context_assembler:
+  token_budget: 2048
+  model_name: "gpt-3.5-turbo"
+  max_items: null
+  min_score: null
+
+# Duplicate detection configuration
+duplicate_detection:
+  similarity_threshold: 0.95
+  hash_algorithm: "sha256"
+
+# Test-specific logging configuration
+logging:
+  log_level: "DEBUG"  # More verbose logging for tests
+  log_file: "./tests/test_logs/test_run.log"  # Separate log directory for tests
+  log_format: "json"
+  log_structured_events: true
+  log_metrics: false  # Disable metrics in tests to reduce noise
+
+# Metrics (disabled for tests)
+metrics_enabled: false
+metrics_log_interval: 300
+metrics_file: "test_metrics.log"
+
+# PaddleOCR configuration
+paddle_ocr:
+  enabled: true
+  lang: "en"
+  use_gpu: false
+  use_angle_cls: true
+  show_log: false
+  det_model_dir: null
+  rec_model_dir: null
+  cls_model_dir: null
+  use_space_char: true
+  enable_mkldnn: false
+  cpu_threads: 4
+  min_confidence: 0.5
+  save_extracted_images: false  # Don't save images during tests
+  extracted_images_dir: "./tests/test_data/extracted_images"
+  replace_image_placeholders: true
+
+# Boilerplate removal configuration
+boilerplate_removal:
+  enabled: true
+  aggressive_mode: true
+  position: "after_ocr"
+  patterns:
+    remove_html_comments: true
+    remove_blog_metadata: true
+    remove_footer_timestamps: true
+    remove_navigation: true
+    remove_social_sharing: true
+    preserve_code_blocks: true
+    preserve_markdown_structure: true
