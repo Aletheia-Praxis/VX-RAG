@@ -66,6 +66,30 @@ class MetricsCollector:
                     self.logger.log_metric(name, avg_value, **metric.get('tags', {}))
                 else:
                     self.logger.log_metric(name, metric['value'], **metric.get('tags', {}))
+    
+    def get_stats(self) -> Dict[str, Any]:
+        """
+        Get current metrics as a dictionary.
+        
+        Returns:
+            Dictionary of metric names and their current values
+        """
+        with self.lock:
+            stats = {}
+            for name, metric in self.metrics.items():
+                if metric['type'] == 'histogram' and metric.get('values'):
+                    # Calculate statistics for histograms
+                    values = metric['values']
+                    stats[name] = {
+                        'type': 'histogram',
+                        'count': len(values),
+                        'avg': sum(values) / len(values),
+                        'min': min(values),
+                        'max': max(values)
+                    }
+                else:
+                    stats[name] = metric.get('value', 0)
+            return stats
 
 
 # Global instance
