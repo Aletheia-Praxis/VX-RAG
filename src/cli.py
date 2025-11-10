@@ -128,7 +128,56 @@ def main() -> None:
 
 def handle_ingest(args: argparse.Namespace) -> None:
     """Handle ingest command."""
-    print(f"Starting ingestion from {args.data_dir}")
+    from src.rag.services.ingest_service.service import (
+        PDFIngestAdapter, 
+        TXTIngestAdapter, 
+        MDIngestAdapter
+    )
+    
+    start_time = time.time()
+    data_path = Path(args.data_dir)
+    
+    if not data_path.exists():
+        print(f"Error: Data directory {data_path} does not exist")
+        logger.error("Ingestion failed: data directory not found", data_dir=str(data_path))
+        sys.exit(1)
+    
+    logger.info("Starting document parsing", data_dir=str(data_path))
+    print(f"\n[Step 1/1] Parsing documents from {data_path}...")
+    
+    # Initialize adapters
+    pdf_adapter = PDFIngestAdapter()
+    txt_adapter = TXTIngestAdapter()
+    md_adapter = MDIngestAdapter()
+    
+    # Parse documents by type
+    pdf_docs = pdf_adapter.load_data(str(data_path / "pdf"))
+    txt_docs = txt_adapter.load_data(str(data_path / "txt"))
+    md_docs = md_adapter.load_data(str(data_path / "md"))
+    
+    # Combine all documents
+    all_docs = pdf_docs + txt_docs + md_docs
+    
+    # Display results
+    print(f"\nParsing Results:")
+    print(f"  PDF documents:   {len(pdf_docs)}")
+    print(f"  TXT documents:   {len(txt_docs)}")
+    print(f"  MD documents:    {len(md_docs)}")
+    print(f"  {'='*40}")
+    print(f"  Total documents: {len(all_docs)}")
+    
+    duration = time.time() - start_time
+    logger.info("Document parsing completed", 
+               pdf=len(pdf_docs), 
+               txt=len(txt_docs), 
+               md=len(md_docs), 
+               total=len(all_docs),
+               duration_ms=duration * 1000)
+    
+    metrics.increment("ingestion_documents_parsed_total", len(all_docs))
+    metrics.histogram("ingestion_parsing_duration_ms", duration * 1000)
+    
+    print(f"\nCompleted in {duration:.2f}s")
 
 
 def handle_index(args: argparse.Namespace) -> None:
