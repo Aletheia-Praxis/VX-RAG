@@ -8,7 +8,7 @@ import argparse
 import sys
 import time
 
-from typing import Any, List, Dict, cast
+from typing import Any, List, Dict
 
 # Import structured logging and metrics
 from src.utils.logging_config import get_logger, log_index_event
@@ -179,12 +179,12 @@ def main() -> None:
             # Execute submission
             task_id = asyncio.run(submit_background_ingest())
             
-            print(f"Ingestion started in background")
+            print("Ingestion started in background")
             print(f"Task ID: {task_id}")
-            print(f"\nUse the following commands:")
+            print("\nUse the following commands:")
             print(f"  vx-rag status {task_id}")
             print(f"  vx-rag cancel {task_id}")
-            print(f"  vx-rag list-tasks")
+            print("  vx-rag list-tasks")
             sys.exit(0)
         
         # Synchronous mode: blocking execution
@@ -531,7 +531,7 @@ def main() -> None:
             print(f"\n{'='*80}")
             print(f"Query: {args.query}")
             print(f"{'='*80}\n")
-            print(f"Search Strategy: Hybrid (Vector + BM25)")
+            print("Search Strategy: Hybrid (Vector + BM25)")
             print(f"Hybrid Alpha: {config.get('hybrid_alpha', 0.5)} (vector weight)")
             print(f"Results: {len(retrieved_docs)} documents retrieved, {len(payload.context)} in context")
             print(f"Token Budget: {payload.token_budget} (estimated: {payload.total_tokens_estimate()})")
@@ -549,7 +549,7 @@ def main() -> None:
                 # Show metadata
                 metadata = source.get('metadata', {})
                 if metadata:
-                    print(f"   Metadata:")
+                    print("   Metadata:")
                     for key, value in list(metadata.items())[:3]:  # Show first 3 metadata items
                         print(f"     - {key}: {value}")
                 
@@ -736,7 +736,7 @@ def main() -> None:
                 print(f"Task {args.task_id} not found")
                 sys.exit(1)
             
-            print(f"\nTask Status Report")
+            print("\nTask Status Report")
             print(f"{'=' * 70}")
             print(f"  ID:       {status['task_id']}")
             print(f"  Name:     {status['name']}")
@@ -755,12 +755,12 @@ def main() -> None:
                 import json
                 try:
                     result = json.loads(status['result']) if isinstance(status['result'], str) else status['result']
-                    print(f"\n  Results:")
+                    print("\n  Results:")
                     print(f"    Parsed:   {result.get('parsed', 0)} docs")
                     print(f"    Unique:   {result.get('unique', 0)} docs")
                     print(f"    Chunks:   {result.get('chunks', 0)}")
                     print(f"    Duration: {result.get('duration', 0):.2f}s")
-                except:
+                except Exception:
                     print(f"\n  Result: {status['result']}")
             
             if status['status'] == 'failed' and status.get('error'):
@@ -799,7 +799,7 @@ def main() -> None:
             
             stats = queue.get_queue_stats()
             
-            print(f"\nTask Queue Statistics")
+            print("\nTask Queue Statistics")
             print(f"{'=' * 70}")
             print(f"  Total Tasks:          {stats['total_tasks']}")
             print(f"  Pending:              {stats['pending']}")
@@ -1056,7 +1056,7 @@ def main() -> None:
                 except Exception as e:
                     print(f"  Error processing {txt_file.name}: {e}")
             
-            print(f"\nSummary:")
+            print("\nSummary:")
             print(f"  Files processed: {files_processed}/{len(txt_files)}")
             print(f"  Total removed: {total_removed} characters")
             
