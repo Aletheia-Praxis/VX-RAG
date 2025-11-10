@@ -160,6 +160,19 @@ def budget_and_assemble(
         documents, token_budget, max_items, min_score
     )
     
+    # Normalize scores to 0.0-1.0 range (CrossEncoder can return values outside this range)
+    if selected_docs:
+        scores = [doc.get('score', 0.0) for doc in selected_docs if doc.get('score') is not None]
+        if scores:
+            max_score = max(scores)
+            min_score_val = min(scores)
+            score_range = max_score - min_score_val if max_score > min_score_val else 1.0
+            
+            for doc in selected_docs:
+                if 'score' in doc and doc['score'] is not None:
+                    # Normalize to 0.0-1.0 (min-max scaling)
+                    doc['score'] = (doc['score'] - min_score_val) / score_range
+    
     # Convert to MCP ContextItems
     from ..schemas.mcp_schemas import ContextItem, MCPContextPayload
     
