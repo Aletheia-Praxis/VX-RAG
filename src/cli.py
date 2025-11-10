@@ -509,7 +509,7 @@ def main() -> None:
                 # Use top_k from config (retriever.semantic_top_k or similarity_top_k)
                 top_k = config.get('similarity_top_k', 5)
                 result = await hybrid_search_service.asearch(args.query, top_k=top_k)
-                return cast(List[Dict[str, Any]], result)
+                return result
 
             retrieved_docs = asyncio.run(do_search())
             
@@ -966,7 +966,7 @@ def main() -> None:
                     start = time.time()
                     results = await hybrid_search.asearch(args.query, top_k=5)
                     duration = time.time() - start
-                    return cast(List[Dict[str, Any]], results), duration
+                    return results, duration
                 
                 results, duration = asyncio.run(run_search())
                 
