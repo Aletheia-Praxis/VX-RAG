@@ -147,7 +147,15 @@ def get_logger(name: str = "vx_rag") -> StructuredLogger:
 def load_logging_config() -> Dict[str, Any]:
     """Load logging configuration from settings.yaml."""
     try:
-        config_path = Path("config/settings.yaml")
+        # Check if test mode is enabled via environment variable
+        import os
+        config_path_str = os.environ.get('VX_RAG_CONFIG_PATH')
+        
+        if config_path_str:
+            config_path = Path(config_path_str)
+        else:
+            config_path = Path("config/settings.yaml")
+        
         if config_path.exists():
             import yaml
             with open(config_path, 'r', encoding='utf-8') as f:
