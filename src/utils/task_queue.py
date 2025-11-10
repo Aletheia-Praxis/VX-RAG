@@ -152,6 +152,8 @@ class TaskQueue:
         max_concurrent_tasks: int = 2,
         state_file: Optional[Path] = None,
         enable_persistence: bool = True,
+        max_completed_tasks: int = 100,
+        max_failed_tasks: int = 50,
     ):
         """
         Initialize task queue.
@@ -161,10 +163,14 @@ class TaskQueue:
             max_concurrent_tasks: Maximum number of tasks running simultaneously (rate limiting)
             state_file: Path to task state persistence file
             enable_persistence: Enable/disable task state persistence
+            max_completed_tasks: Maximum number of completed tasks to keep (FIFO rolling window)
+            max_failed_tasks: Maximum number of failed tasks to keep (FIFO rolling window)
         """
         self.max_workers = max_workers
         self.max_concurrent_tasks = max_concurrent_tasks
         self.enable_persistence = enable_persistence
+        self.max_completed_tasks = max_completed_tasks
+        self.max_failed_tasks = max_failed_tasks
         
         # Task queue (priority queue)
         self._queue: asyncio.PriorityQueue[QueueTask] = asyncio.PriorityQueue()
@@ -345,7 +351,52 @@ class TaskQueue:
         
         return True
     
-    async def get_queue_stats(self) -> Dict[str, Any]:
+    async def _enforce_task_limits(self) -> None:
+        """
+        Enforce rolling window limits for completed/failed tasks.
+        
+        When limits are reached, removes oldest tasks (FIFO) to make room for new ones.
+        This implements a rolling buffer where oldest entries are automatically evicted.
+        """
+        # Get completed and failed tasks sorted by completion time
+        completed_tasks = [
+            t for t in self._tasks.values() 
+            if t.status == TaskStatus.COMPLETED
+        ]
+        failed_tasks = [
+            t for t in self._tasks.values() 
+            if t.status == TaskStatus.FAILED
+        ]
+        
+        # Sort by completion time (oldest first)
+        completed_tasks.sort(key=lambda t: t.completed_at or 0)
+        failed_tasks.sort(key=lambda t: t.completed_at or 0)
+        
+        # Remove oldest completed tasks if over limit
+        if len(completed_tasks) > self.max_completed_tasks:
+            excess_count = len(completed_tasks) - self.max_completed_tasks
+            for task in completed_tasks[:excess_count]:
+                logger.info(
+                    "Removed oldest completed task (rolling window)",
+                    task_id=task.task_id,
+                    task_name=task.name,
+                    completed_at=task.completed_at
+                )
+                del self._tasks[task.task_id]
+        
+        # Remove oldest failed tasks if over limit
+        if len(failed_tasks) > self.max_failed_tasks:
+            excess_count = len(failed_tasks) - self.max_failed_tasks
+            for task in failed_tasks[:excess_count]:
+                logger.info(
+                    "Removed oldest failed task (rolling window)",
+                    task_id=task.task_id,
+                    task_name=task.name,
+                    completed_at=task.completed_at
+                )
+                del self._tasks[task.task_id]
+    
+    def get_queue_stats(self) -> Dict[str, Any]:
         """
         Get queue statistics.
         
@@ -368,6 +419,8 @@ class TaskQueue:
             'queue_size': self._queue.qsize(),
             'max_concurrent_tasks': self.max_concurrent_tasks,
             'max_workers': self.max_workers,
+            'max_completed_tasks': self.max_completed_tasks,
+            'max_failed_tasks': self.max_failed_tasks,
         }
     
     async def _worker_loop(self) -> None:
@@ -471,6 +524,10 @@ class TaskQueue:
                     task.completed_at = time.time()
             
             finally:
+                # Enforce rolling window limits after task completion
+                if task.status in (TaskStatus.COMPLETED, TaskStatus.FAILED):
+                    await self._enforce_task_limits()
+                
                 if self.enable_persistence:
                     await self._save_state()
     
@@ -524,6 +581,8 @@ _task_queue: Optional[TaskQueue] = None
 def get_task_queue(
     max_workers: int = 4,
     max_concurrent_tasks: int = 2,
+    max_completed_tasks: int = 100,
+    max_failed_tasks: int = 50,
 ) -> TaskQueue:
     """
     Get or create the global task queue instance.
@@ -531,6 +590,8 @@ def get_task_queue(
     Args:
         max_workers: Maximum ThreadPoolExecutor workers
         max_concurrent_tasks: Maximum concurrent tasks (rate limiting)
+        max_completed_tasks: Maximum completed tasks to keep (rolling window)
+        max_failed_tasks: Maximum failed tasks to keep (rolling window)
         
     Returns:
         TaskQueue instance
@@ -541,6 +602,8 @@ def get_task_queue(
         _task_queue = TaskQueue(
             max_workers=max_workers,
             max_concurrent_tasks=max_concurrent_tasks,
+            max_completed_tasks=max_completed_tasks,
+            max_failed_tasks=max_failed_tasks,
         )
     
     return _task_queue
