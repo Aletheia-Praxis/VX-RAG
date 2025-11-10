@@ -358,6 +358,17 @@ class PDFIngestAdapter(IngestAdapter):
 class TXTIngestAdapter(IngestAdapter):
     """Adapter for loading TXT documents."""
     
+    def __init__(self, config_path: Optional[str] = None) -> None:
+        """
+        Initialize TXT adapter.
+        
+        Args:
+            config_path: Path to settings.yaml file
+        """
+        # Load boilerplate removal configuration
+        self.boilerplate_config = get_boilerplate_removal_config(config_path)
+        self.boilerplate_enabled = self.boilerplate_config['enabled']
+    
     def load_data(self, source: str) -> List[Dict[str, Any]]:
         """
         Load TXT documents from the specified directory.
@@ -389,7 +400,16 @@ class TXTIngestAdapter(IngestAdapter):
                     with open(file_path, 'r', encoding='utf-8') as f:
                         text = f.read()
                     
-                    normalized_text = normalize_text(text)
+                    # Remove boilerplate BEFORE normalization (per standard)
+                    if self.boilerplate_enabled:
+                        aggressive_mode = self.boilerplate_config['aggressive_mode']
+                        cleaned_text = remove_boilerplate(text, aggressive_mode=aggressive_mode)
+                        logger.debug(f"Boilerplate removal applied to TXT (aggressive={aggressive_mode})")
+                    else:
+                        cleaned_text = text
+                        logger.debug("Boilerplate removal disabled for TXT")
+                    
+                    normalized_text = normalize_text(cleaned_text)
                     lang = detect_language(normalized_text)
                     
                     result.append({
@@ -424,6 +444,17 @@ class TXTIngestAdapter(IngestAdapter):
 class MDIngestAdapter(IngestAdapter):
     """Adapter for loading Markdown documents."""
     
+    def __init__(self, config_path: Optional[str] = None) -> None:
+        """
+        Initialize MD adapter.
+        
+        Args:
+            config_path: Path to settings.yaml file
+        """
+        # Load boilerplate removal configuration
+        self.boilerplate_config = get_boilerplate_removal_config(config_path)
+        self.boilerplate_enabled = self.boilerplate_config['enabled']
+    
     def load_data(self, source: str) -> List[Dict[str, Any]]:
         """
         Load Markdown documents from the specified directory.
@@ -455,9 +486,17 @@ class MDIngestAdapter(IngestAdapter):
                     with open(file_path, 'r', encoding='utf-8') as f:
                         text = f.read()
                     
-                    # For Markdown, we can optionally parse headers or keep as is
-                    # For now, treat as plain text
-                    normalized_text = normalize_text(text)
+                    # Remove boilerplate BEFORE normalization (per standard)
+                    # Markdown files from Vx Underground may contain blog artifacts
+                    if self.boilerplate_enabled:
+                        aggressive_mode = self.boilerplate_config['aggressive_mode']
+                        cleaned_text = remove_boilerplate(text, aggressive_mode=aggressive_mode)
+                        logger.debug(f"Boilerplate removal applied to MD (aggressive={aggressive_mode})")
+                    else:
+                        cleaned_text = text
+                        logger.debug("Boilerplate removal disabled for MD")
+                    
+                    normalized_text = normalize_text(cleaned_text)
                     lang = detect_language(normalized_text)
                     
                     result.append({
