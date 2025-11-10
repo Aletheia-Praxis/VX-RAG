@@ -202,7 +202,7 @@ class BoilerplateRemovalService:
         # Pattern for markdown code blocks (```...```)
         code_pattern = r'```[\s\S]*?```'
         
-        def replace_with_placeholder(match: re.Match) -> str:
+        def replace_with_placeholder(match: re.Match[str]) -> str:
             index = len(code_blocks)
             code_blocks.append(match.group(0))
             return placeholder_template.format(index)
