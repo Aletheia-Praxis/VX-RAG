@@ -11,7 +11,7 @@ Pipeline position:
 
 import re
 import logging
-from typing import List, Optional, Dict, Any
+from typing import List, Dict
 from dataclasses import dataclass
 
 logger = logging.getLogger(__name__)
