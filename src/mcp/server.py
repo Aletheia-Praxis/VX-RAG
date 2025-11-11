@@ -157,7 +157,7 @@ def run_ingestion_pipeline(data_dir: str, config_path: str) -> Dict[str, Any]:
     chunks = chunker.chunk_documents(unique_docs)
     
     # Step 5: Save chunks
-    def make_serializable(obj):
+    def make_serializable(obj: Any) -> Any:
         """Recursively remove non-serializable objects."""
         if isinstance(obj, dict):
             return {
@@ -799,7 +799,7 @@ async def verify_snapshot(params: SnapshotVerifyParams) -> str:
         error_response = {
             "error": f"Snapshot verification failed: {str(e)}",
             "snapshot_name": params.snapshot_name,
-            "valid": False,
+            "valid": "false",
         }
         
         return json.dumps(error_response, indent=2, ensure_ascii=False)
@@ -852,7 +852,7 @@ def get_system_context() -> str:
         return json.dumps({"error": f"Failed to retrieve system context: {str(e)}"})
 
 
-async def start_server():
+async def start_server() -> None:
     """Start MCP server with task queue."""
     logger.info("Starting VX-RAG MCP server")
     log_service_health("mcp_server", "starting")
