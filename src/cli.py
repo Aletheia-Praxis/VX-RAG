@@ -691,5 +691,59 @@ def handle_update_index(args: argparse.Namespace) -> None:
     metrics.histogram("index_update_duration_ms", duration * 1000)
 
 
+def handle_snapshot(args: argparse.Namespace) -> None:
+    """Handle snapshot command - create versioned backup of indexes."""
+    from src.rag.services.vectordb_service.service import VectorStoreClient
+    from src.rag.services.embedder_service.service import EmbeddingService
+    
+    start_time = time.time()
+    persist_dir = Path(args.persist_dir)
+    snapshot_name = args.name if hasattr(args, 'name') and args.name else None
+    
+    faiss_index_path = persist_dir / "faiss_index"
+    
+    if not faiss_index_path.exists():
+        print(f"Error: Index not found at {faiss_index_path}")
+        logger.error("Snapshot failed: index not found", persist_dir=str(persist_dir))
+        sys.exit(1)
+    
+    logger.info("Creating snapshot", persist_dir=str(persist_dir), snapshot_name=snapshot_name)
+    print(f"\n{'='*60}")
+    print(f"Creating Index Snapshot")
+    print(f"{'='*60}\n")
+    
+    # Load embedder for model info
+    embedder = EmbeddingService(config_path=args.config)
+    embed_model_info = embedder.get_model_info()
+    
+    # Load vector store
+    vector_client = VectorStoreClient(store_type="faiss", config={'index_dir': str(faiss_index_path)})
+    vector_client.load_index(embed_model=embedder.embed_model)
+    
+    if not vector_client.index:
+        print(f"ERROR: Failed to load index")
+        logger.error("Failed to load index for snapshot")
+        sys.exit(1)
+    
+    # Create snapshot
+    snapshot_path = vector_client.create_snapshot(
+        snapshot_name=snapshot_name,
+        embed_model_info=embed_model_info
+    )
+    
+    duration = time.time() - start_time
+    
+    print(f"  Snapshot created: {snapshot_path}")
+    print(f"  Duration: {duration:.2f}s")
+    print(f"{'='*60}\n")
+    
+    logger.info("Snapshot created successfully",
+               snapshot_path=str(snapshot_path),
+               duration_ms=duration * 1000)
+    
+    metrics.increment("snapshots_created_total")
+    metrics.histogram("snapshot_creation_duration_ms", duration * 1000)
+
+
 if __name__ == "__main__":
     main()
