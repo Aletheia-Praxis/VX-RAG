@@ -19,17 +19,21 @@ from functools import wraps
 from src.utils.logging_config import get_logger
 from src.utils.metrics import get_metrics
 from src.utils.rate_limiter import get_rate_limiter
+from src.utils.config_loader import get_mcp_rate_limit_config
 
 logger = get_logger("mcp_middleware")
 metrics = get_metrics()
 
 
+# Load rate limiting configuration from settings.yaml
+rate_limit_config = get_mcp_rate_limit_config()
+
 # Initialize rate limiter for MCP operations
 # Single-user system, but we still want to prevent runaway queries
 mcp_rate_limiter = get_rate_limiter(
-    max_concurrent=2,       # Max 2 concurrent queries
-    queue_size=10,          # Queue up to 10 requests
-    default_timeout=600.0,  # 10 minutes default timeout
+    max_concurrent=rate_limit_config['max_concurrent'],
+    queue_size=rate_limit_config['queue_size'],
+    default_timeout=rate_limit_config['default_timeout'],
 )
 
 
