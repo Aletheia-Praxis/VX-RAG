@@ -19,6 +19,7 @@ from src.utils.logging_config import get_logger, log_query_event, log_service_he
 from src.utils.metrics import get_metrics
 from src.utils.config_loader import get_mcp_config
 from src.utils.rate_limiter import get_rate_limiter
+from src.utils.task_queue import get_task_queue, TaskPriority
 
 # Get structured logger and metrics
 logger = get_logger("mcp_server")
@@ -34,6 +35,14 @@ rate_limiter = get_rate_limiter(
     default_timeout=600.0,  # 10 minutes default timeout
 )
 
+# Initialize task queue for background operations
+task_queue = get_task_queue(
+    max_workers=4,              # Max 4 ThreadPoolExecutor workers
+    max_concurrent_tasks=2,     # Max 2 concurrent tasks
+    max_completed_tasks=100,    # Keep last 100 completed tasks
+    max_failed_tasks=50,        # Keep last 50 failed tasks
+)
+
 
 # Create FastMCP server
 mcp = FastMCP(
@@ -46,6 +55,122 @@ class QueryParams(BaseModel):
     """Parameters for document query tool."""
     query: str = Field(..., description="The search query")
     top_k: int = Field(3, ge=1, le=10, description="Number of top results to return")
+
+
+class IngestParams(BaseModel):
+    """Parameters for document ingestion tool."""
+    data_dir: str = Field("data/raw", description="Directory containing documents to ingest")
+    config_path: str = Field("config/settings.yaml", description="Path to configuration file")
+    background: bool = Field(True, description="Run ingestion in background")
+
+
+class TaskStatusParams(BaseModel):
+    """Parameters for task status check."""
+    task_id: str = Field(..., description="Unique task identifier")
+
+
+# Helper function for background ingestion
+def run_ingestion_pipeline(data_dir: str, config_path: str) -> Dict[str, Any]:
+    """
+    Run the full ingestion pipeline (synchronous, for TaskQueue).
+    
+    This is a blocking function that will be executed in ThreadPoolExecutor.
+    
+    Args:
+        data_dir: Directory containing raw documents
+        config_path: Path to configuration file
+        
+    Returns:
+        Dictionary with ingestion results
+    """
+    from pathlib import Path
+    from src.rag.services.ingest_service.service import (
+        PDFIngestAdapter, 
+        TXTIngestAdapter, 
+        MDIngestAdapter,
+        save_processed_text
+    )
+    from src.rag.services.duplicate_detection_service.service import DuplicateDetector
+    from src.rag.services.chunker_service.service import Chunker
+    import json
+    
+    start_time = time.time()
+    data_path = Path(data_dir)
+    processed_dir = data_path / "processed"
+    
+    if not data_path.exists():
+        raise FileNotFoundError(f"Data directory not found: {data_path}")
+    
+    processed_dir.mkdir(parents=True, exist_ok=True)
+    
+    logger.info("Starting background ingestion", data_dir=str(data_path))
+    
+    # Step 1: Parse documents
+    pdf_adapter = PDFIngestAdapter()
+    txt_adapter = TXTIngestAdapter()
+    md_adapter = MDIngestAdapter()
+    
+    pdf_docs = pdf_adapter.load_data(str(data_path / "pdf"))
+    txt_docs = txt_adapter.load_data(str(data_path / "txt"))
+    md_docs = md_adapter.load_data(str(data_path / "md"))
+    
+    all_docs = pdf_docs + txt_docs + md_docs
+    
+    # Step 2: Remove duplicates
+    detector = DuplicateDetector(config_path=config_path)
+    unique_docs = detector.remove_duplicates(all_docs)
+    
+    # Step 3: Save processed documents
+    saved_count = save_processed_text(unique_docs, processed_dir)
+    
+    # Step 4: Chunk documents
+    chunker = Chunker(config_path=config_path)
+    chunks = chunker.chunk_documents(unique_docs)
+    
+    # Step 5: Save chunks
+    def make_serializable(obj):
+        """Recursively remove non-serializable objects."""
+        if isinstance(obj, dict):
+            return {
+                k: make_serializable(v) 
+                for k, v in obj.items() 
+                if k not in ['node_info', 'relationships', 'excluded_llm_metadata_keys', 
+                             'excluded_embed_metadata_keys', 'metadata_seperator', 
+                             'metadata_template', 'text_template']
+            }
+        elif isinstance(obj, list):
+            return [make_serializable(item) for item in obj]
+        else:
+            return obj
+    
+    chunks_file = data_path / "processed" / "chunks.json"
+    serializable_chunks = make_serializable(chunks)
+    
+    with open(chunks_file, 'w', encoding='utf-8') as f:
+        json.dump(serializable_chunks, f, ensure_ascii=False, indent=2)
+    
+    duration = time.time() - start_time
+    
+    logger.info(
+        "Background ingestion completed", 
+        parsed=len(all_docs),
+        duplicates_removed=len(all_docs) - len(unique_docs),
+        unique=len(unique_docs),
+        saved=saved_count,
+        chunks=len(chunks),
+        duration_sec=round(duration, 2)
+    )
+    
+    return {
+        'status': 'completed',
+        'documents_parsed': len(all_docs),
+        'duplicates_removed': len(all_docs) - len(unique_docs),
+        'unique_documents': len(unique_docs),
+        'documents_saved': saved_count,
+        'chunks_created': len(chunks),
+        'chunks_file': str(chunks_file),
+        'duration_seconds': round(duration, 2)
+    }
 
 
 @mcp.tool
@@ -166,7 +291,7 @@ def get_health_status() -> str:
     Get the health status of the RAG system.
     
     Returns:
-        JSON-formatted health status including index load state and rate limiter stats
+        JSON-formatted health status including index load state, rate limiter, and task queue stats
     """
     try:
         # Delegate to MCP bridge
@@ -177,6 +302,9 @@ def get_health_status() -> str:
         
         # Add rate limiter statistics
         health_dict['rate_limiter'] = rate_limiter.get_stats()
+        
+        # Add task queue statistics
+        health_dict['task_queue'] = task_queue.get_queue_stats()
         
         # Log service health
         log_service_health("mcp_server", "healthy")
@@ -204,7 +332,25 @@ def get_system_context() -> str:
         return json.dumps({"error": f"Failed to retrieve system context: {str(e)}"})
 
 
-if __name__ == "__main__":
+async def start_server():
+    """Start MCP server with task queue."""
     logger.info("Starting VX-RAG MCP server")
     log_service_health("mcp_server", "starting")
-    mcp.run()
+    
+    # Start task queue
+    await task_queue.start()
+    logger.info("Task queue started")
+    
+    # Run MCP server (blocking)
+    try:
+        mcp.run()
+    finally:
+        # Cleanup on shutdown
+        logger.info("Shutting down MCP server")
+        await task_queue.stop()
+        logger.info("Task queue stopped")
+        log_service_health("mcp_server", "stopped")
+
+
+if __name__ == "__main__":
+    asyncio.run(start_server())
