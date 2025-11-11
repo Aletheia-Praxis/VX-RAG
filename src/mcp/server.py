@@ -376,6 +376,61 @@ async def ingest_documents(params: IngestParams) -> str:
         return json.dumps(error_response, indent=2, ensure_ascii=False)
 
 
+@mcp.tool
+async def get_task_status(params: TaskStatusParams) -> str:
+    """
+    Get the status of a background task.
+    
+    Returns detailed information about task progress, result, or error.
+    
+    Args:
+        params: Task status parameters including task ID
+        
+    Returns:
+        JSON-formatted task status information
+    """
+    try:
+        logger.info("Checking task status", task_id=params.task_id)
+        
+        task_status = await task_queue.get_task_status(params.task_id)
+        
+        if task_status is None:
+            response = {
+                "error": "Task not found",
+                "task_id": params.task_id,
+            }
+        else:
+            response = {
+                "task_id": params.task_id,
+                "status": task_status['status'],
+                "name": task_status['name'],
+                "created_at": task_status['created_at'],
+                "started_at": task_status['started_at'],
+                "completed_at": task_status['completed_at'],
+                "result": task_status['result'],
+                "error": task_status['error'],
+            }
+            
+            # Calculate duration if available
+            if task_status['started_at'] and task_status['completed_at']:
+                duration = task_status['completed_at'] - task_status['started_at']
+                response['duration_seconds'] = round(duration, 2)
+        
+        logger.info("Task status retrieved", task_id=params.task_id, status=task_status['status'] if task_status else 'not_found')
+        
+        return json.dumps(response, indent=2, ensure_ascii=False)
+        
+    except Exception as e:
+        logger.error("Failed to get task status", task_id=params.task_id, error=str(e))
+        
+        error_response = {
+            "error": f"Failed to get task status: {str(e)}",
+            "task_id": params.task_id,
+        }
+        
+        return json.dumps(error_response, indent=2, ensure_ascii=False)
+
+
 @mcp.resource("health://status")
 def get_health_status() -> str:
     """
