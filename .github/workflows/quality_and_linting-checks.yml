@@ -49,7 +49,7 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install mypy types-requests python-dotenv types-selenium types-beautifulsoup4 fastmcp pydantic types-PyYAML
-          echo "y" | mypy --install-types --config-file for_checks/for_step_Install_tool-mypy.ini src scripts || true
+          echo "y" | mypy --install-types --config-file config\for_checks\for_step_Install_tool-mypy.ini src scripts || true
       - name: Run mypy
         run: |
           mypy --config-file mypy.ini src scripts
