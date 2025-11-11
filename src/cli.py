@@ -1176,14 +1176,14 @@ def handle_serve(args: argparse.Namespace) -> None:
     """
     Handle serve command - start MCP server.
     
-    Starts the FastMCP server with configured transport protocol (stdio or HTTP).
-    The server provides MCP tools for querying, ingestion, task management, and snapshots.
+    Starts the minimal FastMCP server that delegates to handlers.
+    Only provides LLM-facing tools, no admin operations.
     """
     import signal
-    from src.mcp.server import mcp
+    from src.mcp.server import run_stdio, run_sse, run_http
     
     print(f"\n{'='*80}")
-    print("Starting VX-RAG MCP Server")
+    print("Starting VX-RAG MCP Server (New Architecture)")
     print(f"{'='*80}")
     print(f"  Config:    {args.config}")
     print(f"  Transport: {args.transport}")
@@ -1204,124 +1204,42 @@ def handle_serve(args: argparse.Namespace) -> None:
     )
     
     # Setup graceful shutdown
-    shutdown_event = asyncio.Event()
-    
     def signal_handler(signum: int, frame: Any) -> None:
         """Handle shutdown signals."""
         print(f"\n\nReceived signal {signum}. Shutting down gracefully...")
         logger.info("Shutdown signal received", signal=signum)
-        shutdown_event.set()
+        sys.exit(0)
     
     # Register signal handlers
     signal.signal(signal.SIGINT, signal_handler)
     signal.signal(signal.SIGTERM, signal_handler)
     
-    async def run_server() -> None:
-        """Run server with graceful shutdown."""
-        try:
-            # Start task queue
-            task_queue = get_cli_task_queue()
-            await task_queue.start()
-            logger.info("Task queue started for MCP server")
-            print("Task queue started")
-            
-            # Display server info based on transport
-            if args.transport == "stdio":
-                print("\nMCP Server started in STDIO mode")
-                print("This mode is designed for IDE integration (VS Code, Claude Desktop)")
-                print("Server is listening on stdin/stdout")
-                print("\nPress Ctrl+C to stop the server\n")
-            elif args.transport == "sse":
-                print(f"\nMCP Server started in SSE mode")
-                print(f"Server URL: http://{args.host}:{args.port}")
-                print(f"SSE Endpoint: http://{args.host}:{args.port}/sse")
-                if args.cors:
-                    print(f"CORS enabled for origins: {args.allowed_origins}")
-                print("\nPress Ctrl+C to stop the server\n")
-            elif args.transport == "http":
-                print(f"\nMCP Server started in HTTP mode")
-                print(f"Server URL: http://{args.host}:{args.port}")
-                if args.cors:
-                    print(f"CORS enabled for origins: {args.allowed_origins}")
-                print("\nPress Ctrl+C to stop the server\n")
-            
-            # Run MCP server with appropriate transport
-            if args.transport == "stdio":
-                # STDIO transport for IDE integration
-                await mcp.run_stdio_async()
-                
-            elif args.transport == "sse":
-                # SSE (Server-Sent Events) transport
-                import uvicorn
-                
-            # Get FastAPI app with SSE support
-            app = mcp.sse_app()
-            
-            # Add CORS middleware if enabled
-            if args.cors:
-                from starlette.middleware.cors import CORSMiddleware
-                origins = [origin.strip() for origin in args.allowed_origins.split(",")]
-                app.add_middleware(
-                    CORSMiddleware,
-                    allow_origins=origins,
-                    allow_credentials=True,
-                    allow_methods=["*"],
-                    allow_headers=["*"],
-                )                # Run with uvicorn
-                config = uvicorn.Config(
-                    app,
-                    host=args.host,
-                    port=args.port,
-                    log_level="info",
-                    access_log=True
-                )
-                server = uvicorn.Server(config)
-                await server.serve()
-                
-            elif args.transport == "http":
-                # HTTP REST API transport
-                import uvicorn
-                
-            # Get FastAPI app with HTTP support
-            app = mcp.http_app()
-            
-            # Add CORS middleware if enabled
-            if args.cors:
-                from starlette.middleware.cors import CORSMiddleware
-                origins = [origin.strip() for origin in args.allowed_origins.split(",")]
-                app.add_middleware(
-                    CORSMiddleware,
-                    allow_origins=origins,
-                    allow_credentials=True,
-                    allow_methods=["*"],
-                    allow_headers=["*"],
-                )                # Run with uvicorn
-                config = uvicorn.Config(
-                    app,
-                    host=args.host,
-                    port=args.port,
-                    log_level="info",
-                    access_log=True
-                )
-                server = uvicorn.Server(config)
-                await server.serve()
-                
-        except KeyboardInterrupt:
-            print("\n\nShutdown initiated...")
-        except Exception as e:
-            logger.error("Server error", error=str(e), exc_info=True)
-            print(f"\nServer error: {e}")
-            raise
-        finally:
-            print("Cleaning up resources...")
-            task_queue = get_cli_task_queue()
-            await task_queue.stop()
-            logger.info("Task queue stopped")
-            print("Server stopped")
-    
-    # Run the async server
+    # Run server based on transport
     try:
-        asyncio.run(run_server())
+        if args.transport == "stdio":
+            print("\nMCP Server starting in STDIO mode")
+            print("This mode is designed for IDE integration (VS Code, Claude Desktop)")
+            print("Server will listen on stdin/stdout")
+            print("\nPress Ctrl+C to stop the server\n")
+            run_stdio()
+            
+        elif args.transport == "sse":
+            print(f"\nMCP Server starting in SSE mode")
+            print(f"Server URL: http://{args.host}:{args.port}")
+            print(f"SSE Endpoint: http://{args.host}:{args.port}/sse")
+            if args.cors:
+                print(f"CORS enabled for origins: {args.allowed_origins}")
+            print("\nPress Ctrl+C to stop the server\n")
+            asyncio.run(run_sse(host=args.host, port=args.port))
+            
+        elif args.transport == "http":
+            print(f"\nMCP Server starting in HTTP mode")
+            print(f"Server URL: http://{args.host}:{args.port}")
+            if args.cors:
+                print(f"CORS enabled for origins: {args.allowed_origins}")
+            print("\nPress Ctrl+C to stop the server\n")
+            asyncio.run(run_http(host=args.host, port=args.port))
+            
     except KeyboardInterrupt:
         print("\nServer shutdown complete")
     except Exception as e:
