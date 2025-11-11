@@ -39,6 +39,7 @@ def main() -> None:
     # Query command
     query_parser = subparsers.add_parser("query", help="Query the system")
     query_parser.add_argument("query", type=str)
+    query_parser.add_argument("--persist-dir", type=str, default="./data/index")
     query_parser.add_argument("--config", type=str, default="./config/settings.yaml")
     query_parser.add_argument("--top-k", type=int, default=5)
 
@@ -400,8 +401,164 @@ def handle_index(args: argparse.Namespace) -> None:
 
 
 def handle_query(args: argparse.Namespace) -> None:
-    """Handle query command."""
-    print(f"Querying: {args.query}")
+    """Handle query command - search documents using hybrid retrieval + reranking."""
+    import json
+    from llama_index.core import StorageContext, load_index_from_storage
+    from src.rag.services.embedder_service.service import EmbeddingService
+    from src.rag.services.vectordb_service.service import VectorStoreClient
+    from src.rag.services.bm25_service.service import BM25Service
+    from src.rag.services.retriever_service.service import RetrieverService
+    from src.rag.services.reranker_service.service import RerankerService
+    from src.rag.services.hybrid_search_service.service import HybridSearchService
+    from src.rag.services.assembler_service.service import ContextAssembler
+    
+    start_time = time.time()
+    persist_dir = Path(args.persist_dir)
+    query = args.query
+    top_k = args.top_k if hasattr(args, 'top_k') else 5
+    
+    # Validate index exists
+    faiss_index_path = persist_dir / "faiss_index"
+    bm25_index_path = persist_dir / "bm25_index"
+    metadata_file = persist_dir / "index_metadata.json"
+    
+    if not faiss_index_path.exists() or not bm25_index_path.exists():
+        print(f"Error: Indexes not found in {persist_dir}")
+        print("Please run 'index' command first to create indexes.")
+        logger.error("Query failed: indexes not found", persist_dir=str(persist_dir))
+        sys.exit(1)
+    
+    logger.info("Starting query pipeline", query=query, top_k=top_k)
+    print(f"\n{'='*60}")
+    print(f"Query: {query}")
+    print(f"{'='*60}\n")
+    
+    # Step 1: Load indexes (Module 8 - RetrieverService setup)
+    print(f"[Step 1/5] Loading indexes...")
+    
+    # Load FAISS index
+    embedder = EmbeddingService(config_path=args.config)
+    vector_client = VectorStoreClient(store_type="faiss", config={'index_dir': str(faiss_index_path)})
+    vector_client.load_index(embed_model=embedder.embed_model)
+    
+    print(f"  FAISS index loaded from: {faiss_index_path}")
+    logger.info(f"Loaded FAISS index from {faiss_index_path}")
+    
+    # Load BM25 index
+    bm25_service = BM25Service(index_dir=str(bm25_index_path), config_path=args.config)
+    bm25_service.load_index()
+    
+    print(f"  BM25 index loaded from: {bm25_index_path}")
+    logger.info(f"Loaded BM25 index from {bm25_index_path}")
+    
+    # Step 2: Initialize RetrieverService (Module 8)
+    print(f"\n[Step 2/5] Initializing retriever...")
+    
+    retriever = RetrieverService(index=vector_client.index, config_path=args.config)
+    if vector_client.index:
+        retriever.set_index(vector_client.index)
+        retriever.bm25_retriever = bm25_service.bm25_retriever
+    else:
+        print(f"  ERROR: Failed to load FAISS index")
+        logger.error("FAISS index is None after loading")
+        sys.exit(1)
+    
+    print(f"  Retriever initialized (vector + BM25)")
+    logger.info("Retriever service initialized")
+    
+    # Step 3: Retrieve candidates (Module 8 - hybrid retrieval)
+    print(f"\n[Step 3/5] Retrieving candidates...")
+    
+    # Retrieve from both sources
+    initial_k = top_k * 4  # Over-retrieve for reranking
+    
+    try:
+        vector_results = retriever.retrieve(query, top_k=initial_k, search_type="semantic")
+        print(f"  Vector search: {len(vector_results)} candidates")
+        
+        bm25_results = retriever.retrieve(query, top_k=initial_k, search_type="keyword")
+        print(f"  BM25 search: {len(bm25_results)} candidates")
+        
+        logger.info(f"Retrieved {len(vector_results)} vector + {len(bm25_results)} BM25 candidates")
+    except Exception as e:
+        print(f"  ERROR: Retrieval failed - {e}")
+        logger.error(f"Retrieval failed: {e}")
+        sys.exit(1)
+    
+    # Step 4: Rerank candidates (Module 9 - RerankerService)
+    print(f"\n[Step 4/5] Reranking candidates...")
+    
+    reranker = RerankerService(config_path=args.config)
+    
+    # Combine results (simple merge for reranking)
+    all_candidates = vector_results + bm25_results
+    
+    # Remove duplicates by node_id
+    seen_ids = set()
+    unique_candidates = []
+    for doc in all_candidates:
+        node_id = doc.get('node_id', doc.get('id', ''))
+        if node_id not in seen_ids:
+            seen_ids.add(node_id)
+            unique_candidates.append(doc)
+    
+    print(f"  Unique candidates: {len(unique_candidates)}")
+    
+    # Rerank
+    reranked_results = reranker.rerank(query, unique_candidates, top_k=top_k)
+    
+    print(f"  Reranked to top {len(reranked_results)} results")
+    logger.info(f"Reranked {len(unique_candidates)} candidates to top {len(reranked_results)}")
+    
+    # Step 5: Assemble context (Module 11 - ContextAssembler)
+    print(f"\n[Step 5/5] Assembling context...")
+    
+    assembler = ContextAssembler(config_path=args.config)
+    context_payload = assembler.assemble_context(
+        query=query,
+        documents=reranked_results,
+        token_budget=4000,  # Default budget
+        max_items=top_k
+    )
+    
+    print(f"  Context assembled: {len(context_payload.context)} items")
+    print(f"  Estimated tokens: ~{context_payload.total_tokens_estimate()}")
+    logger.info(f"Context assembled: {len(context_payload.context)} items")
+    
+    # Display results
+    duration = time.time() - start_time
+    
+    print(f"\n{'='*60}")
+    print(f"Results:")
+    print(f"{'='*60}\n")
+    
+    for i, item in enumerate(context_payload.context, 1):
+        score_str = f"{item.score:.4f}" if item.score is not None else "N/A"
+        print(f"[{i}] Score: {score_str}")
+        print(f"    ID: {item.id}")
+        print(f"    Preview: {item.text[:150]}...")
+        if item.meta:
+            print(f"    Metadata: {json.dumps(item.meta, indent=8)}")
+        print()
+    
+    print(f"{'='*60}")
+    print(f"Query Summary:")
+    print(f"{'='*60}")
+    print(f"  Query:              {query}")
+    print(f"  Results returned:   {len(context_payload.context)}")
+    print(f"  Token estimate:     ~{context_payload.total_tokens_estimate()}")
+    print(f"  Duration:           {duration:.2f}s")
+    print(f"{'='*60}\n")
+    
+    logger.info("Query pipeline completed",
+               query=query,
+               results=len(context_payload.context),
+               tokens_estimate=context_payload.total_tokens_estimate(),
+               duration_ms=duration * 1000)
+    
+    metrics.increment("query_requests_total")
+    metrics.histogram("query_duration_ms", duration * 1000)
+    metrics.histogram("query_results_count", len(context_payload.context))
 
 
 def handle_update_index(args: argparse.Namespace) -> None:
