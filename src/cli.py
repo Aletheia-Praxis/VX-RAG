@@ -9,9 +9,9 @@ import sys
 import time
 import asyncio
 from pathlib import Path
-from typing import Any, List, Dict
+from typing import Any
 
-from src.utils.logging_config import get_logger, log_index_event
+from src.utils.logging_config import get_logger
 from src.utils.metrics import get_metrics
 from src.utils.task_queue import get_task_queue
 
@@ -190,7 +190,7 @@ def handle_ingest(args: argparse.Namespace) -> None:
     print(f"  Total parsed: {len(all_docs)} documents")
     
     # Step 2: Remove duplicates
-    print(f"\n[Step 2/4] Removing duplicates...")
+    print("\n[Step 2/4] Removing duplicates...")
     
     detector = DuplicateDetector(config_path=args.config)
     unique_docs = detector.remove_duplicates(all_docs)
@@ -206,7 +206,7 @@ def handle_ingest(args: argparse.Namespace) -> None:
     print(f"  Saved files: {saved_count}")
     
     # Step 4: Chunk documents
-    print(f"\n[Step 4/4] Chunking documents...")
+    print("\n[Step 4/4] Chunking documents...")
     
     chunker = Chunker(config_path=args.config)
     chunks = chunker.chunk_documents(unique_docs)
@@ -243,13 +243,13 @@ def handle_ingest(args: argparse.Namespace) -> None:
         print(f"  Saved chunks to: {chunks_file}")
     except TypeError as e:
         logger.error(f"Failed to serialize chunks: {e}")
-        print(f"  Warning: Could not save chunks (serialization error)")
+        print("  Warning: Could not save chunks (serialization error)")
     
     # Summary
     duration = time.time() - start_time
     
     print(f"\n{'='*50}")
-    print(f"Ingestion Summary:")
+    print("Ingestion Summary:")
     print(f"{'='*50}")
     print(f"  Documents parsed:     {len(all_docs)}")
     print(f"  Duplicates removed:   {duplicates_removed}")
@@ -278,8 +278,7 @@ def handle_ingest(args: argparse.Namespace) -> None:
 def handle_index(args: argparse.Namespace) -> None:
     """Handle index command - create embeddings and build FAISS + BM25 indexes."""
     import json
-    import numpy as np
-    from llama_index.core.schema import Document, TextNode
+    from llama_index.core.schema import Document
     from src.rag.services.embedder_service.service import EmbeddingService
     from src.rag.services.vectordb_service.service import VectorStoreClient
     from src.rag.services.bm25_service.service import BM25Service
@@ -309,19 +308,15 @@ def handle_index(args: argparse.Namespace) -> None:
     logger.info(f"Loaded {len(chunks)} chunks from {chunks_file}")
     
     # Step 2: Generate embeddings (Module 5 - EmbedderService)
-    print(f"\n[Step 2/4] Generating embeddings...")
+    print("\n[Step 2/4] Generating embeddings...")
     
     embedder = EmbeddingService(config_path=args.config)
     
     # Extract text from chunks
     chunk_texts = [chunk.get('text', '') for chunk in chunks]
-    chunk_ids = [chunk.get('id', f"chunk_{i}") for i, chunk in enumerate(chunks)]
     
     print(f"  Embedding {len(chunk_texts)} chunks...")
     embeddings_list = embedder.embed_batch(chunk_texts)
-    
-    # Convert to numpy array for FAISS
-    embeddings_array = np.array(embeddings_list, dtype=np.float32)
     
     embedding_dim = len(embeddings_list[0]) if embeddings_list else 0
     print(f"  Generated embeddings: {len(embeddings_list)}")
@@ -329,7 +324,7 @@ def handle_index(args: argparse.Namespace) -> None:
     logger.info(f"Generated {len(embeddings_list)} embeddings with dimension {embedding_dim}")
     
     # Step 3: Build FAISS vector index (Module 6 - VectorStoreClient)
-    print(f"\n[Step 3/4] Building FAISS vector index...")
+    print("\n[Step 3/4] Building FAISS vector index...")
     
     # Convert chunks to LlamaIndex Document objects for VectorStoreClient
     documents = []
@@ -348,7 +343,7 @@ def handle_index(args: argparse.Namespace) -> None:
     vector_client = VectorStoreClient(store_type="faiss", config=vector_store_config)
     
     # Build FAISS index
-    vector_index = vector_client.build_index(
+    vector_client.build_index(
         documents=documents,
         embed_model=embedder.embed_model
     )
@@ -362,7 +357,7 @@ def handle_index(args: argparse.Namespace) -> None:
     logger.info(f"Built and saved FAISS index to {faiss_index_path}")
     
     # Step 4: Build BM25 index (Module 7 - BM25Service)
-    print(f"\n[Step 4/4] Building BM25 index...")
+    print("\n[Step 4/4] Building BM25 index...")
     
     # Initialize BM25Service with persist directory
     bm25_index_path = persist_dir / "bm25_index"
@@ -398,7 +393,7 @@ def handle_index(args: argparse.Namespace) -> None:
     duration = time.time() - start_time
     
     print(f"\n{'='*50}")
-    print(f"Indexing Summary:")
+    print("Indexing Summary:")
     print(f"{'='*50}")
     print(f"  Chunks processed:     {len(chunks)}")
     print(f"  Embeddings created:   {len(embeddings_list)}")
@@ -424,13 +419,11 @@ def handle_index(args: argparse.Namespace) -> None:
 def handle_query(args: argparse.Namespace) -> None:
     """Handle query command - search documents using hybrid retrieval + reranking."""
     import json
-    from llama_index.core import StorageContext, load_index_from_storage
     from src.rag.services.embedder_service.service import EmbeddingService
     from src.rag.services.vectordb_service.service import VectorStoreClient
     from src.rag.services.bm25_service.service import BM25Service
     from src.rag.services.retriever_service.service import RetrieverService
     from src.rag.services.reranker_service.service import RerankerService
-    from src.rag.services.hybrid_search_service.service import HybridSearchService
     from src.rag.services.assembler_service.service import ContextAssembler
     
     start_time = time.time()
@@ -441,7 +434,6 @@ def handle_query(args: argparse.Namespace) -> None:
     # Validate index exists
     faiss_index_path = persist_dir / "faiss_index"
     bm25_index_path = persist_dir / "bm25_index"
-    metadata_file = persist_dir / "index_metadata.json"
     
     if not faiss_index_path.exists() or not bm25_index_path.exists():
         print(f"Error: Indexes not found in {persist_dir}")
@@ -455,7 +447,7 @@ def handle_query(args: argparse.Namespace) -> None:
     print(f"{'='*60}\n")
     
     # Step 1: Load indexes (Module 8 - RetrieverService setup)
-    print(f"[Step 1/5] Loading indexes...")
+    print("[Step 1/5] Loading indexes...")
     
     # Load FAISS index
     embedder = EmbeddingService(config_path=args.config)
@@ -473,22 +465,22 @@ def handle_query(args: argparse.Namespace) -> None:
     logger.info(f"Loaded BM25 index from {bm25_index_path}")
     
     # Step 2: Initialize RetrieverService (Module 8)
-    print(f"\n[Step 2/5] Initializing retriever...")
+    print("\n[Step 2/5] Initializing retriever...")
     
     retriever = RetrieverService(index=vector_client.index, config_path=args.config)
     if vector_client.index:
         retriever.set_index(vector_client.index)
         retriever.bm25_retriever = bm25_service.bm25_retriever
     else:
-        print(f"  ERROR: Failed to load FAISS index")
+        print("  ERROR: Failed to load FAISS index")
         logger.error("FAISS index is None after loading")
         sys.exit(1)
     
-    print(f"  Retriever initialized (vector + BM25)")
+    print("  Retriever initialized (vector + BM25)")
     logger.info("Retriever service initialized")
     
     # Step 3: Retrieve candidates (Module 8 - hybrid retrieval)
-    print(f"\n[Step 3/5] Retrieving candidates...")
+    print("\n[Step 3/5] Retrieving candidates...")
     
     # Retrieve from both sources
     initial_k = top_k * 4  # Over-retrieve for reranking
@@ -507,7 +499,7 @@ def handle_query(args: argparse.Namespace) -> None:
         sys.exit(1)
     
     # Step 4: Rerank candidates (Module 9 - RerankerService)
-    print(f"\n[Step 4/5] Reranking candidates...")
+    print("\n[Step 4/5] Reranking candidates...")
     
     reranker = RerankerService(config_path=args.config)
     
@@ -532,7 +524,7 @@ def handle_query(args: argparse.Namespace) -> None:
     logger.info(f"Reranked {len(unique_candidates)} candidates to top {len(reranked_results)}")
     
     # Step 5: Assemble context (Module 11 - ContextAssembler)
-    print(f"\n[Step 5/5] Assembling context...")
+    print("\n[Step 5/5] Assembling context...")
     
     assembler = ContextAssembler(config_path=args.config)
     context_payload = assembler.assemble_context(
@@ -550,7 +542,7 @@ def handle_query(args: argparse.Namespace) -> None:
     duration = time.time() - start_time
     
     print(f"\n{'='*60}")
-    print(f"Results:")
+    print("Results:")
     print(f"{'='*60}\n")
     
     for i, item in enumerate(context_payload.context, 1):
@@ -563,7 +555,7 @@ def handle_query(args: argparse.Namespace) -> None:
         print()
     
     print(f"{'='*60}")
-    print(f"Query Summary:")
+    print("Query Summary:")
     print(f"{'='*60}")
     print(f"  Query:              {query}")
     print(f"  Results returned:   {len(context_payload.context)}")
@@ -584,16 +576,11 @@ def handle_query(args: argparse.Namespace) -> None:
 
 def handle_update_index(args: argparse.Namespace) -> None:
     """Handle update-index command - add new documents to existing index incrementally."""
-    import json
     from llama_index.core.schema import Document
     from src.rag.services.embedder_service.service import EmbeddingService
     from src.rag.services.vectordb_service.service import VectorStoreClient
     from src.rag.services.bm25_service.service import BM25Service
-    from src.rag.services.ingest_service.service import (
-        PDFIngestAdapter,
-        TXTIngestAdapter,
-        MDIngestAdapter
-    )
+    from src.rag.services.ingest_service.service import PDFIngestAdapter
     from src.rag.services.duplicate_detection_service.service import DuplicateDetector
     from src.rag.services.chunker_service.service import Chunker
     
@@ -613,15 +600,13 @@ def handle_update_index(args: argparse.Namespace) -> None:
     
     logger.info("Starting incremental index update", persist_dir=str(persist_dir), data_dir=str(data_dir))
     print(f"\n{'='*60}")
-    print(f"Incremental Index Update")
+    print("Incremental Index Update")
     print(f"{'='*60}\n")
     
     # Step 1: Parse new documents
     print(f"[Step 1/4] Parsing new documents from {data_dir}...")
     
     pdf_adapter = PDFIngestAdapter(config_path=args.config)
-    txt_adapter = TXTIngestAdapter(config_path=args.config)
-    md_adapter = MDIngestAdapter(config_path=args.config)
     
     new_docs = []
     
@@ -642,19 +627,19 @@ def handle_update_index(args: argparse.Namespace) -> None:
         return
     
     # Step 2: Remove duplicates
-    print(f"\n[Step 2/4] Checking for duplicates...")
+    print("\n[Step 2/4] Checking for duplicates...")
     deduplicator = DuplicateDetector()
     unique_docs = deduplicator.remove_duplicates(new_docs)
     print(f"  Unique new documents: {len(unique_docs)}")
     
     # Step 3: Chunk documents
-    print(f"\n[Step 3/4] Chunking documents...")
+    print("\n[Step 3/4] Chunking documents...")
     chunker = Chunker(config_path=args.config)
     chunks = chunker.chunk_documents(unique_docs)
     print(f"  Created {len(chunks)} chunks")
     
     # Step 4: Update indexes
-    print(f"\n[Step 4/4] Updating indexes...")
+    print("\n[Step 4/4] Updating indexes...")
     
     # Load embedder
     embedder = EmbeddingService(config_path=args.config)
@@ -679,7 +664,7 @@ def handle_update_index(args: argparse.Namespace) -> None:
             vector_client.save_index(create_backup=True)
             print(f"  FAISS index updated: +{len(documents)} documents")
         else:
-            print(f"  ERROR: Failed to update FAISS index")
+            print("  ERROR: Failed to update FAISS index")
             logger.error("Failed to update FAISS index")
     
     # Load and update BM25 index
@@ -687,19 +672,19 @@ def handle_update_index(args: argparse.Namespace) -> None:
     bm25_service.load_index()
     
     # BM25 requires full rebuild (limitation of the current implementation)
-    print(f"  Note: BM25 index requires full rebuild for updates")
-    print(f"  Run 'index' command to rebuild BM25 with new documents")
+    print("  Note: BM25 index requires full rebuild for updates")
+    print("  Run 'index' command to rebuild BM25 with new documents")
     
     # Summary
     duration = time.time() - start_time
     
     print(f"\n{'='*60}")
-    print(f"Update Summary:")
+    print("Update Summary:")
     print(f"{'='*60}")
     print(f"  New documents added:  {len(unique_docs)}")
     print(f"  New chunks created:   {len(chunks)}")
-    print(f"  FAISS index updated:  Yes")
-    print(f"  BM25 index updated:   Requires manual rebuild")
+    print("  FAISS index updated:  Yes")
+    print("  BM25 index updated:   Requires manual rebuild")
     print(f"  Duration:             {duration:.2f}s")
     print(f"{'='*60}\n")
     
@@ -730,7 +715,7 @@ def handle_snapshot(args: argparse.Namespace) -> None:
     
     logger.info("Creating snapshot", persist_dir=str(persist_dir), snapshot_name=snapshot_name)
     print(f"\n{'='*60}")
-    print(f"Creating Index Snapshot")
+    print("Creating Index Snapshot")
     print(f"{'='*60}\n")
     
     # Load embedder for model info
@@ -742,7 +727,7 @@ def handle_snapshot(args: argparse.Namespace) -> None:
     vector_client.load_index(embed_model=embedder.embed_model)
     
     if not vector_client.index:
-        print(f"ERROR: Failed to load index")
+        print("ERROR: Failed to load index")
         logger.error("Failed to load index for snapshot")
         sys.exit(1)
     
@@ -800,13 +785,13 @@ def handle_verify_snapshot(args: argparse.Namespace) -> None:
         
         if result.get('manifest'):
             manifest = result['manifest']
-            print(f"\n  Manifest Info:")
+            print("\n  Manifest Info:")
             print(f"    Created: {manifest.get('timestamp', 'N/A')}")
             print(f"    Embedding model: {manifest.get('embed_model_name', 'N/A')}")
             print(f"    Files: {len(manifest.get('files', []))}")
         
         if not result['valid']:
-            print(f"\n  Errors:")
+            print("\n  Errors:")
             for error in result.get('errors', []):
                 print(f"    - {error}")
         
@@ -842,13 +827,13 @@ def handle_status(args: argparse.Namespace) -> None:
             task_status = await task_queue.get_task_status(args.task_id)
             
             print(f"\n{'='*60}")
-            print(f"Task Status")
+            print("Task Status")
             print(f"{'='*60}\n")
             
             if task_status is None:
                 print(f"  Task ID: {args.task_id}")
-                print(f"  Status: NOT FOUND")
-                print(f"\n  The task may have been removed or never existed.")
+                print("  Status: NOT FOUND")
+                print("\n  The task may have been removed or never existed.")
             else:
                 print(f"  Task ID: {task_status['task_id']}")
                 print(f"  Name: {task_status['name']}")
@@ -874,11 +859,11 @@ def handle_status(args: argparse.Namespace) -> None:
                     print(f"\n  Error: {task_status['error']}")
                 
                 if task_status['result']:
-                    print(f"\n  Result:")
+                    print("\n  Result:")
                     try:
                         result_dict = json.loads(task_status['result']) if isinstance(task_status['result'], str) else task_status['result']
                         print(f"    {json.dumps(result_dict, indent=4)}")
-                    except:
+                    except (json.JSONDecodeError, TypeError, AttributeError):
                         print(f"    {task_status['result']}")
             
             print(f"\n{'='*60}\n")
@@ -897,7 +882,7 @@ def handle_cancel(args: argparse.Namespace) -> None:
         
         try:
             print(f"\n{'='*60}")
-            print(f"Task Cancellation")
+            print("Task Cancellation")
             print(f"{'='*60}\n")
             
             # Check if task exists first
@@ -905,8 +890,8 @@ def handle_cancel(args: argparse.Namespace) -> None:
             
             if task_status is None:
                 print(f"  Task ID: {args.task_id}")
-                print(f"  Status: NOT FOUND")
-                print(f"\n  The task may have been removed or never existed.")
+                print("  Status: NOT FOUND")
+                print("\n  The task may have been removed or never existed.")
             else:
                 print(f"  Task ID: {args.task_id}")
                 print(f"  Current Status: {task_status['status'].upper()}")
@@ -915,9 +900,9 @@ def handle_cancel(args: argparse.Namespace) -> None:
                 success = await task_queue.cancel_task(args.task_id)
                 
                 if success:
-                    print(f"  Result: CANCELLED SUCCESSFULLY")
+                    print("  Result: CANCELLED SUCCESSFULLY")
                 else:
-                    print(f"  Result: CANNOT CANCEL")
+                    print("  Result: CANNOT CANCEL")
                     print(f"  Reason: Task is in '{task_status['status']}' state")
             
             print(f"\n{'='*60}\n")
@@ -982,7 +967,7 @@ def handle_list_tasks(args: argparse.Namespace) -> None:
             
             # Show queue statistics
             stats = task_queue.get_queue_stats()
-            print(f"  Queue Statistics:")
+            print("  Queue Statistics:")
             print(f"    Total: {stats['total_tasks']}")
             print(f"    Pending: {stats['pending']}")
             print(f"    Running: {stats['running']}")
@@ -1001,11 +986,11 @@ def handle_list_tasks(args: argparse.Namespace) -> None:
 def handle_cleanup(args: argparse.Namespace) -> None:
     """Handle cleanup command - cleanup old task records."""
     print(f"\n{'='*60}")
-    print(f"Task Cleanup")
+    print("Task Cleanup")
     print(f"{'='*60}\n")
-    print(f"  Status: Not implemented (requires async task queue)")
-    print(f"\n  Note: Task queue requires MCP server integration")
-    print(f"  Use MCP API endpoints for task management")
+    print("  Status: Not implemented (requires async task queue)")
+    print("\n  Note: Task queue requires MCP server integration")
+    print("  Use MCP API endpoints for task management")
     print(f"{'='*60}\n")
 
 
@@ -1022,7 +1007,7 @@ def handle_metrics(args: argparse.Namespace) -> None:
         print(json.dumps(stats, indent=2))
     else:
         print(f"\n{'='*60}")
-        print(f"System Metrics")
+        print("System Metrics")
         print(f"{'='*60}\n")
         
         if not stats:
@@ -1055,16 +1040,16 @@ def handle_metrics(args: argparse.Namespace) -> None:
 def handle_benchmark(args: argparse.Namespace) -> None:
     """Handle benchmark command - benchmark different search strategies."""
     print(f"\n{'='*60}")
-    print(f"Search Strategy Benchmark")
+    print("Search Strategy Benchmark")
     print(f"{'='*60}\n")
     print(f"  Query: {args.query}")
     print(f"  Alphas: {args.alphas if hasattr(args, 'alphas') else '0.0,0.5,1.0'}")
-    print(f"\n  Status: Not yet implemented")
-    print(f"\n  Planned features:")
-    print(f"    - Compare vector vs BM25 vs hybrid search")
-    print(f"    - Test different alpha weights")
-    print(f"    - Measure retrieval latency")
-    print(f"    - Compare relevance scores")
+    print("\n  Status: Not yet implemented")
+    print("\n  Planned features:")
+    print("    - Compare vector vs BM25 vs hybrid search")
+    print("    - Test different alpha weights")
+    print("    - Measure retrieval latency")
+    print("    - Compare relevance scores")
     print(f"{'='*60}\n")
     
     logger.info("Benchmark command called (not implemented)", query=args.query)
@@ -1072,7 +1057,6 @@ def handle_benchmark(args: argparse.Namespace) -> None:
 
 def handle_clean_boilerplate(args: argparse.Namespace) -> None:
     """Handle clean-boilerplate command - remove web artifacts and boilerplate."""
-    import json
     from src.rag.services.boilerplate_removal_service.service import BoilerplateRemovalService
     
     start_time = time.time()
@@ -1132,9 +1116,9 @@ def handle_clean_boilerplate(args: argparse.Namespace) -> None:
                     # Write cleaned content
                     with open(txt_file, 'w', encoding='utf-8') as f:
                         f.write(cleaned_text)
-                    print(f"    Status: UPDATED")
+                    print("    Status: UPDATED")
                 else:
-                    print(f"    Status: DRY RUN (no changes)")
+                    print("    Status: DRY RUN (no changes)")
                 
                 cleaned_count += 1
                 total_removed_chars += removed_chars
@@ -1153,7 +1137,7 @@ def handle_clean_boilerplate(args: argparse.Namespace) -> None:
     duration = time.time() - start_time
     
     print(f"\n{'='*60}")
-    print(f"Boilerplate Removal Summary:")
+    print("Boilerplate Removal Summary:")
     print(f"{'='*60}")
     print(f"  Total files:          {len(txt_files)}")
     print(f"  Files cleaned:        {cleaned_count}")
@@ -1164,7 +1148,7 @@ def handle_clean_boilerplate(args: argparse.Namespace) -> None:
     print(f"  Duration:             {duration:.2f}s")
     
     if stats:
-        print(f"\n  Pattern Statistics:")
+        print("\n  Pattern Statistics:")
         for pattern_name, count in stats.items():
             if count > 0:
                 print(f"    {pattern_name}: {count} matches")
@@ -1193,10 +1177,10 @@ def handle_serve(args: argparse.Namespace) -> None:
     The server provides MCP tools for querying, ingestion, task management, and snapshots.
     """
     import signal
-    from src.mcp.server import mcp, start_server
+    from src.mcp.server import mcp
     
     print(f"\n{'='*80}")
-    print(f"Starting VX-RAG MCP Server")
+    print("Starting VX-RAG MCP Server")
     print(f"{'='*80}")
     print(f"  Config:    {args.config}")
     print(f"  Transport: {args.transport}")
@@ -1233,10 +1217,10 @@ def handle_serve(args: argparse.Namespace) -> None:
             task_queue = get_cli_task_queue()
             await task_queue.start()
             logger.info("Task queue started for MCP server")
-            print(f"Task queue started")
+            print("Task queue started")
             
-            print(f"MCP Server started successfully")
-            print(f"Press Ctrl+C to stop the server\n")
+            print("MCP Server started successfully")
+            print("Press Ctrl+C to stop the server\n")
             
             # Run MCP server (blocking call)
             if args.transport == "stdio":
