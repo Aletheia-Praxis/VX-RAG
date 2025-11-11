@@ -83,7 +83,26 @@ mcp:
   host: "127.0.0.1"
   port: 25191  # The MCP server port is 2025, 29th day, 10th month (October), i.e. the date of creation of the repository.
   debug: true  # Enable debug mode
-  query_timeout: 600.0  # Query timeout in seconds (10 minutes)
+  
+  # Rate limiting
+  rate_limit:
+    max_concurrent: 2       # Maximum concurrent requests
+    queue_size: 10          # Queue size for pending requests
+    default_timeout: 600.0  # Default timeout in seconds (10 minutes)
+  
+  # Tool-specific timeouts
+  timeouts:
+    query_knowledge_base: 600.0   # 10 minutes for complex queries
+    search_documents: 300.0       # 5 minutes for simple searches
+    health_check: 30.0            # 30 seconds for health checks
+    system_context: 10.0          # 10 seconds for system context
+  
+  # Tool default parameters
+  defaults:
+    top_k: 5               # Default number of results for knowledge base queries
+    token_budget: 4000     # Default token budget for context assembly
+    search_top_k: 10       # Default number of results for document search
+    apply_redaction: true  # Enable sensitive data redaction in responses
 
 # Context Assembler configuration
 context_assembler:
