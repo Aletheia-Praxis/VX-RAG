@@ -37,7 +37,7 @@ mcp_rate_limiter = get_rate_limiter(
 )
 
 
-def with_rate_limit(timeout: Optional[float] = None):
+def with_rate_limit(timeout: Optional[float] = None) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
     """
     Decorator to apply rate limiting to async functions.
     
@@ -49,9 +49,9 @@ def with_rate_limit(timeout: Optional[float] = None):
         async def my_handler(params):
             ...
     """
-    def decorator(func: Callable) -> Callable:
+    def decorator(func: Callable[..., Any]) -> Callable[..., Any]:
         @wraps(func)
-        async def wrapper(*args, **kwargs) -> Any:
+        async def wrapper(*args: Any, **kwargs: Any) -> Any:
             request_id = str(uuid.uuid4())
             
             try:
@@ -88,7 +88,7 @@ def with_rate_limit(timeout: Optional[float] = None):
     return decorator
 
 
-def with_logging(tool_name: str):
+def with_logging(tool_name: str) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
     """
     Decorator to add structured logging to tool handlers.
     
@@ -106,9 +106,9 @@ def with_logging(tool_name: str):
         async def handle_query(...):
             ...
     """
-    def decorator(func: Callable) -> Callable:
+    def decorator(func: Callable[..., Any]) -> Callable[..., Any]:
         @wraps(func)
-        async def wrapper(*args, **kwargs) -> Any:
+        async def wrapper(*args: Any, **kwargs: Any) -> Any:
             request_id = str(uuid.uuid4())
             start_time = time.time()
             
@@ -167,7 +167,7 @@ def with_logging(tool_name: str):
     return decorator
 
 
-def with_metrics(metric_prefix: str):
+def with_metrics(metric_prefix: str) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
     """
     Decorator to collect detailed performance metrics.
     
@@ -184,9 +184,9 @@ def with_metrics(metric_prefix: str):
         async def handle_query(...):
             ...
     """
-    def decorator(func: Callable) -> Callable:
+    def decorator(func: Callable[..., Any]) -> Callable[..., Any]:
         @wraps(func)
-        async def wrapper(*args, **kwargs) -> Any:
+        async def wrapper(*args: Any, **kwargs: Any) -> Any:
             start_time = time.time()
             
             # Increment invocation counter
@@ -215,7 +215,7 @@ def with_metrics(metric_prefix: str):
     return decorator
 
 
-def with_mcp_middleware(tool_name: str, timeout: Optional[float] = None):
+def with_mcp_middleware(tool_name: str, timeout: Optional[float] = None) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
     """
     Apply all middleware to an MCP tool handler.
     
@@ -233,9 +233,9 @@ def with_mcp_middleware(tool_name: str, timeout: Optional[float] = None):
         async def handle_query(params):
             ...
     """
-    def decorator(func: Callable) -> Callable:
+    def decorator(func: Callable[..., Any]) -> Callable[..., Any]:
         # Apply decorators in reverse order (innermost first)
-        decorated = func
+        decorated: Callable[..., Any] = func
         decorated = with_metrics(f"mcp_{tool_name}")(decorated)
         decorated = with_logging(tool_name)(decorated)
         decorated = with_rate_limit(timeout)(decorated)
