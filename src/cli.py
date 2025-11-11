@@ -856,5 +856,48 @@ def handle_cleanup(args: argparse.Namespace) -> None:
     print(f"{'='*60}\n")
 
 
+def handle_metrics(args: argparse.Namespace) -> None:
+    """Handle metrics command - display collected metrics."""
+    import json
+    
+    output_format = args.format if hasattr(args, 'format') else 'text'
+    
+    # Get current metrics
+    stats = metrics.get_stats()
+    
+    if output_format == 'json':
+        print(json.dumps(stats, indent=2))
+    else:
+        print(f"\n{'='*60}")
+        print(f"System Metrics")
+        print(f"{'='*60}\n")
+        
+        if not stats:
+            print("  No metrics collected yet")
+        else:
+            for metric_name, metric_data in stats.items():
+                metric_type = metric_data.get('type', 'unknown')
+                
+                if metric_type == 'counter':
+                    print(f"  {metric_name}: {metric_data.get('value', 0)}")
+                elif metric_type == 'gauge':
+                    print(f"  {metric_name}: {metric_data.get('value', 0):.2f}")
+                elif metric_type == 'histogram':
+                    values = metric_data.get('values', [])
+                    if values:
+                        avg = sum(values) / len(values)
+                        min_val = min(values)
+                        max_val = max(values)
+                        print(f"  {metric_name}:")
+                        print(f"    avg: {avg:.2f}")
+                        print(f"    min: {min_val:.2f}")
+                        print(f"    max: {max_val:.2f}")
+                        print(f"    count: {len(values)}")
+        
+        print(f"\n{'='*60}\n")
+    
+    logger.info("Metrics displayed", format=output_format)
+
+
 if __name__ == "__main__":
     main()
