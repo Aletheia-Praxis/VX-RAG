@@ -16,6 +16,8 @@ import time
 import uuid
 from typing import Dict, Any
 
+from typing import TYPE_CHECKING
+
 from .schemas import (
     QueryKnowledgeBaseRequest,
     SearchDocumentsRequest,
@@ -28,16 +30,24 @@ from .formatters import (
     format_error_response,
 )
 
-from src.rag.orchestrator import get_orchestrator
 from src.utils.logging_config import get_logger, log_query_event
 from src.utils.metrics import get_metrics
 from src.utils.config_loader import get_mcp_defaults
+
+if TYPE_CHECKING:
+    from src.rag.orchestrator import RAGOrchestrator
 
 logger = get_logger("mcp_handlers")
 metrics = get_metrics()
 
 # Load MCP default configuration
 mcp_defaults = get_mcp_defaults()
+
+
+def _get_orchestrator() -> "RAGOrchestrator":
+    """Lazy import of orchestrator to avoid circular imports and slow startup."""
+    from src.rag.orchestrator import get_orchestrator
+    return get_orchestrator()
 
 
 async def handle_query_knowledge_base(params: QueryKnowledgeBaseRequest) -> str:
@@ -66,8 +76,8 @@ async def handle_query_knowledge_base(params: QueryKnowledgeBaseRequest) -> str:
     )
     
     try:
-        # Get orchestrator instance
-        orchestrator = get_orchestrator()
+        # Get orchestrator instance (lazy import)
+        orchestrator = _get_orchestrator()
         
         # Execute query pipeline
         rag_result = orchestrator.query(
@@ -180,8 +190,8 @@ async def handle_search_documents(params: SearchDocumentsRequest) -> str:
     )
     
     try:
-        # Get orchestrator instance
-        orchestrator = get_orchestrator()
+        # Get orchestrator instance (lazy import)
+        orchestrator = _get_orchestrator()
         
         # Execute search
         results = orchestrator.search_documents(
@@ -275,8 +285,8 @@ async def handle_health_check() -> str:
     logger.info("Handling health check")
     
     try:
-        # Get orchestrator instance
-        orchestrator = get_orchestrator()
+        # Get orchestrator instance (lazy import)
+        orchestrator = _get_orchestrator()
         
         # Get health status
         health_data = orchestrator.get_health_status()
