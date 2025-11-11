@@ -31,9 +31,13 @@ from .formatters import (
 from src.rag.orchestrator import get_orchestrator
 from src.utils.logging_config import get_logger, log_query_event
 from src.utils.metrics import get_metrics
+from src.utils.config_loader import get_mcp_defaults
 
 logger = get_logger("mcp_handlers")
 metrics = get_metrics()
+
+# Load MCP default configuration
+mcp_defaults = get_mcp_defaults()
 
 
 async def handle_query_knowledge_base(params: QueryKnowledgeBaseRequest) -> str:
@@ -76,7 +80,7 @@ async def handle_query_knowledge_base(params: QueryKnowledgeBaseRequest) -> str:
         # Format response
         formatted_response = format_query_response(
             rag_result=rag_result,
-            apply_redaction=True  # Always redact for LLM responses
+            apply_redaction=mcp_defaults['apply_redaction']
         )
         
         # Log metrics
@@ -191,7 +195,7 @@ async def handle_search_documents(params: SearchDocumentsRequest) -> str:
             query=params.query,
             results=results,
             search_type=params.search_type,
-            apply_redaction=True  # Always redact for LLM responses
+            apply_redaction=mcp_defaults['apply_redaction']
         )
         
         # Log metrics
