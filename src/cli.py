@@ -899,5 +899,23 @@ def handle_metrics(args: argparse.Namespace) -> None:
     logger.info("Metrics displayed", format=output_format)
 
 
+def handle_benchmark(args: argparse.Namespace) -> None:
+    """Handle benchmark command - benchmark different search strategies."""
+    print(f"\n{'='*60}")
+    print(f"Search Strategy Benchmark")
+    print(f"{'='*60}\n")
+    print(f"  Query: {args.query}")
+    print(f"  Alphas: {args.alphas if hasattr(args, 'alphas') else '0.0,0.5,1.0'}")
+    print(f"\n  Status: Not yet implemented")
+    print(f"\n  Planned features:")
+    print(f"    - Compare vector vs BM25 vs hybrid search")
+    print(f"    - Test different alpha weights")
+    print(f"    - Measure retrieval latency")
+    print(f"    - Compare relevance scores")
+    print(f"{'='*60}\n")
+    
+    logger.info("Benchmark command called (not implemented)", query=args.query)
+
+
 if __name__ == "__main__":
     main()
