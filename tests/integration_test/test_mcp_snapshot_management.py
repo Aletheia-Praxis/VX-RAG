@@ -9,16 +9,11 @@ Tests snapshot creation and verification directly via VectorStoreClient:
 
 import asyncio
 import json
-import sys
 import time
 from pathlib import Path
 
-# Add project root to path
-project_root = Path(__file__).parent.parent.parent
-sys.path.insert(0, str(project_root))
-
-from src.rag.services.vectordb_service.service import VectorStoreClient
 from src.rag.services.embedder_service.service import EmbeddingService
+from src.rag.services.vectordb_service.service import VectorStoreClient
 from src.utils.task_queue import get_task_queue
 
 

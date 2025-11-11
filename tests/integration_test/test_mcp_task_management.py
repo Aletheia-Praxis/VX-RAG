@@ -5,15 +5,8 @@ Tests the new cancel_task and list_tasks MCP tools.
 """
 
 import asyncio
-import json
-import sys
-from pathlib import Path
 
-# Add project root to path
-project_root = Path(__file__).parent.parent.parent
-sys.path.insert(0, str(project_root))
-
-from src.utils.task_queue import get_task_queue, TaskPriority
+from src.utils.task_queue import TaskPriority, get_task_queue
 
 
 def dummy_task() -> str:
@@ -84,7 +77,7 @@ async def test_task_management():
     
     # Final stats
     stats = task_queue.get_queue_stats()
-    print(f"\nFinal statistics:")
+    print("\nFinal statistics:")
     print(f"  Completed: {stats['completed']}")
     print(f"  Cancelled: {stats['cancelled']}")
     print(f"  Failed: {stats['failed']}")
