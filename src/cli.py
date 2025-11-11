@@ -108,10 +108,13 @@ def main() -> None:
 
     # Serve MCP command
     serve_parser = subparsers.add_parser("serve", help="Start MCP server")
-    serve_parser.add_argument("--host", type=str, default="localhost", help="Server host")
-    serve_parser.add_argument("--port", type=int, default=8000, help="Server port")
+    serve_parser.add_argument("--host", type=str, default="localhost", help="Server host (for http/sse transports)")
+    serve_parser.add_argument("--port", type=int, default=8000, help="Server port (for http/sse transports)")
     serve_parser.add_argument("--config", type=str, default="./config/settings.yaml", help="Config file path")
-    serve_parser.add_argument("--transport", choices=["stdio", "http"], default="stdio", help="Transport protocol")
+    serve_parser.add_argument("--transport", choices=["stdio", "sse", "http"], default="stdio", 
+                              help="Transport protocol: stdio (default, for IDE integration), sse (Server-Sent Events), http (REST API)")
+    serve_parser.add_argument("--cors", action="store_true", help="Enable CORS for http/sse transports")
+    serve_parser.add_argument("--allowed-origins", type=str, default="*", help="Comma-separated list of allowed CORS origins")
 
     args = parser.parse_args()
 
@@ -1184,17 +1187,20 @@ def handle_serve(args: argparse.Namespace) -> None:
     print(f"{'='*80}")
     print(f"  Config:    {args.config}")
     print(f"  Transport: {args.transport}")
-    if args.transport == "http":
+    if args.transport in ["http", "sse"]:
         print(f"  Host:      {args.host}")
         print(f"  Port:      {args.port}")
+        if args.cors:
+            print(f"  CORS:      Enabled ({args.allowed_origins})")
     print(f"{'='*80}\n")
     
     logger.info(
         "Starting MCP server",
         config=args.config,
         transport=args.transport,
-        host=args.host if args.transport == "http" else None,
-        port=args.port if args.transport == "http" else None
+        host=args.host if args.transport in ["http", "sse"] else None,
+        port=args.port if args.transport in ["http", "sse"] else None,
+        cors=args.cors if hasattr(args, "cors") else False
     )
     
     # Setup graceful shutdown
@@ -1219,15 +1225,86 @@ def handle_serve(args: argparse.Namespace) -> None:
             logger.info("Task queue started for MCP server")
             print("Task queue started")
             
-            print("MCP Server started successfully")
-            print("Press Ctrl+C to stop the server\n")
-            
-            # Run MCP server (blocking call)
+            # Display server info based on transport
             if args.transport == "stdio":
-                mcp.run()
-            else:
-                # HTTP transport with host and port
-                mcp.run()
+                print("\nMCP Server started in STDIO mode")
+                print("This mode is designed for IDE integration (VS Code, Claude Desktop)")
+                print("Server is listening on stdin/stdout")
+                print("\nPress Ctrl+C to stop the server\n")
+            elif args.transport == "sse":
+                print(f"\nMCP Server started in SSE mode")
+                print(f"Server URL: http://{args.host}:{args.port}")
+                print(f"SSE Endpoint: http://{args.host}:{args.port}/sse")
+                if args.cors:
+                    print(f"CORS enabled for origins: {args.allowed_origins}")
+                print("\nPress Ctrl+C to stop the server\n")
+            elif args.transport == "http":
+                print(f"\nMCP Server started in HTTP mode")
+                print(f"Server URL: http://{args.host}:{args.port}")
+                if args.cors:
+                    print(f"CORS enabled for origins: {args.allowed_origins}")
+                print("\nPress Ctrl+C to stop the server\n")
+            
+            # Run MCP server with appropriate transport
+            if args.transport == "stdio":
+                # STDIO transport for IDE integration
+                await mcp.run_stdio_async()
+                
+            elif args.transport == "sse":
+                # SSE (Server-Sent Events) transport
+                import uvicorn
+                
+            # Get FastAPI app with SSE support
+            app = mcp.sse_app()
+            
+            # Add CORS middleware if enabled
+            if args.cors:
+                from starlette.middleware.cors import CORSMiddleware
+                origins = [origin.strip() for origin in args.allowed_origins.split(",")]
+                app.add_middleware(
+                    CORSMiddleware,
+                    allow_origins=origins,
+                    allow_credentials=True,
+                    allow_methods=["*"],
+                    allow_headers=["*"],
+                )                # Run with uvicorn
+                config = uvicorn.Config(
+                    app,
+                    host=args.host,
+                    port=args.port,
+                    log_level="info",
+                    access_log=True
+                )
+                server = uvicorn.Server(config)
+                await server.serve()
+                
+            elif args.transport == "http":
+                # HTTP REST API transport
+                import uvicorn
+                
+            # Get FastAPI app with HTTP support
+            app = mcp.http_app()
+            
+            # Add CORS middleware if enabled
+            if args.cors:
+                from starlette.middleware.cors import CORSMiddleware
+                origins = [origin.strip() for origin in args.allowed_origins.split(",")]
+                app.add_middleware(
+                    CORSMiddleware,
+                    allow_origins=origins,
+                    allow_credentials=True,
+                    allow_methods=["*"],
+                    allow_headers=["*"],
+                )                # Run with uvicorn
+                config = uvicorn.Config(
+                    app,
+                    host=args.host,
+                    port=args.port,
+                    log_level="info",
+                    access_log=True
+                )
+                server = uvicorn.Server(config)
+                await server.serve()
                 
         except KeyboardInterrupt:
             print("\n\nShutdown initiated...")
