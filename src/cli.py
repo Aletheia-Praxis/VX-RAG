@@ -22,7 +22,7 @@ metrics = get_metrics()
 _task_queue = None
 
 
-def get_cli_task_queue():
+def get_cli_task_queue() -> Any:
     """Get or create the CLI task queue instance."""
     global _task_queue
     if _task_queue is None:
@@ -221,7 +221,7 @@ def handle_ingest(args: argparse.Namespace) -> None:
     chunks_file = data_path / "processed" / "chunks.json"
     
     # Filter out non-serializable LlamaIndex objects
-    def make_serializable(obj):
+    def make_serializable(obj: Any) -> Any:
         """Recursively remove non-serializable objects."""
         if isinstance(obj, dict):
             return {
@@ -834,7 +834,7 @@ def handle_status(args: argparse.Namespace) -> None:
     import json
     from datetime import datetime
     
-    async def _check_status():
+    async def _check_status() -> None:
         task_queue = get_cli_task_queue()
         await task_queue.start()
         
@@ -891,7 +891,7 @@ def handle_status(args: argparse.Namespace) -> None:
 
 def handle_cancel(args: argparse.Namespace) -> None:
     """Handle cancel command - cancel background task."""
-    async def _cancel_task():
+    async def _cancel_task() -> None:
         task_queue = get_cli_task_queue()
         await task_queue.start()
         
@@ -932,7 +932,7 @@ def handle_list_tasks(args: argparse.Namespace) -> None:
     """Handle list-tasks command - list all background tasks."""
     from datetime import datetime
     
-    async def _list_tasks():
+    async def _list_tasks() -> None:
         task_queue = get_cli_task_queue()
         await task_queue.start()
         
@@ -1216,7 +1216,7 @@ def handle_serve(args: argparse.Namespace) -> None:
     # Setup graceful shutdown
     shutdown_event = asyncio.Event()
     
-    def signal_handler(signum, frame):
+    def signal_handler(signum: int, frame: Any) -> None:
         """Handle shutdown signals."""
         print(f"\n\nReceived signal {signum}. Shutting down gracefully...")
         logger.info("Shutdown signal received", signal=signum)
@@ -1226,7 +1226,7 @@ def handle_serve(args: argparse.Namespace) -> None:
     signal.signal(signal.SIGINT, signal_handler)
     signal.signal(signal.SIGTERM, signal_handler)
     
-    async def run_server():
+    async def run_server() -> None:
         """Run server with graceful shutdown."""
         try:
             # Start task queue
