@@ -50,7 +50,7 @@ mcp = FastMCP(
 
 
 @mcp.tool()
-@with_mcp_middleware("query_knowledge_base", timeout=mcp_timeouts['query_knowledge_base'])
+@with_mcp_middleware("query_knowledge_base", timeout=mcp_timeouts['query_knowledge_base'])  # type: ignore[misc]
 async def query_knowledge_base(
     query: str,
     top_k: int = mcp_defaults['top_k'],
@@ -83,7 +83,7 @@ async def query_knowledge_base(
 
 
 @mcp.tool()
-@with_mcp_middleware("search_documents", timeout=mcp_timeouts['search_documents'])
+@with_mcp_middleware("search_documents", timeout=mcp_timeouts['search_documents'])  # type: ignore[misc]
 async def search_documents(
     query: str,
     top_k: int = mcp_defaults['search_top_k'],
