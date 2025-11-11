@@ -745,5 +745,68 @@ def handle_snapshot(args: argparse.Namespace) -> None:
     metrics.histogram("snapshot_creation_duration_ms", duration * 1000)
 
 
+def handle_verify_snapshot(args: argparse.Namespace) -> None:
+    """Handle verify-snapshot command - verify integrity of snapshot."""
+    from src.rag.services.vectordb_service.service import VectorStoreClient
+    
+    start_time = time.time()
+    persist_dir = Path(args.persist_dir)
+    snapshot_name = args.name
+    
+    faiss_index_path = persist_dir / "faiss_index"
+    
+    if not faiss_index_path.exists():
+        print(f"Error: Index directory not found at {faiss_index_path}")
+        logger.error("Verification failed: index directory not found", persist_dir=str(persist_dir))
+        sys.exit(1)
+    
+    logger.info("Verifying snapshot", snapshot_name=snapshot_name)
+    print(f"\n{'='*60}")
+    print(f"Verifying Snapshot: {snapshot_name}")
+    print(f"{'='*60}\n")
+    
+    # Initialize vector store client
+    vector_client = VectorStoreClient(store_type="faiss", config={'index_dir': str(faiss_index_path)})
+    
+    # Verify snapshot
+    try:
+        result = vector_client.verify_snapshot_integrity(snapshot_name)
+        
+        duration = time.time() - start_time
+        
+        print(f"  Snapshot: {snapshot_name}")
+        print(f"  Status: {'VALID' if result['valid'] else 'INVALID'}")
+        
+        if result.get('manifest'):
+            manifest = result['manifest']
+            print(f"\n  Manifest Info:")
+            print(f"    Created: {manifest.get('timestamp', 'N/A')}")
+            print(f"    Embedding model: {manifest.get('embed_model_name', 'N/A')}")
+            print(f"    Files: {len(manifest.get('files', []))}")
+        
+        if not result['valid']:
+            print(f"\n  Errors:")
+            for error in result.get('errors', []):
+                print(f"    - {error}")
+        
+        print(f"\n  Verification duration: {duration:.2f}s")
+        print(f"{'='*60}\n")
+        
+        logger.info("Snapshot verification completed",
+                   snapshot_name=snapshot_name,
+                   valid=result['valid'],
+                   duration_ms=duration * 1000)
+        
+        metrics.increment("snapshot_verifications_total")
+        
+        if not result['valid']:
+            sys.exit(1)
+            
+    except Exception as e:
+        print(f"  ERROR: Verification failed - {e}")
+        logger.error(f"Snapshot verification failed: {e}")
+        sys.exit(1)
+
+
 if __name__ == "__main__":
     main()
