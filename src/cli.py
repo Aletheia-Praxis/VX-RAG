@@ -134,6 +134,7 @@ def handle_ingest(args: argparse.Namespace) -> None:
         MDIngestAdapter
     )
     from src.rag.services.duplicate_detection_service.service import DuplicateDetector
+    from src.rag.services.chunker_service.service import Chunker
     
     start_time = time.time()
     data_path = Path(args.data_dir)
@@ -146,7 +147,7 @@ def handle_ingest(args: argparse.Namespace) -> None:
     logger.info("Starting ingestion pipeline", data_dir=str(data_path))
     
     # Step 1: Parse documents
-    print(f"\n[Step 1/2] Parsing documents from {data_path}...")
+    print(f"\n[Step 1/3] Parsing documents from {data_path}...")
     
     pdf_adapter = PDFIngestAdapter()
     txt_adapter = TXTIngestAdapter()
@@ -162,7 +163,7 @@ def handle_ingest(args: argparse.Namespace) -> None:
     print(f"  Total parsed: {len(all_docs)} documents")
     
     # Step 2: Remove duplicates
-    print(f"\n[Step 2/2] Removing duplicates...")
+    print(f"\n[Step 2/3] Removing duplicates...")
     
     detector = DuplicateDetector(config_path=args.config)
     unique_docs = detector.remove_duplicates(all_docs)
@@ -170,6 +171,17 @@ def handle_ingest(args: argparse.Namespace) -> None:
     duplicates_removed = len(all_docs) - len(unique_docs)
     print(f"  Duplicates removed: {duplicates_removed}")
     print(f"  Unique documents: {len(unique_docs)}")
+    
+    # Step 3: Chunk documents
+    print(f"\n[Step 3/3] Chunking documents...")
+    
+    chunker = Chunker(config_path=args.config)
+    chunks = chunker.chunk_documents(unique_docs)
+    
+    chunking_stats = chunker.get_chunking_stats(chunks)
+    print(f"  Total chunks: {chunking_stats['total_chunks']}")
+    print(f"  Avg chunk length: {chunking_stats['avg_chunk_length']:.0f} chars")
+    print(f"  Chunk distribution: {chunking_stats['chunk_size_distribution']}")
     
     # Summary
     duration = time.time() - start_time
@@ -180,6 +192,7 @@ def handle_ingest(args: argparse.Namespace) -> None:
     print(f"  Documents parsed:     {len(all_docs)}")
     print(f"  Duplicates removed:   {duplicates_removed}")
     print(f"  Unique documents:     {len(unique_docs)}")
+    print(f"  Total chunks:         {len(chunks)}")
     print(f"  Duration:             {duration:.2f}s")
     print(f"{'='*50}\n")
     
@@ -187,10 +200,12 @@ def handle_ingest(args: argparse.Namespace) -> None:
                parsed=len(all_docs), 
                duplicates_removed=duplicates_removed,
                unique=len(unique_docs),
+               chunks=len(chunks),
                duration_ms=duration * 1000)
     
     metrics.increment("ingestion_documents_parsed_total", len(all_docs))
     metrics.increment("ingestion_duplicates_removed_total", duplicates_removed)
+    metrics.increment("ingestion_chunks_created_total", len(chunks))
     metrics.histogram("ingestion_pipeline_duration_ms", duration * 1000)
 
 
