@@ -106,6 +106,13 @@ def main() -> None:
     clean_bp_parser.add_argument("--config", type=str, default="./config/settings.yaml")
     clean_bp_parser.add_argument("--dry-run", action="store_true")
 
+    # Serve MCP command
+    serve_parser = subparsers.add_parser("serve", help="Start MCP server")
+    serve_parser.add_argument("--host", type=str, default="localhost", help="Server host")
+    serve_parser.add_argument("--port", type=int, default=8000, help="Server port")
+    serve_parser.add_argument("--config", type=str, default="./config/settings.yaml", help="Config file path")
+    serve_parser.add_argument("--transport", choices=["stdio", "http"], default="stdio", help="Transport protocol")
+
     args = parser.parse_args()
 
     if args.command == "ingest":
@@ -134,6 +141,8 @@ def main() -> None:
         handle_benchmark(args)
     elif args.command == "clean-boilerplate":
         handle_clean_boilerplate(args)
+    elif args.command == "serve":
+        handle_serve(args)
     else:
         parser.print_help()
         sys.exit(1)
@@ -1174,6 +1183,90 @@ def handle_clean_boilerplate(args: argparse.Namespace) -> None:
     metrics.increment("boilerplate_removal_files_processed", len(txt_files))
     metrics.increment("boilerplate_removal_files_cleaned", cleaned_count)
     metrics.histogram("boilerplate_removal_duration_ms", duration * 1000)
+
+
+def handle_serve(args: argparse.Namespace) -> None:
+    """
+    Handle serve command - start MCP server.
+    
+    Starts the FastMCP server with configured transport protocol (stdio or HTTP).
+    The server provides MCP tools for querying, ingestion, task management, and snapshots.
+    """
+    import signal
+    from src.mcp.server import mcp, start_server
+    
+    print(f"\n{'='*80}")
+    print(f"Starting VX-RAG MCP Server")
+    print(f"{'='*80}")
+    print(f"  Config:    {args.config}")
+    print(f"  Transport: {args.transport}")
+    if args.transport == "http":
+        print(f"  Host:      {args.host}")
+        print(f"  Port:      {args.port}")
+    print(f"{'='*80}\n")
+    
+    logger.info(
+        "Starting MCP server",
+        config=args.config,
+        transport=args.transport,
+        host=args.host if args.transport == "http" else None,
+        port=args.port if args.transport == "http" else None
+    )
+    
+    # Setup graceful shutdown
+    shutdown_event = asyncio.Event()
+    
+    def signal_handler(signum, frame):
+        """Handle shutdown signals."""
+        print(f"\n\nReceived signal {signum}. Shutting down gracefully...")
+        logger.info("Shutdown signal received", signal=signum)
+        shutdown_event.set()
+    
+    # Register signal handlers
+    signal.signal(signal.SIGINT, signal_handler)
+    signal.signal(signal.SIGTERM, signal_handler)
+    
+    async def run_server():
+        """Run server with graceful shutdown."""
+        try:
+            # Start task queue
+            task_queue = get_cli_task_queue()
+            await task_queue.start()
+            logger.info("Task queue started for MCP server")
+            print(f"Task queue started")
+            
+            print(f"MCP Server started successfully")
+            print(f"Press Ctrl+C to stop the server\n")
+            
+            # Run MCP server (blocking call)
+            if args.transport == "stdio":
+                mcp.run()
+            else:
+                # HTTP transport with host and port
+                mcp.run()
+                
+        except KeyboardInterrupt:
+            print("\n\nShutdown initiated...")
+        except Exception as e:
+            logger.error("Server error", error=str(e), exc_info=True)
+            print(f"\nServer error: {e}")
+            raise
+        finally:
+            print("Cleaning up resources...")
+            task_queue = get_cli_task_queue()
+            await task_queue.stop()
+            logger.info("Task queue stopped")
+            print("Server stopped")
+    
+    # Run the async server
+    try:
+        asyncio.run(run_server())
+    except KeyboardInterrupt:
+        print("\nServer shutdown complete")
+    except Exception as e:
+        print(f"\nFatal error: {e}")
+        logger.error("Fatal server error", error=str(e), exc_info=True)
+        sys.exit(1)
 
 
 if __name__ == "__main__":
