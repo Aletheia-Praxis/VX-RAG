@@ -69,6 +69,20 @@ class TaskStatusParams(BaseModel):
     task_id: str = Field(..., description="Unique task identifier")
 
 
+class TaskCancelParams(BaseModel):
+    """Parameters for task cancellation."""
+    task_id: str = Field(..., description="Unique task identifier to cancel")
+
+
+class TaskListParams(BaseModel):
+    """Parameters for listing tasks."""
+    filter: str = Field(
+        "all",
+        description="Filter tasks by status: all, pending, running, completed, failed, cancelled"
+    )
+    limit: int = Field(50, ge=1, le=500, description="Maximum number of tasks to return")
+
+
 # Helper function for background ingestion
 def run_ingestion_pipeline(data_dir: str, config_path: str) -> Dict[str, Any]:
     """
@@ -426,6 +440,141 @@ async def get_task_status(params: TaskStatusParams) -> str:
         error_response = {
             "error": f"Failed to get task status: {str(e)}",
             "task_id": params.task_id,
+        }
+        
+        return json.dumps(error_response, indent=2, ensure_ascii=False)
+
+
+@mcp.tool
+async def cancel_task(params: TaskCancelParams) -> str:
+    """
+    Cancel a pending or running background task.
+    
+    Attempts to cancel the specified task. Tasks that are already completed,
+    failed, or cancelled cannot be cancelled.
+    
+    Args:
+        params: Task cancellation parameters including task ID
+        
+    Returns:
+        JSON-formatted cancellation result
+    """
+    try:
+        logger.info("Attempting to cancel task", task_id=params.task_id)
+        
+        success = await task_queue.cancel_task(params.task_id)
+        
+        if success:
+            response = {
+                "success": True,
+                "task_id": params.task_id,
+                "message": "Task cancelled successfully",
+            }
+            logger.info("Task cancelled successfully", task_id=params.task_id)
+        else:
+            # Task not found or already in terminal state
+            task_status = await task_queue.get_task_status(params.task_id)
+            
+            if task_status is None:
+                response = {
+                    "success": False,
+                    "task_id": params.task_id,
+                    "error": "Task not found",
+                }
+            else:
+                response = {
+                    "success": False,
+                    "task_id": params.task_id,
+                    "error": f"Cannot cancel task in '{task_status['status']}' state",
+                    "current_status": task_status['status'],
+                }
+            
+            logger.warning(
+                "Failed to cancel task",
+                task_id=params.task_id,
+                reason=response.get('error', 'unknown'),
+            )
+        
+        return json.dumps(response, indent=2, ensure_ascii=False)
+        
+    except Exception as e:
+        logger.error("Error cancelling task", task_id=params.task_id, error=str(e))
+        
+        error_response = {
+            "success": False,
+            "task_id": params.task_id,
+            "error": f"Failed to cancel task: {str(e)}",
+        }
+        
+        return json.dumps(error_response, indent=2, ensure_ascii=False)
+
+
+@mcp.tool
+async def list_tasks(params: TaskListParams) -> str:
+    """
+    List all tasks in the queue with optional filtering.
+    
+    Returns a list of tasks matching the specified filter criteria.
+    Tasks are sorted by creation time (newest first).
+    
+    Args:
+        params: Task list parameters including filter and limit
+        
+    Returns:
+        JSON-formatted list of tasks
+    """
+    try:
+        logger.info("Listing tasks", filter=params.filter, limit=params.limit)
+        
+        # Get queue statistics
+        stats = task_queue.get_queue_stats()
+        
+        # Get all tasks from the internal registry
+        all_tasks = []
+        for task_id, task_data in task_queue._tasks.items():
+            task_dict = task_data.to_dict()
+            all_tasks.append(task_dict)
+        
+        # Filter tasks by status
+        if params.filter != "all":
+            filtered_tasks = [
+                task for task in all_tasks 
+                if task['status'] == params.filter
+            ]
+        else:
+            filtered_tasks = all_tasks
+        
+        # Sort by creation time (newest first)
+        filtered_tasks.sort(key=lambda t: t['created_at'] or 0, reverse=True)
+        
+        # Apply limit
+        limited_tasks = filtered_tasks[:params.limit]
+        
+        response = {
+            "tasks": limited_tasks,
+            "total_matching": len(filtered_tasks),
+            "returned": len(limited_tasks),
+            "filter": params.filter,
+            "queue_stats": stats,
+        }
+        
+        logger.info(
+            "Tasks listed",
+            filter=params.filter,
+            total_matching=len(filtered_tasks),
+            returned=len(limited_tasks),
+        )
+        
+        return json.dumps(response, indent=2, ensure_ascii=False)
+        
+    except Exception as e:
+        logger.error("Error listing tasks", filter=params.filter, error=str(e))
+        
+        error_response = {
+            "error": f"Failed to list tasks: {str(e)}",
+            "tasks": [],
+            "total_matching": 0,
+            "returned": 0,
         }
         
         return json.dumps(error_response, indent=2, ensure_ascii=False)
