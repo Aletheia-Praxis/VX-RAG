@@ -254,9 +254,13 @@ def handle_ingest(args: argparse.Namespace) -> None:
 
 
 def handle_index(args: argparse.Namespace) -> None:
-    """Handle index command - create embeddings and build indexes."""
+    """Handle index command - create embeddings and build FAISS + BM25 indexes."""
     import json
+    import numpy as np
+    from llama_index.core.schema import Document, TextNode
     from src.rag.services.embedder_service.service import EmbeddingService
+    from src.rag.services.vectordb_service.service import VectorStoreClient
+    from src.rag.services.bm25_service.service import BM25Service
     
     start_time = time.time()
     data_dir = Path(args.data_dir)
@@ -274,32 +278,99 @@ def handle_index(args: argparse.Namespace) -> None:
     logger.info("Starting indexing pipeline", persist_dir=str(persist_dir))
     
     # Step 1: Load chunks
-    print(f"\n[Step 1/3] Loading chunks from {chunks_file}...")
+    print(f"\n[Step 1/4] Loading chunks from {chunks_file}...")
     
     with open(chunks_file, 'r', encoding='utf-8') as f:
         chunks = json.load(f)
     
     print(f"  Loaded chunks: {len(chunks)}")
+    logger.info(f"Loaded {len(chunks)} chunks from {chunks_file}")
     
-    # Step 2: Generate embeddings
-    print(f"\n[Step 2/3] Generating embeddings...")
+    # Step 2: Generate embeddings (Module 5 - EmbedderService)
+    print(f"\n[Step 2/4] Generating embeddings...")
     
     embedder = EmbeddingService(config_path=args.config)
     
     # Extract text from chunks
     chunk_texts = [chunk.get('text', '') for chunk in chunks]
+    chunk_ids = [chunk.get('id', f"chunk_{i}") for i, chunk in enumerate(chunks)]
     
     print(f"  Embedding {len(chunk_texts)} chunks...")
-    embeddings = embedder.embed(chunk_texts)
+    embeddings_list = embedder.embed_batch(chunk_texts)
     
-    print(f"  Generated embeddings: {len(embeddings)}")
-    print(f"  Embedding dimension: {len(embeddings[0]) if embeddings else 0}")
+    # Convert to numpy array for FAISS
+    embeddings_array = np.array(embeddings_list, dtype=np.float32)
     
-    # Save embeddings
-    embeddings_file = persist_dir / "embeddings.json"
-    with open(embeddings_file, 'w', encoding='utf-8') as f:
-        json.dump(embeddings, f)
-    print(f"  Saved embeddings to: {embeddings_file}")
+    embedding_dim = len(embeddings_list[0]) if embeddings_list else 0
+    print(f"  Generated embeddings: {len(embeddings_list)}")
+    print(f"  Embedding dimension: {embedding_dim}")
+    logger.info(f"Generated {len(embeddings_list)} embeddings with dimension {embedding_dim}")
+    
+    # Step 3: Build FAISS vector index (Module 6 - VectorStoreClient)
+    print(f"\n[Step 3/4] Building FAISS vector index...")
+    
+    # Convert chunks to LlamaIndex Document objects for VectorStoreClient
+    documents = []
+    for chunk in chunks:
+        doc = Document(
+            text=chunk.get('text', ''),
+            metadata=chunk.get('metadata', {}),
+            id_=chunk.get('id', '')
+        )
+        documents.append(doc)
+    
+    # Initialize VectorStoreClient with persist directory
+    vector_store_config = {
+        'index_dir': str(persist_dir / "faiss_index")
+    }
+    vector_client = VectorStoreClient(store_type="faiss", config=vector_store_config)
+    
+    # Build FAISS index
+    vector_index = vector_client.build_index(
+        documents=documents,
+        embed_model=embedder.embed_model
+    )
+    
+    # Save FAISS index
+    vector_client.save_index(create_backup=False)
+    
+    faiss_index_path = persist_dir / "faiss_index"
+    print(f"  FAISS index built: {len(documents)} vectors")
+    print(f"  Saved to: {faiss_index_path}")
+    logger.info(f"Built and saved FAISS index to {faiss_index_path}")
+    
+    # Step 4: Build BM25 index (Module 7 - BM25Service)
+    print(f"\n[Step 4/4] Building BM25 index...")
+    
+    # Initialize BM25Service with persist directory
+    bm25_index_path = persist_dir / "bm25_index"
+    bm25_service = BM25Service(index_dir=str(bm25_index_path), config_path=args.config)
+    
+    # Build BM25 index with documents
+    bm25_service.build_index(documents)
+    
+    # Save BM25 index
+    bm25_service.save_index()
+    
+    print(f"  BM25 index built: {len(documents)} documents")
+    print(f"  Saved to: {bm25_index_path}")
+    logger.info(f"Built and saved BM25 index to {bm25_index_path}")
+    
+    # Save metadata for later use
+    metadata = {
+        'num_chunks': len(chunks),
+        'num_embeddings': len(embeddings_list),
+        'embedding_dim': embedding_dim,
+        'faiss_index_path': str(faiss_index_path),
+        'bm25_index_path': str(bm25_index_path),
+        'indexed_at': time.strftime('%Y-%m-%d %H:%M:%S')
+    }
+    
+    metadata_file = persist_dir / "index_metadata.json"
+    with open(metadata_file, 'w', encoding='utf-8') as f:
+        json.dump(metadata, f, indent=2)
+    
+    print(f"  Saved metadata to: {metadata_file}")
     
     # Summary
     duration = time.time() - start_time
@@ -308,19 +379,23 @@ def handle_index(args: argparse.Namespace) -> None:
     print(f"Indexing Summary:")
     print(f"{'='*50}")
     print(f"  Chunks processed:     {len(chunks)}")
-    print(f"  Embeddings created:   {len(embeddings)}")
-    print(f"  Embedding dim:        {len(embeddings[0]) if embeddings else 0}")
-    print(f"  Persist dir:          {persist_dir}")
+    print(f"  Embeddings created:   {len(embeddings_list)}")
+    print(f"  Embedding dim:        {embedding_dim}")
+    print(f"  FAISS index:          {faiss_index_path}")
+    print(f"  BM25 index:           {bm25_index_path}")
+    print(f"  Metadata:             {metadata_file}")
     print(f"  Duration:             {duration:.2f}s")
     print(f"{'='*50}\n")
     
     logger.info("Indexing pipeline completed",
                chunks=len(chunks),
-               embeddings=len(embeddings),
+               embeddings=len(embeddings_list),
+               faiss_index=str(faiss_index_path),
+               bm25_index=str(bm25_index_path),
                duration_ms=duration * 1000)
     
     metrics.increment("indexing_chunks_processed_total", len(chunks))
-    metrics.increment("indexing_embeddings_created_total", len(embeddings))
+    metrics.increment("indexing_embeddings_created_total", len(embeddings_list))
     metrics.histogram("indexing_pipeline_duration_ms", duration * 1000)
 
 
