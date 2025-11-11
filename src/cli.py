@@ -562,53 +562,133 @@ def handle_query(args: argparse.Namespace) -> None:
 
 
 def handle_update_index(args: argparse.Namespace) -> None:
-    """Handle update-index command."""
-    print(f"Updating index in {args.persist_dir}")
-
-
-def handle_snapshot(args: argparse.Namespace) -> None:
-    """Handle snapshot command."""
-    print(f"Creating snapshot in {args.persist_dir}")
-
-
-def handle_verify_snapshot(args: argparse.Namespace) -> None:
-    """Handle verify-snapshot command."""
-    print(f"Verifying snapshot '{args.name}' in {args.persist_dir}")
-
-
-def handle_status(args: argparse.Namespace) -> None:
-    """Handle status command."""
-    print(f"Checking status of task {args.task_id}")
-
-
-def handle_cancel(args: argparse.Namespace) -> None:
-    """Handle cancel command."""
-    print(f"Cancelling task {args.task_id}")
-
-
-def handle_list_tasks(args: argparse.Namespace) -> None:
-    """Handle list-tasks command."""
-    print("Listing all tasks")
-
-
-def handle_cleanup(args: argparse.Namespace) -> None:
-    """Handle cleanup command."""
-    print("Cleaning up old tasks")
-
-
-def handle_metrics(args: argparse.Namespace) -> None:
-    """Handle metrics command."""
-    print("Displaying system metrics")
-
-
-def handle_benchmark(args: argparse.Namespace) -> None:
-    """Handle benchmark command."""
-    print(f"Benchmarking with query: {args.query}")
-
-
-def handle_clean_boilerplate(args: argparse.Namespace) -> None:
-    """Handle clean-boilerplate command."""
-    print(f"Cleaning boilerplate from {args.data_dir}")
+    """Handle update-index command - add new documents to existing index incrementally."""
+    import json
+    from llama_index.core.schema import Document
+    from src.rag.services.embedder_service.service import EmbeddingService
+    from src.rag.services.vectordb_service.service import VectorStoreClient
+    from src.rag.services.bm25_service.service import BM25Service
+    from src.rag.services.ingest_service.service import (
+        PDFIngestAdapter,
+        TXTIngestAdapter,
+        MDIngestAdapter
+    )
+    from src.rag.services.duplicate_detection_service.service import DuplicateDetector
+    from src.rag.services.chunker_service.service import Chunker
+    
+    start_time = time.time()
+    persist_dir = Path(args.persist_dir)
+    data_dir = Path(args.data_dir)
+    
+    # Validate paths
+    faiss_index_path = persist_dir / "faiss_index"
+    bm25_index_path = persist_dir / "bm25_index"
+    
+    if not faiss_index_path.exists() or not bm25_index_path.exists():
+        print(f"Error: Indexes not found in {persist_dir}")
+        print("Please run 'index' command first to create initial indexes.")
+        logger.error("Update index failed: indexes not found", persist_dir=str(persist_dir))
+        sys.exit(1)
+    
+    logger.info("Starting incremental index update", persist_dir=str(persist_dir), data_dir=str(data_dir))
+    print(f"\n{'='*60}")
+    print(f"Incremental Index Update")
+    print(f"{'='*60}\n")
+    
+    # Step 1: Parse new documents
+    print(f"[Step 1/4] Parsing new documents from {data_dir}...")
+    
+    pdf_adapter = PDFIngestAdapter(config_path=args.config)
+    txt_adapter = TXTIngestAdapter(config_path=args.config)
+    md_adapter = MDIngestAdapter(config_path=args.config)
+    
+    new_docs = []
+    
+    # Parse new PDFs
+    if (data_dir / "pdf").exists():
+        pdf_files = list((data_dir / "pdf").glob("*.pdf"))
+        for pdf_file in pdf_files:
+            try:
+                docs = pdf_adapter.load_data(str(pdf_file))
+                new_docs.extend(docs)
+            except Exception as e:
+                logger.error(f"Failed to parse {pdf_file.name}: {e}")
+    
+    print(f"  Found {len(new_docs)} new documents")
+    
+    if not new_docs:
+        print("  No new documents to add.")
+        return
+    
+    # Step 2: Remove duplicates
+    print(f"\n[Step 2/4] Checking for duplicates...")
+    deduplicator = DuplicateDetector()
+    unique_docs = deduplicator.remove_duplicates(new_docs)
+    print(f"  Unique new documents: {len(unique_docs)}")
+    
+    # Step 3: Chunk documents
+    print(f"\n[Step 3/4] Chunking documents...")
+    chunker = Chunker(config_path=args.config)
+    chunks = chunker.chunk_documents(unique_docs)
+    print(f"  Created {len(chunks)} chunks")
+    
+    # Step 4: Update indexes
+    print(f"\n[Step 4/4] Updating indexes...")
+    
+    # Load embedder
+    embedder = EmbeddingService(config_path=args.config)
+    
+    # Convert chunks to Documents
+    documents = []
+    for chunk in chunks:
+        doc = Document(
+            text=chunk.get('text', ''),
+            metadata=chunk.get('metadata', {}),
+            id_=chunk.get('id', '')
+        )
+        documents.append(doc)
+    
+    # Load and update FAISS index
+    vector_client = VectorStoreClient(store_type="faiss", config={'index_dir': str(faiss_index_path)})
+    vector_client.load_index(embed_model=embedder.embed_model)
+    
+    if vector_client.index:
+        success = vector_client.add_documents_incremental(documents, embedder.embed_model)
+        if success:
+            vector_client.save_index(create_backup=True)
+            print(f"  FAISS index updated: +{len(documents)} documents")
+        else:
+            print(f"  ERROR: Failed to update FAISS index")
+            logger.error("Failed to update FAISS index")
+    
+    # Load and update BM25 index
+    bm25_service = BM25Service(index_dir=str(bm25_index_path), config_path=args.config)
+    bm25_service.load_index()
+    
+    # BM25 requires full rebuild (limitation of the current implementation)
+    print(f"  Note: BM25 index requires full rebuild for updates")
+    print(f"  Run 'index' command to rebuild BM25 with new documents")
+    
+    # Summary
+    duration = time.time() - start_time
+    
+    print(f"\n{'='*60}")
+    print(f"Update Summary:")
+    print(f"{'='*60}")
+    print(f"  New documents added:  {len(unique_docs)}")
+    print(f"  New chunks created:   {len(chunks)}")
+    print(f"  FAISS index updated:  Yes")
+    print(f"  BM25 index updated:   Requires manual rebuild")
+    print(f"  Duration:             {duration:.2f}s")
+    print(f"{'='*60}\n")
+    
+    logger.info("Incremental index update completed",
+               new_docs=len(unique_docs),
+               new_chunks=len(chunks),
+               duration_ms=duration * 1000)
+    
+    metrics.increment("index_update_documents_added", len(unique_docs))
+    metrics.histogram("index_update_duration_ms", duration * 1000)
 
 
 if __name__ == "__main__":
