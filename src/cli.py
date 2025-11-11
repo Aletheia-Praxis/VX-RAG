@@ -917,5 +917,120 @@ def handle_benchmark(args: argparse.Namespace) -> None:
     logger.info("Benchmark command called (not implemented)", query=args.query)
 
 
+def handle_clean_boilerplate(args: argparse.Namespace) -> None:
+    """Handle clean-boilerplate command - remove web artifacts and boilerplate."""
+    import json
+    from src.rag.services.boilerplate_removal_service.service import BoilerplateRemovalService
+    
+    start_time = time.time()
+    data_dir = Path(args.data_dir)
+    dry_run = args.dry_run
+    
+    if not data_dir.exists():
+        print(f"Error: Directory not found: {data_dir}")
+        logger.error("Clean boilerplate failed: directory not found", data_dir=str(data_dir))
+        sys.exit(1)
+    
+    logger.info("Starting boilerplate removal", data_dir=str(data_dir), dry_run=dry_run)
+    print(f"\n{'='*60}")
+    print(f"Cleaning boilerplate from: {data_dir}")
+    print(f"Mode: {'DRY RUN (no changes)' if dry_run else 'LIVE (files will be modified)'}")
+    print(f"{'='*60}\n")
+    
+    # Initialize service
+    boilerplate_service = BoilerplateRemovalService(aggressive_mode=True)
+    
+    # Find all .txt files
+    txt_files = list(data_dir.glob("*.txt"))
+    
+    if not txt_files:
+        print(f"No .txt files found in {data_dir}")
+        logger.warning("No txt files found for cleaning", data_dir=str(data_dir))
+        return
+    
+    print(f"Found {len(txt_files)} text files to process\n")
+    
+    cleaned_count = 0
+    skipped_count = 0
+    error_count = 0
+    total_removed_chars = 0
+    
+    for txt_file in txt_files:
+        try:
+            # Read original content
+            with open(txt_file, 'r', encoding='utf-8') as f:
+                original_text = f.read()
+            
+            original_len = len(original_text)
+            
+            # Clean boilerplate
+            cleaned_text = boilerplate_service.remove_boilerplate(original_text)
+            cleaned_len = len(cleaned_text)
+            
+            removed_chars = original_len - cleaned_len
+            
+            if removed_chars > 0:
+                print(f"  {txt_file.name}")
+                print(f"    Original: {original_len:,} chars")
+                print(f"    Cleaned:  {cleaned_len:,} chars")
+                print(f"    Removed:  {removed_chars:,} chars ({removed_chars/original_len*100:.1f}%)")
+                
+                if not dry_run:
+                    # Write cleaned content
+                    with open(txt_file, 'w', encoding='utf-8') as f:
+                        f.write(cleaned_text)
+                    print(f"    Status: UPDATED")
+                else:
+                    print(f"    Status: DRY RUN (no changes)")
+                
+                cleaned_count += 1
+                total_removed_chars += removed_chars
+            else:
+                skipped_count += 1
+                
+        except Exception as e:
+            error_count += 1
+            print(f"  ERROR: {txt_file.name} - {e}")
+            logger.error(f"Failed to clean {txt_file.name}", error=str(e))
+    
+    # Get statistics from service
+    stats = boilerplate_service.stats if hasattr(boilerplate_service, 'stats') else {}
+    
+    # Summary
+    duration = time.time() - start_time
+    
+    print(f"\n{'='*60}")
+    print(f"Boilerplate Removal Summary:")
+    print(f"{'='*60}")
+    print(f"  Total files:          {len(txt_files)}")
+    print(f"  Files cleaned:        {cleaned_count}")
+    print(f"  Files skipped:        {skipped_count}")
+    print(f"  Errors:               {error_count}")
+    print(f"  Total chars removed:  {total_removed_chars:,}")
+    print(f"  Mode:                 {'DRY RUN' if dry_run else 'LIVE'}")
+    print(f"  Duration:             {duration:.2f}s")
+    
+    if stats:
+        print(f"\n  Pattern Statistics:")
+        for pattern_name, count in stats.items():
+            if count > 0:
+                print(f"    {pattern_name}: {count} matches")
+    
+    print(f"{'='*60}\n")
+    
+    logger.info("Boilerplate removal completed",
+               total_files=len(txt_files),
+               cleaned=cleaned_count,
+               skipped=skipped_count,
+               errors=error_count,
+               chars_removed=total_removed_chars,
+               dry_run=dry_run,
+               duration_ms=duration * 1000)
+    
+    metrics.increment("boilerplate_removal_files_processed", len(txt_files))
+    metrics.increment("boilerplate_removal_files_cleaned", cleaned_count)
+    metrics.histogram("boilerplate_removal_duration_ms", duration * 1000)
+
+
 if __name__ == "__main__":
     main()
