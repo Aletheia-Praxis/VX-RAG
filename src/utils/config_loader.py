@@ -483,7 +483,8 @@ def get_mcp_rate_limit_config(config_path: Optional[str] = None) -> Dict[str, An
         - default_timeout: Default timeout in seconds
     """
     mcp_config = get_mcp_config(config_path)
-    return mcp_config['rate_limit']
+    rate_limit: Dict[str, Any] = mcp_config['rate_limit']
+    return rate_limit
 
 
 def get_mcp_timeouts(config_path: Optional[str] = None) -> Dict[str, float]:
@@ -501,7 +502,8 @@ def get_mcp_timeouts(config_path: Optional[str] = None) -> Dict[str, float]:
         - system_context: Timeout for system context requests
     """
     mcp_config = get_mcp_config(config_path)
-    return mcp_config['timeouts']
+    timeouts: Dict[str, float] = mcp_config['timeouts']
+    return timeouts
 
 
 def get_mcp_defaults(config_path: Optional[str] = None) -> Dict[str, Any]:
@@ -519,7 +521,8 @@ def get_mcp_defaults(config_path: Optional[str] = None) -> Dict[str, Any]:
         - apply_redaction: Enable sensitive data redaction in responses
     """
     mcp_config = get_mcp_config(config_path)
-    return mcp_config['defaults']
+    defaults: Dict[str, Any] = mcp_config['defaults']
+    return defaults
 
 
 def get_faiss_config(config_path: Optional[str] = None) -> Dict[str, Any]:
