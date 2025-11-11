@@ -9,7 +9,9 @@ import json
 import time
 import asyncio
 import uuid
-from typing import Dict, Any
+import datetime
+from pathlib import Path
+from typing import Dict, Any, Optional
 from fastmcp import FastMCP
 from pydantic import BaseModel, Field
 from .bridge import get_mcp_bridge
@@ -81,6 +83,19 @@ class TaskListParams(BaseModel):
         description="Filter tasks by status: all, pending, running, completed, failed, cancelled"
     )
     limit: int = Field(50, ge=1, le=500, description="Maximum number of tasks to return")
+
+
+class SnapshotCreateParams(BaseModel):
+    """Parameters for creating index snapshot."""
+    persist_dir: str = Field("data/index", description="Directory containing the index to snapshot")
+    snapshot_name: Optional[str] = Field(None, description="Optional custom name for snapshot (default: timestamp)")
+    config_path: str = Field("config/settings.yaml", description="Path to configuration file")
+
+
+class SnapshotVerifyParams(BaseModel):
+    """Parameters for verifying snapshot integrity."""
+    persist_dir: str = Field("data/index", description="Directory containing the index snapshots")
+    snapshot_name: str = Field(..., description="Name of the snapshot to verify")
 
 
 # Helper function for background ingestion
@@ -575,6 +590,216 @@ async def list_tasks(params: TaskListParams) -> str:
             "tasks": [],
             "total_matching": 0,
             "returned": 0,
+        }
+        
+        return json.dumps(error_response, indent=2, ensure_ascii=False)
+
+
+@mcp.tool
+async def create_snapshot(params: SnapshotCreateParams) -> str:
+    """
+    Create a versioned snapshot of the vector index.
+    
+    Creates a timestamped backup of the FAISS index with a manifest file
+    containing metadata and checksums for integrity verification.
+    
+    Args:
+        params: Snapshot creation parameters including persist directory and optional name
+        
+    Returns:
+        JSON-formatted response with snapshot path and details
+    """
+    start_time = time.time()
+    request_id = str(uuid.uuid4())
+    
+    try:
+        from pathlib import Path
+        from src.rag.services.vectordb_service.service import VectorStoreClient
+        from src.rag.services.embedder_service.service import EmbeddingService
+        
+        logger.info(
+            "Creating snapshot",
+            request_id=request_id,
+            persist_dir=params.persist_dir,
+            snapshot_name=params.snapshot_name,
+        )
+        
+        persist_dir = Path(params.persist_dir)
+        faiss_index_path = persist_dir / "faiss_index"
+        
+        if not faiss_index_path.exists():
+            error_response = {
+                "error": f"Index not found at {faiss_index_path}",
+                "persist_dir": params.persist_dir,
+            }
+            logger.error("Snapshot creation failed: index not found", persist_dir=params.persist_dir)
+            return json.dumps(error_response, indent=2, ensure_ascii=False)
+        
+        # Load embedder for model info
+        embedder = EmbeddingService(config_path=params.config_path)
+        embed_model_info = embedder.get_model_info()
+        
+        # Load vector store
+        vector_client = VectorStoreClient(
+            store_type="faiss",
+            config={'index_dir': str(faiss_index_path)}
+        )
+        vector_client.load_index(embed_model=embedder.embed_model)
+        
+        if not vector_client.index:
+            error_response = {
+                "error": "Failed to load index for snapshot creation",
+                "persist_dir": params.persist_dir,
+            }
+            logger.error("Failed to load index", persist_dir=params.persist_dir)
+            return json.dumps(error_response, indent=2, ensure_ascii=False)
+        
+        # Create snapshot (returns bool)
+        success = vector_client.create_snapshot(
+            snapshot_name=params.snapshot_name,
+            embed_model_info=embed_model_info
+        )
+        
+        if not success:
+            error_response = {
+                "error": "Failed to create snapshot",
+                "persist_dir": params.persist_dir,
+            }
+            logger.error("Snapshot creation failed", request_id=request_id, persist_dir=params.persist_dir)
+            return json.dumps(error_response, indent=2, ensure_ascii=False)
+        
+        # Construct snapshot path (method returns bool, not Path)
+        timestamp = datetime.datetime.now().strftime("%Y-%m-%d-%H-%M-%S")
+        snapshot_name_final = params.snapshot_name or f"snapshot_{timestamp}"
+        snapshot_dir = Path(params.persist_dir).parent / "snapshots" / snapshot_name_final
+        
+        duration = time.time() - start_time
+        
+        response = {
+            "success": True,
+            "snapshot_path": str(snapshot_dir),
+            "snapshot_name": snapshot_name_final,
+            "persist_dir": params.persist_dir,
+            "duration_seconds": round(duration, 2),
+        }
+        
+        logger.info(
+            "Snapshot created successfully",
+            request_id=request_id,
+            snapshot_path=str(snapshot_dir),
+            snapshot_name=snapshot_name_final,
+            duration_ms=duration * 1000,
+        )
+        
+        metrics.increment("mcp_snapshots_created_total")
+        metrics.histogram("mcp_snapshot_creation_duration_ms", duration * 1000)
+        
+        return json.dumps(response, indent=2, ensure_ascii=False)
+        
+    except Exception as e:
+        duration = time.time() - start_time
+        logger.error(
+            "Snapshot creation failed",
+            request_id=request_id,
+            persist_dir=params.persist_dir,
+            error=str(e),
+            duration_ms=duration * 1000,
+            exc_info=True,
+        )
+        
+        error_response = {
+            "error": f"Snapshot creation failed: {str(e)}",
+            "persist_dir": params.persist_dir,
+        }
+        
+        return json.dumps(error_response, indent=2, ensure_ascii=False)
+
+
+@mcp.tool
+async def verify_snapshot(params: SnapshotVerifyParams) -> str:
+    """
+    Verify the integrity of a snapshot.
+    
+    Checks snapshot files against stored checksums in the manifest
+    to ensure data integrity and completeness.
+    
+    Args:
+        params: Snapshot verification parameters including persist directory and snapshot name
+        
+    Returns:
+        JSON-formatted verification result with status and details
+    """
+    start_time = time.time()
+    request_id = str(uuid.uuid4())
+    
+    try:
+        from pathlib import Path
+        from src.rag.services.vectordb_service.service import VectorStoreClient
+        
+        logger.info(
+            "Verifying snapshot",
+            request_id=request_id,
+            snapshot_name=params.snapshot_name,
+            persist_dir=params.persist_dir,
+        )
+        
+        persist_dir = Path(params.persist_dir)
+        faiss_index_path = persist_dir / "faiss_index"
+        
+        if not faiss_index_path.exists():
+            error_response = {
+                "error": f"Index directory not found at {faiss_index_path}",
+                "persist_dir": params.persist_dir,
+            }
+            logger.error("Verification failed: index directory not found", persist_dir=params.persist_dir)
+            return json.dumps(error_response, indent=2, ensure_ascii=False)
+        
+        # Initialize vector store client
+        vector_client = VectorStoreClient(
+            store_type="faiss",
+            config={'index_dir': str(faiss_index_path)}
+        )
+        
+        # Verify snapshot
+        result = vector_client.verify_snapshot_integrity(params.snapshot_name)
+        
+        duration = time.time() - start_time
+        
+        response = {
+            "snapshot_name": params.snapshot_name,
+            "valid": result['valid'],
+            "errors": result.get('errors', []),
+            "manifest": result.get('manifest', {}),
+            "duration_seconds": round(duration, 2),
+        }
+        
+        logger.info(
+            "Snapshot verification completed",
+            request_id=request_id,
+            snapshot_name=params.snapshot_name,
+            valid=result['valid'],
+            duration_ms=duration * 1000,
+        )
+        
+        metrics.increment("mcp_snapshot_verifications_total")
+        
+        return json.dumps(response, indent=2, ensure_ascii=False)
+        
+    except Exception as e:
+        duration = time.time() - start_time
+        logger.error(
+            "Snapshot verification failed",
+            request_id=request_id,
+            snapshot_name=params.snapshot_name,
+            error=str(e),
+            duration_ms=duration * 1000,
+            exc_info=True,
+        )
+        
+        error_response = {
+            "error": f"Snapshot verification failed: {str(e)}",
+            "snapshot_name": params.snapshot_name,
+            "valid": False,
         }
         
         return json.dumps(error_response, indent=2, ensure_ascii=False)
