@@ -14,7 +14,7 @@ All administrative/utility operations have been moved to CLI.
 
 import time
 import uuid
-from typing import Dict, Any
+from typing import Dict, Any, Optional, Callable
 
 from typing import TYPE_CHECKING
 
@@ -352,7 +352,7 @@ async def handle_get_system_context() -> str:
         )
 
 # Map of tool names to handler functions
-TOOL_HANDLERS = {
+TOOL_HANDLERS: Dict[str, Callable[..., Any]] = {
     "query_knowledge_base": handle_query_knowledge_base,
     "search_documents": handle_search_documents,
     "health_check": handle_health_check,
@@ -360,7 +360,7 @@ TOOL_HANDLERS = {
 }
 
 
-def get_handler(tool_name: str):
+def get_handler(tool_name: str) -> Optional[Callable[..., Any]]:
     """
     Get handler function for a tool by name.
     
