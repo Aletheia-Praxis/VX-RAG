@@ -420,7 +420,7 @@ def get_data_directories(config_path: Optional[str] = None) -> Dict[str, str]:
 
 def get_mcp_config(config_path: Optional[str] = None) -> Dict[str, Any]:
     """
-    Get MCP server configuration from settings.yaml.
+    Get complete MCP server configuration from settings.yaml.
     
     Args:
         config_path: Path to settings.yaml file
@@ -430,7 +430,9 @@ def get_mcp_config(config_path: Optional[str] = None) -> Dict[str, Any]:
         - host: Server host address
         - port: Server port number
         - debug: Debug mode flag
-        - query_timeout: Query timeout in seconds
+        - rate_limit: Rate limiting configuration
+        - timeouts: Tool-specific timeout configuration
+        - defaults: Default parameters for tools
     """
     config = load_settings(config_path)
     
@@ -440,11 +442,84 @@ def get_mcp_config(config_path: Optional[str] = None) -> Dict[str, Any]:
         'host': mcp_section.get('host', '127.0.0.1'),
         'port': mcp_section.get('port', 25191),
         'debug': mcp_section.get('debug', True),
-        'query_timeout': mcp_section.get('query_timeout', 600.0)
+        'rate_limit': mcp_section.get('rate_limit', {
+            'max_concurrent': 2,
+            'queue_size': 10,
+            'default_timeout': 600.0
+        }),
+        'timeouts': mcp_section.get('timeouts', {
+            'query_knowledge_base': 600.0,
+            'search_documents': 300.0,
+            'health_check': 30.0,
+            'system_context': 10.0
+        }),
+        'defaults': mcp_section.get('defaults', {
+            'top_k': 5,
+            'token_budget': 4000,
+            'search_top_k': 10,
+            'apply_redaction': True
+        })
     }
     
-    logger.info(f"Loaded MCP config: host={mcp_config['host']}, port={mcp_config['port']}, query_timeout={mcp_config['query_timeout']}")
+    logger.info(
+        f"Loaded MCP config: host={mcp_config['host']}, "
+        f"port={mcp_config['port']}, "
+        f"max_concurrent={mcp_config['rate_limit']['max_concurrent']}"
+    )
     return mcp_config
+
+
+def get_mcp_rate_limit_config(config_path: Optional[str] = None) -> Dict[str, Any]:
+    """
+    Get MCP rate limiting configuration from settings.yaml.
+    
+    Args:
+        config_path: Path to settings.yaml file
+        
+    Returns:
+        Dictionary with rate limiting configuration:
+        - max_concurrent: Maximum concurrent requests
+        - queue_size: Queue size for pending requests
+        - default_timeout: Default timeout in seconds
+    """
+    mcp_config = get_mcp_config(config_path)
+    return mcp_config['rate_limit']
+
+
+def get_mcp_timeouts(config_path: Optional[str] = None) -> Dict[str, float]:
+    """
+    Get MCP tool-specific timeouts from settings.yaml.
+    
+    Args:
+        config_path: Path to settings.yaml file
+        
+    Returns:
+        Dictionary mapping tool names to timeout values (seconds):
+        - query_knowledge_base: Timeout for knowledge base queries
+        - search_documents: Timeout for document searches
+        - health_check: Timeout for health checks
+        - system_context: Timeout for system context requests
+    """
+    mcp_config = get_mcp_config(config_path)
+    return mcp_config['timeouts']
+
+
+def get_mcp_defaults(config_path: Optional[str] = None) -> Dict[str, Any]:
+    """
+    Get MCP tool default parameters from settings.yaml.
+    
+    Args:
+        config_path: Path to settings.yaml file
+        
+    Returns:
+        Dictionary with default parameters:
+        - top_k: Default number of results for knowledge base queries
+        - token_budget: Default token budget for context assembly
+        - search_top_k: Default number of results for document search
+        - apply_redaction: Enable sensitive data redaction in responses
+    """
+    mcp_config = get_mcp_config(config_path)
+    return mcp_config['defaults']
 
 
 def get_faiss_config(config_path: Optional[str] = None) -> Dict[str, Any]:
