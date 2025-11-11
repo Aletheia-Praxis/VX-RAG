@@ -131,23 +131,28 @@ def handle_ingest(args: argparse.Namespace) -> None:
     from src.rag.services.ingest_service.service import (
         PDFIngestAdapter, 
         TXTIngestAdapter, 
-        MDIngestAdapter
+        MDIngestAdapter,
+        save_processed_text
     )
     from src.rag.services.duplicate_detection_service.service import DuplicateDetector
     from src.rag.services.chunker_service.service import Chunker
     
     start_time = time.time()
     data_path = Path(args.data_dir)
+    processed_dir = data_path / "processed"
     
     if not data_path.exists():
         print(f"Error: Data directory {data_path} does not exist")
         logger.error("Ingestion failed: data directory not found", data_dir=str(data_path))
         sys.exit(1)
     
+    # Ensure processed directory exists
+    processed_dir.mkdir(parents=True, exist_ok=True)
+    
     logger.info("Starting ingestion pipeline", data_dir=str(data_path))
     
     # Step 1: Parse documents
-    print(f"\n[Step 1/3] Parsing documents from {data_path}...")
+    print(f"\n[Step 1/4] Parsing documents from {data_path}...")
     
     pdf_adapter = PDFIngestAdapter()
     txt_adapter = TXTIngestAdapter()
@@ -163,7 +168,7 @@ def handle_ingest(args: argparse.Namespace) -> None:
     print(f"  Total parsed: {len(all_docs)} documents")
     
     # Step 2: Remove duplicates
-    print(f"\n[Step 2/3] Removing duplicates...")
+    print(f"\n[Step 2/4] Removing duplicates...")
     
     detector = DuplicateDetector(config_path=args.config)
     unique_docs = detector.remove_duplicates(all_docs)
@@ -172,8 +177,14 @@ def handle_ingest(args: argparse.Namespace) -> None:
     print(f"  Duplicates removed: {duplicates_removed}")
     print(f"  Unique documents: {len(unique_docs)}")
     
-    # Step 3: Chunk documents
-    print(f"\n[Step 3/3] Chunking documents...")
+    # Step 3: Save processed documents
+    print(f"\n[Step 3/4] Saving processed documents to {processed_dir}...")
+    
+    saved_count = save_processed_text(unique_docs, processed_dir)
+    print(f"  Saved files: {saved_count}")
+    
+    # Step 4: Chunk documents
+    print(f"\n[Step 4/4] Chunking documents...")
     
     chunker = Chunker(config_path=args.config)
     chunks = chunker.chunk_documents(unique_docs)
@@ -182,6 +193,35 @@ def handle_ingest(args: argparse.Namespace) -> None:
     print(f"  Total chunks: {chunking_stats['total_chunks']}")
     print(f"  Avg chunk length: {chunking_stats['avg_chunk_length']:.0f} chars")
     print(f"  Chunk distribution: {chunking_stats['chunk_size_distribution']}")
+    
+    # Save chunks to file for indexing
+    import json
+    chunks_file = data_path / "processed" / "chunks.json"
+    
+    # Filter out non-serializable LlamaIndex objects
+    def make_serializable(obj):
+        """Recursively remove non-serializable objects."""
+        if isinstance(obj, dict):
+            return {
+                k: make_serializable(v) 
+                for k, v in obj.items() 
+                if k not in ['node_info', 'relationships', 'excluded_llm_metadata_keys', 
+                             'excluded_embed_metadata_keys', 'metadata_seperator', 
+                             'metadata_template', 'text_template']
+            }
+        elif isinstance(obj, list):
+            return [make_serializable(item) for item in obj]
+        else:
+            return obj
+    
+    try:
+        serializable_chunks = make_serializable(chunks)
+        with open(chunks_file, 'w', encoding='utf-8') as f:
+            json.dump(serializable_chunks, f, ensure_ascii=False, indent=2)
+        print(f"  Saved chunks to: {chunks_file}")
+    except TypeError as e:
+        logger.error(f"Failed to serialize chunks: {e}")
+        print(f"  Warning: Could not save chunks (serialization error)")
     
     # Summary
     duration = time.time() - start_time
@@ -192,7 +232,9 @@ def handle_ingest(args: argparse.Namespace) -> None:
     print(f"  Documents parsed:     {len(all_docs)}")
     print(f"  Duplicates removed:   {duplicates_removed}")
     print(f"  Unique documents:     {len(unique_docs)}")
+    print(f"  Saved to disk:        {saved_count}")
     print(f"  Total chunks:         {len(chunks)}")
+    print(f"  Chunks file:          {chunks_file}")
     print(f"  Duration:             {duration:.2f}s")
     print(f"{'='*50}\n")
     
@@ -200,18 +242,86 @@ def handle_ingest(args: argparse.Namespace) -> None:
                parsed=len(all_docs), 
                duplicates_removed=duplicates_removed,
                unique=len(unique_docs),
+               saved=saved_count,
                chunks=len(chunks),
                duration_ms=duration * 1000)
     
     metrics.increment("ingestion_documents_parsed_total", len(all_docs))
     metrics.increment("ingestion_duplicates_removed_total", duplicates_removed)
+    metrics.increment("ingestion_documents_saved_total", saved_count)
     metrics.increment("ingestion_chunks_created_total", len(chunks))
     metrics.histogram("ingestion_pipeline_duration_ms", duration * 1000)
 
 
 def handle_index(args: argparse.Namespace) -> None:
-    """Handle index command."""
-    print(f"Creating index at {args.persist_dir}")
+    """Handle index command - create embeddings and build indexes."""
+    import json
+    from src.rag.services.embedder_service.service import EmbeddingService
+    
+    start_time = time.time()
+    data_dir = Path(args.data_dir)
+    persist_dir = Path(args.persist_dir)
+    chunks_file = data_dir / "chunks.json"
+    
+    if not chunks_file.exists():
+        print(f"Error: Chunks file not found at {chunks_file}")
+        print("Please run 'ingest' command first to create chunks.")
+        logger.error("Indexing failed: chunks file not found", chunks_file=str(chunks_file))
+        sys.exit(1)
+    
+    persist_dir.mkdir(parents=True, exist_ok=True)
+    
+    logger.info("Starting indexing pipeline", persist_dir=str(persist_dir))
+    
+    # Step 1: Load chunks
+    print(f"\n[Step 1/3] Loading chunks from {chunks_file}...")
+    
+    with open(chunks_file, 'r', encoding='utf-8') as f:
+        chunks = json.load(f)
+    
+    print(f"  Loaded chunks: {len(chunks)}")
+    
+    # Step 2: Generate embeddings
+    print(f"\n[Step 2/3] Generating embeddings...")
+    
+    embedder = EmbeddingService(config_path=args.config)
+    
+    # Extract text from chunks
+    chunk_texts = [chunk.get('text', '') for chunk in chunks]
+    
+    print(f"  Embedding {len(chunk_texts)} chunks...")
+    embeddings = embedder.embed(chunk_texts)
+    
+    print(f"  Generated embeddings: {len(embeddings)}")
+    print(f"  Embedding dimension: {len(embeddings[0]) if embeddings else 0}")
+    
+    # Save embeddings
+    embeddings_file = persist_dir / "embeddings.json"
+    with open(embeddings_file, 'w', encoding='utf-8') as f:
+        json.dump(embeddings, f)
+    print(f"  Saved embeddings to: {embeddings_file}")
+    
+    # Summary
+    duration = time.time() - start_time
+    
+    print(f"\n{'='*50}")
+    print(f"Indexing Summary:")
+    print(f"{'='*50}")
+    print(f"  Chunks processed:     {len(chunks)}")
+    print(f"  Embeddings created:   {len(embeddings)}")
+    print(f"  Embedding dim:        {len(embeddings[0]) if embeddings else 0}")
+    print(f"  Persist dir:          {persist_dir}")
+    print(f"  Duration:             {duration:.2f}s")
+    print(f"{'='*50}\n")
+    
+    logger.info("Indexing pipeline completed",
+               chunks=len(chunks),
+               embeddings=len(embeddings),
+               duration_ms=duration * 1000)
+    
+    metrics.increment("indexing_chunks_processed_total", len(chunks))
+    metrics.increment("indexing_embeddings_created_total", len(embeddings))
+    metrics.histogram("indexing_pipeline_duration_ms", duration * 1000)
 
 
 def handle_query(args: argparse.Namespace) -> None:
