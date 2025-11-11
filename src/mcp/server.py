@@ -32,9 +32,14 @@ from .middleware import with_mcp_middleware
 
 from src.utils.logging_config import get_logger, log_service_health
 from src.utils.metrics import get_metrics
+from src.utils.config_loader import get_mcp_timeouts, get_mcp_defaults
 
 logger = get_logger("mcp_server")
 metrics = get_metrics()
+
+# Load MCP configuration from settings.yaml
+mcp_timeouts = get_mcp_timeouts()
+mcp_defaults = get_mcp_defaults()
 
 
 # Create FastMCP server instance
@@ -45,12 +50,12 @@ mcp = FastMCP(
 
 
 @mcp.tool()
-@with_mcp_middleware("query_knowledge_base", timeout=600.0)
+@with_mcp_middleware("query_knowledge_base", timeout=mcp_timeouts['query_knowledge_base'])
 async def query_knowledge_base(
     query: str,
-    top_k: int = 5,
+    top_k: int = mcp_defaults['top_k'],
     search_type: str = "hybrid",
-    token_budget: int = 4000
+    token_budget: int = mcp_defaults['token_budget']
 ) -> str:
     """
     Query the knowledge base for relevant information.
@@ -78,10 +83,10 @@ async def query_knowledge_base(
 
 
 @mcp.tool()
-@with_mcp_middleware("search_documents", timeout=300.0)
+@with_mcp_middleware("search_documents", timeout=mcp_timeouts['search_documents'])
 async def search_documents(
     query: str,
-    top_k: int = 10,
+    top_k: int = mcp_defaults['search_top_k'],
     search_type: str = "semantic"
 ) -> str:
     """
