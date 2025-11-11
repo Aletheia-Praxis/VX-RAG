@@ -489,7 +489,8 @@ class RAGOrchestrator:
             'config_path': self.config_path
         }
         
-        log_service_health("orchestrator", status['overall_status'])
+        overall_status: str = str(status['overall_status'])
+        log_service_health("orchestrator", overall_status)
         
         return status
 
