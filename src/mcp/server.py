@@ -285,6 +285,97 @@ async def query_documents(params: QueryParams) -> str:
         return json.dumps(error_response, indent=2, ensure_ascii=False)
 
 
+@mcp.tool
+async def ingest_documents(params: IngestParams) -> str:
+    """
+    Ingest documents into the RAG system.
+    
+    Runs the full ingestion pipeline: parsing, deduplication, saving, and chunking.
+    Can run in background mode for large datasets.
+    
+    Args:
+        params: Ingestion parameters including data directory and configuration
+        
+    Returns:
+        JSON-formatted response with task ID (if background) or ingestion results
+    """
+    start_time = time.time()
+    request_id = str(uuid.uuid4())
+    
+    try:
+        logger.info(
+            "Processing ingestion request",
+            request_id=request_id,
+            data_dir=params.data_dir,
+            background=params.background,
+        )
+        
+        if params.background:
+            # Submit to task queue for background processing
+            task_id = await task_queue.submit_task(
+                name="ingest_documents",
+                func=run_ingestion_pipeline,
+                args=(params.data_dir, params.config_path),
+                priority=TaskPriority.HIGH,
+                max_retries=1,  # Heavy operation, limit retries
+            )
+            
+            response = {
+                "status": "submitted",
+                "task_id": task_id,
+                "message": "Ingestion started in background. Use vxrag_task_status to check progress.",
+                "data_dir": params.data_dir,
+            }
+            
+            logger.info(
+                "Ingestion task submitted",
+                request_id=request_id,
+                task_id=task_id,
+            )
+            
+        else:
+            # Run synchronously (blocking)
+            logger.warning(
+                "Running ingestion synchronously (blocking)",
+                request_id=request_id,
+            )
+            
+            result = run_ingestion_pipeline(params.data_dir, params.config_path)
+            result['task_id'] = request_id
+            response = result
+            
+            logger.info(
+                "Ingestion completed synchronously",
+                request_id=request_id,
+                duration_sec=result['duration_seconds'],
+            )
+        
+        duration = time.time() - start_time
+        metrics.increment("mcp_ingest_requests_total")
+        metrics.histogram("mcp_ingest_request_duration_ms", duration * 1000)
+        
+        return json.dumps(response, indent=2, ensure_ascii=False)
+        
+    except Exception as e:
+        duration = time.time() - start_time
+        logger.error(
+            "Ingestion request failed",
+            request_id=request_id,
+            data_dir=params.data_dir,
+            error=str(e),
+            duration_ms=duration * 1000,
+            exc_info=True,
+        )
+        
+        error_response = {
+            "error": f"Ingestion failed: {str(e)}",
+            "data_dir": params.data_dir,
+            "request_id": request_id,
+        }
+        
+        return json.dumps(error_response, indent=2, ensure_ascii=False)
+
+
 @mcp.resource("health://status")
 def get_health_status() -> str:
     """
