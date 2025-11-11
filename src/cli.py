@@ -13,9 +13,21 @@ from typing import Any, List, Dict
 
 from src.utils.logging_config import get_logger, log_index_event
 from src.utils.metrics import get_metrics
+from src.utils.task_queue import get_task_queue
 
 logger = get_logger("cli")
 metrics = get_metrics()
+
+# Global task queue instance (lazy initialization)
+_task_queue = None
+
+
+def get_cli_task_queue():
+    """Get or create the CLI task queue instance."""
+    global _task_queue
+    if _task_queue is None:
+        _task_queue = get_task_queue()
+    return _task_queue
 
 
 def main() -> None:
@@ -810,39 +822,171 @@ def handle_verify_snapshot(args: argparse.Namespace) -> None:
 
 def handle_status(args: argparse.Namespace) -> None:
     """Handle status command - check background task status."""
-    print(f"\n{'='*60}")
-    print(f"Task Status Check")
-    print(f"{'='*60}\n")
-    print(f"  Task ID: {args.task_id}")
-    print(f"  Status: Not implemented (requires async task queue)")
-    print(f"\n  Note: Task queue requires MCP server integration")
-    print(f"  Use MCP API endpoints for task management")
-    print(f"{'='*60}\n")
+    import json
+    from datetime import datetime
+    
+    async def _check_status():
+        task_queue = get_cli_task_queue()
+        await task_queue.start()
+        
+        try:
+            task_status = await task_queue.get_task_status(args.task_id)
+            
+            print(f"\n{'='*60}")
+            print(f"Task Status")
+            print(f"{'='*60}\n")
+            
+            if task_status is None:
+                print(f"  Task ID: {args.task_id}")
+                print(f"  Status: NOT FOUND")
+                print(f"\n  The task may have been removed or never existed.")
+            else:
+                print(f"  Task ID: {task_status['task_id']}")
+                print(f"  Name: {task_status['name']}")
+                print(f"  Status: {task_status['status'].upper()}")
+                
+                if task_status['created_at']:
+                    created = datetime.fromtimestamp(task_status['created_at'])
+                    print(f"  Created: {created.strftime('%Y-%m-%d %H:%M:%S')}")
+                
+                if task_status['started_at']:
+                    started = datetime.fromtimestamp(task_status['started_at'])
+                    print(f"  Started: {started.strftime('%Y-%m-%d %H:%M:%S')}")
+                
+                if task_status['completed_at']:
+                    completed = datetime.fromtimestamp(task_status['completed_at'])
+                    print(f"  Completed: {completed.strftime('%Y-%m-%d %H:%M:%S')}")
+                    
+                    if task_status['started_at']:
+                        duration = task_status['completed_at'] - task_status['started_at']
+                        print(f"  Duration: {duration:.2f}s")
+                
+                if task_status['error']:
+                    print(f"\n  Error: {task_status['error']}")
+                
+                if task_status['result']:
+                    print(f"\n  Result:")
+                    try:
+                        result_dict = json.loads(task_status['result']) if isinstance(task_status['result'], str) else task_status['result']
+                        print(f"    {json.dumps(result_dict, indent=4)}")
+                    except:
+                        print(f"    {task_status['result']}")
+            
+            print(f"\n{'='*60}\n")
+            
+        finally:
+            await task_queue.stop()
+    
+    asyncio.run(_check_status())
 
 
 def handle_cancel(args: argparse.Namespace) -> None:
     """Handle cancel command - cancel background task."""
-    print(f"\n{'='*60}")
-    print(f"Task Cancellation")
-    print(f"{'='*60}\n")
-    print(f"  Task ID: {args.task_id}")
-    print(f"  Status: Not implemented (requires async task queue)")
-    print(f"\n  Note: Task queue requires MCP server integration")
-    print(f"  Use MCP API endpoints for task management")
-    print(f"{'='*60}\n")
+    async def _cancel_task():
+        task_queue = get_cli_task_queue()
+        await task_queue.start()
+        
+        try:
+            print(f"\n{'='*60}")
+            print(f"Task Cancellation")
+            print(f"{'='*60}\n")
+            
+            # Check if task exists first
+            task_status = await task_queue.get_task_status(args.task_id)
+            
+            if task_status is None:
+                print(f"  Task ID: {args.task_id}")
+                print(f"  Status: NOT FOUND")
+                print(f"\n  The task may have been removed or never existed.")
+            else:
+                print(f"  Task ID: {args.task_id}")
+                print(f"  Current Status: {task_status['status'].upper()}")
+                
+                # Try to cancel
+                success = await task_queue.cancel_task(args.task_id)
+                
+                if success:
+                    print(f"  Result: CANCELLED SUCCESSFULLY")
+                else:
+                    print(f"  Result: CANNOT CANCEL")
+                    print(f"  Reason: Task is in '{task_status['status']}' state")
+            
+            print(f"\n{'='*60}\n")
+            
+        finally:
+            await task_queue.stop()
+    
+    asyncio.run(_cancel_task())
 
 
 def handle_list_tasks(args: argparse.Namespace) -> None:
     """Handle list-tasks command - list all background tasks."""
-    task_filter = args.filter if hasattr(args, 'filter') else 'all'
+    from datetime import datetime
     
-    print(f"\n{'='*60}")
-    print(f"Task List (Filter: {task_filter})")
-    print(f"{'='*60}\n")
-    print(f"  No tasks found")
-    print(f"\n  Note: Task queue requires MCP server integration")
-    print(f"  Use MCP API endpoints for task management")
-    print(f"{'='*60}\n")
+    async def _list_tasks():
+        task_queue = get_cli_task_queue()
+        await task_queue.start()
+        
+        try:
+            task_filter = args.filter if hasattr(args, 'filter') else 'all'
+            
+            print(f"\n{'='*60}")
+            print(f"Task List (Filter: {task_filter.upper()})")
+            print(f"{'='*60}\n")
+            
+            # Get all tasks
+            all_tasks = []
+            for task_id, task_data in task_queue._tasks.items():
+                all_tasks.append(task_data.to_dict())
+            
+            # Filter by status
+            if task_filter != 'all':
+                filtered_tasks = [t for t in all_tasks if t['status'] == task_filter]
+            else:
+                filtered_tasks = all_tasks
+            
+            # Sort by creation time (newest first)
+            filtered_tasks.sort(key=lambda t: t['created_at'] or 0, reverse=True)
+            
+            if not filtered_tasks:
+                print(f"  No tasks found matching filter: {task_filter}")
+            else:
+                print(f"  Found {len(filtered_tasks)} task(s):\n")
+                
+                for i, task in enumerate(filtered_tasks, 1):
+                    print(f"  [{i}] {task['name']}")
+                    print(f"      ID: {task['task_id']}")
+                    print(f"      Status: {task['status'].upper()}")
+                    
+                    if task['created_at']:
+                        created = datetime.fromtimestamp(task['created_at'])
+                        print(f"      Created: {created.strftime('%Y-%m-%d %H:%M:%S')}")
+                    
+                    if task['started_at'] and task['completed_at']:
+                        duration = task['completed_at'] - task['started_at']
+                        print(f"      Duration: {duration:.2f}s")
+                    
+                    if task['error']:
+                        print(f"      Error: {task['error'][:80]}...")
+                    
+                    print()
+            
+            # Show queue statistics
+            stats = task_queue.get_queue_stats()
+            print(f"  Queue Statistics:")
+            print(f"    Total: {stats['total_tasks']}")
+            print(f"    Pending: {stats['pending']}")
+            print(f"    Running: {stats['running']}")
+            print(f"    Completed: {stats['completed']}")
+            print(f"    Failed: {stats['failed']}")
+            print(f"    Cancelled: {stats['cancelled']}")
+            
+            print(f"\n{'='*60}\n")
+            
+        finally:
+            await task_queue.stop()
+    
+    asyncio.run(_list_tasks())
 
 
 def handle_cleanup(args: argparse.Namespace) -> None:
