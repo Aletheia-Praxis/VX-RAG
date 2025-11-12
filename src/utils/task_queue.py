@@ -14,10 +14,10 @@ Design Philosophy:
 """
 
 import asyncio
+import functools
 import json
 import time
 import uuid
-from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from datetime import datetime
 from enum import Enum
@@ -121,7 +121,7 @@ class QueueTask:
 
 class TaskQueue:
     """
-    Asyncio-based task queue with ThreadPoolExecutor for CPU-bound operations.
+    Asyncio-based task queue with thread pool support for CPU-bound operations.
     
     Features:
     - Priority-based task scheduling
@@ -130,9 +130,15 @@ class TaskQueue:
     - Task persistence for crash recovery
     - Progress tracking and cancellation
     - Retry mechanism with exponential backoff
+    - Automatic thread pool handling via asyncio.to_thread()
+    
+    Note:
+        Synchronous functions are executed using asyncio.to_thread(), which uses
+        Python's default thread pool. This avoids blocking the event loop while
+        keeping the implementation simple and maintainable.
     
     Example:
-        >>> queue = TaskQueue(max_workers=4, max_concurrent_tasks=2)
+        >>> queue = TaskQueue(max_concurrent_tasks=2)
         >>> await queue.start()
         >>> 
         >>> task_id = await queue.submit_task(
@@ -148,7 +154,6 @@ class TaskQueue:
     
     def __init__(
         self,
-        max_workers: int = 4,
         max_concurrent_tasks: int = 2,
         state_file: Optional[Path] = None,
         enable_persistence: bool = True,
@@ -159,14 +164,12 @@ class TaskQueue:
         Initialize task queue.
         
         Args:
-            max_workers: Maximum number of ThreadPoolExecutor workers
             max_concurrent_tasks: Maximum number of tasks running simultaneously (rate limiting)
             state_file: Path to task state persistence file
             enable_persistence: Enable/disable task state persistence
             max_completed_tasks: Maximum number of completed tasks to keep (FIFO rolling window)
             max_failed_tasks: Maximum number of failed tasks to keep (FIFO rolling window)
         """
-        self.max_workers = max_workers
         self.max_concurrent_tasks = max_concurrent_tasks
         self.enable_persistence = enable_persistence
         self.max_completed_tasks = max_completed_tasks
@@ -181,9 +184,6 @@ class TaskQueue:
         # Currently running tasks
         self._running_tasks: Dict[str, asyncio.Task[Any]] = {}
         
-        # Thread pool for CPU-bound operations
-        self._executor = ThreadPoolExecutor(max_workers=max_workers)
-        
         # Control flags
         self._running = False
         self._worker_task: Optional[asyncio.Task[Any]] = None
@@ -197,7 +197,6 @@ class TaskQueue:
         
         logger.info(
             "TaskQueue initialized",
-            max_workers=max_workers,
             max_concurrent_tasks=max_concurrent_tasks,
             persistence=enable_persistence,
         )
@@ -244,9 +243,6 @@ class TaskQueue:
         for task_id, task in self._running_tasks.items():
             logger.info(f"Cancelling running task: {task_id}")
             task.cancel()
-        
-        # Shutdown executor
-        self._executor.shutdown(wait=True, cancel_futures=True)
         
         # Save state
         if self.enable_persistence:
@@ -418,7 +414,6 @@ class TaskQueue:
             'cancelled': cancelled,
             'queue_size': self._queue.qsize(),
             'max_concurrent_tasks': self.max_concurrent_tasks,
-            'max_workers': self.max_workers,
             'max_completed_tasks': self.max_completed_tasks,
             'max_failed_tasks': self.max_failed_tasks,
         }
@@ -470,16 +465,15 @@ class TaskQueue:
                 kwargs_dict = task.kwargs if task.kwargs is not None else {}
                 
                 if asyncio.iscoroutinefunction(task.func):
+                    # Async function - execute directly
                     result = await task.func(*task.args, **kwargs_dict)
                 else:
-                    # Run in thread pool for CPU-bound operations
-                    loop = asyncio.get_event_loop()
-                    result = await loop.run_in_executor(
-                        self._executor,
-                        task.func,
-                        *task.args,
-                        **kwargs_dict,
-                    )
+                    # Sync function - run in thread pool to avoid blocking event loop
+                    # Using asyncio.to_thread() (Python 3.9+) for better readability
+                    # and modern best practices. It properly handles function arguments
+                    # and runs in a separate thread without blocking the event loop.
+                    func_with_args = functools.partial(task.func, *task.args, **kwargs_dict)
+                    result = await asyncio.to_thread(func_with_args)
                 
                 # Task completed successfully
                 task.status = TaskStatus.COMPLETED
@@ -579,7 +573,6 @@ _task_queue: Optional[TaskQueue] = None
 
 
 def get_task_queue(
-    max_workers: int = 4,
     max_concurrent_tasks: int = 2,
     max_completed_tasks: int = 100,
     max_failed_tasks: int = 50,
@@ -588,7 +581,6 @@ def get_task_queue(
     Get or create the global task queue instance.
     
     Args:
-        max_workers: Maximum ThreadPoolExecutor workers
         max_concurrent_tasks: Maximum concurrent tasks (rate limiting)
         max_completed_tasks: Maximum completed tasks to keep (rolling window)
         max_failed_tasks: Maximum failed tasks to keep (rolling window)
@@ -600,7 +592,6 @@ def get_task_queue(
     
     if _task_queue is None:
         _task_queue = TaskQueue(
-            max_workers=max_workers,
             max_concurrent_tasks=max_concurrent_tasks,
             max_completed_tasks=max_completed_tasks,
             max_failed_tasks=max_failed_tasks,
