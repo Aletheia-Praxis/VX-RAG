@@ -112,9 +112,30 @@ python src/mcp/server.py
 
 The server provides:
 
-- `query_documents`: search tool
-- `health://status`: health check
-- `context://system`: system information
+- `query_knowledge_base`: Advanced semantic search with reranking
+- `search_documents`: Fast document search
+- Health and status endpoints
+
+### MCP Configuration
+
+The MCP server can be configured in `config/settings.yaml`:
+
+```yaml
+mcp:
+  host: "127.0.0.1"
+  port: 25191
+  rate_limit:
+    max_concurrent: 2       # Adjust for your workload
+    queue_size: 10          # Queue capacity
+    default_timeout: 600.0  # 10 minutes
+```
+
+The middleware automatically handles:
+
+- Request rate limiting and queuing
+- Structured logging with request IDs
+- Performance metrics collection
+- Timeout management
 
 ## Troubleshooting
 
@@ -140,12 +161,24 @@ The server provides:
 
 ## Known Limitations and Future Improvements
 
-### Rate Limiting
+### Rate Limiting and Request Management
 
-The current implementation does not include rate limiting or request queuing. For single-user local deployment, this is not a critical issue. Implementation of a queue mechanism for concurrent requests is planned for future releases.
+The system implements rate limiting with request queuing to prevent resource exhaustion:
+
+- **Maximum Concurrent Requests**: 2 (configurable in `config/settings.yaml`)
+- **Queue Size**: 10 pending requests
+- **Default Timeout**: 10 minutes (600 seconds)
+- **Tool-Specific Timeouts**:
+  - Knowledge base queries: 10 minutes
+  - Document search: 5 minutes
+  - Health checks: 30 seconds
+
+When the system is at capacity, new requests are queued automatically. If the queue is full, requests are rejected with an error. This ensures stable operation even under load.
+
+For multi-user deployment, these limits can be adjusted in the `mcp.rate_limit` section of `config/settings.yaml`.
 
 ### Request Timeouts
 
-To prevent client hanging, requests are automatically timed out after 10 minutes. This is a safeguard measure - normal queries should complete much faster.
+Requests are automatically timed out based on operation type to prevent resource hanging. Normal queries typically complete in seconds, but complex operations (e.g., large document searches) may take longer. Timeout values can be customized per tool in the `mcp.timeouts` configuration section.
 
 For more information, see `README.md` and the configuration in `config/settings.yaml`.
