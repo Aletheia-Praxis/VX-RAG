@@ -5,6 +5,7 @@ data_dir: "./data"
 raw_data_dir: "./data/raw"
 processed_data_dir: "./data/processed"
 index_dir: "./data/index"
+snapshots_dir: "./data/snapshots"
 
 # Embedding configuration
 embedding_model: "all-MiniLM-L6-v2"
