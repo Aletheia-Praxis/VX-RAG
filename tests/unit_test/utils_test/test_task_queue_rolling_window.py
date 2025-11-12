@@ -19,7 +19,6 @@ def task_queue_with_limits(tmp_path: Path) -> TaskQueue:
     """Create a task queue with small limits for testing."""
     state_file = tmp_path / "test_queue_state.json"
     queue = TaskQueue(
-        max_workers=2,
         max_concurrent_tasks=1,
         max_completed_tasks=3,  # Small limit for testing
         max_failed_tasks=2,     # Small limit for testing
