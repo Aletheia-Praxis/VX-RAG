@@ -1224,7 +1224,7 @@ def handle_serve(args: argparse.Namespace) -> None:
             run_stdio()
             
         elif args.transport == "sse":
-            print(f"\nMCP Server starting in SSE mode")
+            print("\nMCP Server starting in SSE mode")
             print(f"Server URL: http://{args.host}:{args.port}")
             print(f"SSE Endpoint: http://{args.host}:{args.port}/sse")
             if args.cors:
@@ -1233,7 +1233,7 @@ def handle_serve(args: argparse.Namespace) -> None:
             asyncio.run(run_sse(host=args.host, port=args.port))
             
         elif args.transport == "http":
-            print(f"\nMCP Server starting in HTTP mode")
+            print("\nMCP Server starting in HTTP mode")
             print(f"Server URL: http://{args.host}:{args.port}")
             if args.cors:
                 print(f"CORS enabled for origins: {args.allowed_origins}")
