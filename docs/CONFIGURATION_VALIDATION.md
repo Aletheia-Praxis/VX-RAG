@@ -2,21 +2,21 @@
 
 ## Overview
 
-VX-RAG використовує **Pydantic v2** для валідації всіх налаштувань, що завантажуються з `config/settings.yaml`. Це забезпечує:
+VX-RAG uses **Pydantic v2** to validate all settings loaded from `config/settings.yaml`. This provides:
 
-- **Строгу типізацію**: Всі параметри мають чіткі типи
-- **Автоматичну валідацію**: Неправильні значення виявляються при завантаженні
-- **Чіткі повідомлення про помилки**: Детальні описи проблем валідації
-- **Значення за замовчуванням**: Автоматичне застосування розумних дефолтів
-- **Валідацію діапазонів**: Перевірка, що значення знаходяться у допустимих межах
+- **Strict typing**: All parameters have explicit types
+- **Automatic validation**: Invalid values are detected during loading
+- **Clear error messages**: Detailed descriptions of validation issues
+- **Default values**: Automatic application of sensible defaults
+- **Range validation**: Ensures values are within allowed boundaries
 
 ## Architecture
 
 ### Components
 
-1. **`src/utils/config_schemas.py`**: Pydantic моделі для валідації
-2. **`src/utils/config_loader.py`**: Завантаження та валідація конфігурації
-3. **`config/settings.yaml`**: Файл конфігурації
+1. **`src/utils/config_schemas.py`**: Pydantic models for validation
+2. **`src/utils/config_loader.py`**: Configuration loading and validation
+3. **`config/settings.yaml`**: Configuration file
 
 ### Flow
 
@@ -286,23 +286,23 @@ pytest tests/unit_test/utils_test/test_config_loader_validation.py -v
 
 ### 1. Early Error Detection
 
-Проблеми конфігурації виявляються при запуску, а не під час роботи системи.
+Configuration issues are detected at startup, not during runtime.
 
 ### 2. Type Safety
 
-Pydantic забезпечує строгу типізацію, що допомагає IDE та mypy.
+Pydantic provides strict typing, helping IDEs and mypy.
 
 ### 3. Self-Documenting
 
-Моделі Pydantic служать як документація доступних параметрів.
+Pydantic models serve as documentation for available parameters.
 
 ### 4. Consistent Defaults
 
-Централізовані значення за замовчуванням у схемах Pydantic.
+Centralized default values in Pydantic schemas.
 
 ### 5. Better IDE Support
 
-Автодоповнення та перевірка типів у IDE.
+Autocomplete and type checking in IDEs.
 
 ## Best Practices
 
