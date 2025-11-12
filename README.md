@@ -15,8 +15,9 @@ A hybrid RAG (Retrieval-Augmented Generation) + MCP (Model Context Protocol) sys
 - **Server**: FastMCP-based MCP server providing tools and resources for LLM integration.
 - **Tools**: Query tool for document retrieval and response generation.
 - **Resources**: Health status and system context endpoints.
+- **Middleware**: Rate limiting, request queuing, structured logging, and performance metrics.
 
-The MCP server enables direct integration with IDEs and LLMs through the Model Context Protocol, allowing tools to query the RAG system for contextual information.
+The MCP server enables direct integration with IDEs and LLMs through the Model Context Protocol, allowing tools to query the RAG system for contextual information. The middleware layer ensures stable operation with automatic rate limiting (2 concurrent requests by default) and request queuing (10 requests maximum).
 
 ## Project Structure
 
@@ -185,10 +186,29 @@ Edit `config/settings.yaml`:
 ```yaml
 data_dir: "./data"
 index_dir: "./data/index"
-embedding_model: "..."
-chunk_size: 512
+embedding_model: "all-MiniLM-L6-v2"
+chunk_size: 1024
 vector_store: "faiss"
+
+# MCP server configuration
+mcp:
+  host: "127.0.0.1"
+  port: 25191
+  rate_limit:
+    max_concurrent: 2       # Maximum concurrent requests
+    queue_size: 10          # Maximum pending requests
+    default_timeout: 600.0  # Default timeout (seconds)
 ```
+
+### Key Configuration Sections
+
+- **Data paths**: Configure locations for raw data, processed data, and indexes
+- **Embedding**: Model selection, device (CPU/GPU), batch size, caching
+- **Chunking**: Adaptive chunking for different content types (code, tables, text)
+- **Retrieval**: Hybrid search (semantic + BM25), reranking, filtering
+- **MCP**: Server settings, rate limiting, timeouts, tool defaults
+- **OCR**: PaddleOCR configuration for image text extraction
+- **Boilerplate**: Aggressive removal of web artifacts and document noise
 
 ## Testing
 
