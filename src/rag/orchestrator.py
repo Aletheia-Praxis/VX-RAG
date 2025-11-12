@@ -16,8 +16,6 @@ from typing import Dict, Any, List, Optional
 from pathlib import Path
 import time
 
-from llama_index.core.schema import Document
-
 from .services.embedder_service.service import EmbeddingService
 from .services.vectordb_service.service import VectorStoreClient
 from .services.bm25_service.service import BM25Service
@@ -26,10 +24,7 @@ from .services.reranker_service.service import RerankerService
 from .services.assembler_service.service import ContextAssembler
 from .exceptions import (
     ServiceInitializationError,
-    IndexNotFoundError,
-    IndexLoadError,
     RetrievalError,
-    RerankingError,
 )
 
 from src.utils.logging_config import get_logger, log_service_health
