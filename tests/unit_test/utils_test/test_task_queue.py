@@ -23,7 +23,6 @@ def task_queue(tmp_path: Path) -> TaskQueue:
     """Create a task queue for testing."""
     state_file = tmp_path / "test_queue_state.json"
     queue = TaskQueue(
-        max_workers=2,
         max_concurrent_tasks=1,
         state_file=state_file,
         enable_persistence=False,  # Disable for faster tests
@@ -34,7 +33,6 @@ def task_queue(tmp_path: Path) -> TaskQueue:
 @pytest.mark.asyncio
 async def test_task_queue_initialization(task_queue: TaskQueue) -> None:
     """Test task queue initialization."""
-    assert task_queue.max_workers == 2
     assert task_queue.max_concurrent_tasks == 1
     assert not task_queue._running
 
@@ -222,10 +220,9 @@ async def test_queue_stats(task_queue: TaskQueue) -> None:
     await task_queue.submit_task("task2", dummy_task)
     await task_queue.submit_task("task3", dummy_task)
     
-    stats = await task_queue.get_queue_stats()
+    stats = task_queue.get_queue_stats()
     
     assert stats['total_tasks'] == 3
-    assert stats['max_workers'] == 2
     assert stats['max_concurrent_tasks'] == 1
     
     await task_queue.stop()
