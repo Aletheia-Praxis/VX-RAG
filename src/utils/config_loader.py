@@ -440,6 +440,7 @@ def get_data_directories(config_path: Optional[str] = None) -> Dict[str, str]:
         - raw_data_dir: Raw data directory
         - processed_data_dir: Processed data directory
         - index_dir: Index directory
+        - snapshots_dir: Snapshots directory
     """
     config = load_settings(config_path)
     
@@ -447,7 +448,8 @@ def get_data_directories(config_path: Optional[str] = None) -> Dict[str, str]:
         'data_dir': config.get('data_dir', './data'),
         'raw_data_dir': config.get('raw_data_dir', './data/raw'),
         'processed_data_dir': config.get('processed_data_dir', './data/processed'),
-        'index_dir': config.get('index_dir', './data/index')
+        'index_dir': config.get('index_dir', './data/index'),
+        'snapshots_dir': config.get('snapshots_dir', './data/snapshots')
     }
     
     logger.info(f"Loaded data directories: index_dir={data_dirs['index_dir']}")
