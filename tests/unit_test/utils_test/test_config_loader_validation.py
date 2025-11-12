@@ -5,10 +5,8 @@ Tests the config_loader module's ability to load and validate configuration.
 """
 
 import pytest
-import tempfile
 import yaml
 from pathlib import Path
-from typing import Dict, Any
 
 from src.utils.config_loader import load_settings, get_validated_settings
 from src.utils.config_schemas import VXRAGSettings

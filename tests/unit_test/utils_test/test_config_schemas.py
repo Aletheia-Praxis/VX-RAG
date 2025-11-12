@@ -12,9 +12,7 @@ from src.utils.config_schemas import (
     EmbeddingConfig,
     ChunkingConfig,
     AdaptiveChunkingProfile,
-    AdaptiveChunkingConfig,
     FAISSConfig,
-    BM25Config,
     RetrieverConfig,
     RerankerConfig,
     ContextAssemblerConfig,
@@ -22,7 +20,6 @@ from src.utils.config_schemas import (
     RateLimitConfig,
     DuplicateDetectionConfig,
     PaddleOCRConfig,
-    BoilerplateRemovalConfig,
 )
 
 
