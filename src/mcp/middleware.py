@@ -202,7 +202,7 @@ def with_metrics(metric_prefix: str) -> Callable[[Callable[..., Any]], Callable[
                 
                 return result
                 
-            except Exception as e:
+            except Exception:
                 duration = time.time() - start_time
                 
                 # Record failed execution
