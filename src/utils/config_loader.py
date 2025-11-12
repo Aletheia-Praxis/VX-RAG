@@ -1,7 +1,7 @@
 """
 Global configuration loader for VX-RAG.
 
-Provides utilities to load configuration from settings.yaml.
+Provides utilities to load configuration from settings.yaml with Pydantic validation.
 This centralizes all configuration loading to avoid hardcoded values throughout the codebase.
 """
 
@@ -9,24 +9,32 @@ import yaml
 import logging
 from pathlib import Path
 from typing import Dict, Any, Optional
+from pydantic import ValidationError
+
+from .config_schemas import VXRAGSettings
 
 logger = logging.getLogger(__name__)
+
+# Global validated settings instance
+_validated_settings: Optional[VXRAGSettings] = None
 
 
 def load_settings(config_path: Optional[str] = None) -> Dict[str, Any]:
     """
-    Load complete settings.yaml configuration.
+    Load and validate complete settings.yaml configuration using Pydantic.
     
     Args:
         config_path: Path to settings.yaml file. If None, uses default location.
         
     Returns:
-        Dictionary with complete configuration from settings.yaml
+        Dictionary with complete validated configuration from settings.yaml
         
     Raises:
         FileNotFoundError: If config file not found
-        ValueError: If config is invalid
+        ValueError: If config is invalid or fails validation
     """
+    global _validated_settings
+    
     config_file_path: Path
     if config_path is None:
         # Default path relative to project root
@@ -50,8 +58,36 @@ def load_settings(config_path: Optional[str] = None) -> Dict[str, Any]:
         logger.error("Config root must be a dictionary")
         raise ValueError("Invalid configuration: root must be a dictionary")
     
-    logger.info(f"Loaded configuration from {config_file_path}")
-    return config
+    # Validate configuration using Pydantic
+    try:
+        _validated_settings = VXRAGSettings(**config)
+        logger.info(f"Configuration validated successfully from {config_file_path}")
+        return _validated_settings.model_dump()
+    except ValidationError as e:
+        logger.error(f"Configuration validation failed: {e}")
+        raise ValueError(f"Configuration validation errors:\n{e}")
+
+
+def get_validated_settings() -> VXRAGSettings:
+    """
+    Get the current validated settings instance.
+    
+    Returns:
+        Validated VXRAGSettings instance
+        
+    Raises:
+        RuntimeError: If settings have not been loaded yet
+    """
+    global _validated_settings
+    
+    if _validated_settings is None:
+        # Auto-load settings on first access
+        load_settings()
+    
+    if _validated_settings is None:
+        raise RuntimeError("Settings not loaded. Call load_settings() first.")
+    
+    return _validated_settings
 
 
 def load_chunking_config(config_path: Optional[str] = None) -> Dict[str, Any]:
