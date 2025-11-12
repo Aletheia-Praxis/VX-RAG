@@ -198,6 +198,7 @@ class DataDirectoriesConfig(BaseModel):
     raw_data_dir: str = Field(default="./data/raw", description="Raw data directory")
     processed_data_dir: str = Field(default="./data/processed", description="Processed data directory")
     index_dir: str = Field(default="./data/index", description="Index directory")
+    snapshots_dir: str = Field(default="./data/snapshots", description="Snapshots directory")
 
 
 class LoggingConfig(BaseModel):
@@ -226,6 +227,7 @@ class VXRAGSettings(BaseModel):
     raw_data_dir: str = Field(default="./data/raw")
     processed_data_dir: str = Field(default="./data/processed")
     index_dir: str = Field(default="./data/index")
+    snapshots_dir: str = Field(default="./data/snapshots")
     
     # Embedding
     embedding_model: str = Field(default="all-MiniLM-L6-v2")
