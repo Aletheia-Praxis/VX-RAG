@@ -15,7 +15,6 @@ Administrative operations (ingestion, indexing, snapshots, tasks) are CLI-only.
 """
 
 import asyncio
-from typing import Any
 from fastmcp import FastMCP
 
 from .schemas import (
