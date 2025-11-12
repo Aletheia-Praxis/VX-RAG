@@ -12,14 +12,11 @@ from typing import Generator, Any
 
 import pytest
 
-# Add src and tests directory to path for imports
-project_root = Path(__file__).parent.parent
-tests_root = Path(__file__).parent
-sys.path.insert(0, str(project_root / "src"))
-sys.path.insert(0, str(tests_root))
-
-# Import test configuration utilities after path is set
 from config_test.test_logging import configure_test_logging, get_test_config_path
+
+# Add src directory to path for imports
+project_root = os.path.dirname(os.path.dirname(__file__))
+sys.path.insert(0, os.path.join(project_root, "src"))
 
 # Set environment variable to use test configuration
 os.environ["VX_RAG_TEST_MODE"] = "true"
@@ -37,10 +34,10 @@ def setup_test_environment() -> Generator[None, None, None]:
     - Prevents production log pollution
     """
     # Create test directories
-    test_logs_dir = project_root / "tests" / "test_logs"
+    test_logs_dir = Path(os.path.join(project_root, "tests", "test_logs"))
     test_logs_dir.mkdir(parents=True, exist_ok=True)
     
-    test_data_dir = project_root / "tests" / "test_data"
+    test_data_dir = Path(os.path.join(project_root, "tests", "test_data"))
     test_data_dir.mkdir(parents=True, exist_ok=True)
     
     # Configure root logger for tests using config_test module
