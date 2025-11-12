@@ -24,6 +24,13 @@ from .services.bm25_service.service import BM25Service
 from .services.retriever_service.service import RetrieverService
 from .services.reranker_service.service import RerankerService
 from .services.assembler_service.service import ContextAssembler
+from .exceptions import (
+    ServiceInitializationError,
+    IndexNotFoundError,
+    IndexLoadError,
+    RetrievalError,
+    RerankingError,
+)
 
 from src.utils.logging_config import get_logger, log_service_health
 from src.utils.metrics import get_metrics
@@ -169,14 +176,23 @@ class RAGOrchestrator:
             
             metrics.histogram("orchestrator_init_duration_ms", duration * 1000)
             
+        except (ImportError, ModuleNotFoundError) as e:
+            error_msg = f"Missing required dependency: {e}"
+            logger.error("Failed to initialize RAG services", error=error_msg, exc_info=True)
+            log_service_health("orchestrator", "error", error=error_msg)
+            raise ServiceInitializationError("orchestrator", error_msg) from e
+        
+        except (FileNotFoundError, IOError) as e:
+            error_msg = f"File system error: {e}"
+            logger.error("Failed to initialize RAG services", error=error_msg, exc_info=True)
+            log_service_health("orchestrator", "error", error=error_msg)
+            raise ServiceInitializationError("orchestrator", error_msg) from e
+        
         except Exception as e:
-            logger.error(
-                "Failed to initialize RAG services",
-                error=str(e),
-                exc_info=True
-            )
-            log_service_health("orchestrator", "error", error=str(e))
-            raise
+            error_msg = f"Unexpected error during initialization: {e}"
+            logger.error("Failed to initialize RAG services", error=error_msg, exc_info=True)
+            log_service_health("orchestrator", "error", error=error_msg)
+            raise ServiceInitializationError("orchestrator", error_msg) from e
 
     def query(
         self,
@@ -367,10 +383,24 @@ class RAGOrchestrator:
             
             return response
             
-        except Exception as e:
+        except ValueError as e:
+            # Query validation or parameter errors
             duration = time.time() - start_time
             logger.error(
-                "Query pipeline failed",
+                "Query pipeline failed: invalid parameters",
+                request_id=request_id,
+                query=query,
+                error=str(e),
+                duration_ms=duration * 1000
+            )
+            metrics.increment("orchestrator_query_errors_total")
+            raise RetrievalError(query, f"Invalid parameters: {e}") from e
+        
+        except (KeyError, AttributeError) as e:
+            # Missing data or attribute errors
+            duration = time.time() - start_time
+            logger.error(
+                "Query pipeline failed: data structure error",
                 request_id=request_id,
                 query=query,
                 error=str(e),
@@ -378,7 +408,21 @@ class RAGOrchestrator:
                 exc_info=True
             )
             metrics.increment("orchestrator_query_errors_total")
-            raise
+            raise RetrievalError(query, f"Data structure error: {e}") from e
+        
+        except Exception as e:
+            # Unexpected errors
+            duration = time.time() - start_time
+            logger.error(
+                "Query pipeline failed: unexpected error",
+                request_id=request_id,
+                query=query,
+                error=str(e),
+                duration_ms=duration * 1000,
+                exc_info=True
+            )
+            metrics.increment("orchestrator_query_errors_total")
+            raise RetrievalError(query, f"Unexpected error: {e}") from e
 
     def search_documents(
         self,
@@ -422,14 +466,13 @@ class RAGOrchestrator:
             
             return results
             
+        except ValueError as e:
+            logger.error("Document search failed: invalid parameters", query=query, error=str(e))
+            raise RetrievalError(query, f"Invalid parameters: {e}") from e
+        
         except Exception as e:
-            logger.error(
-                "Document search failed",
-                query=query,
-                error=str(e),
-                exc_info=True
-            )
-            raise
+            logger.error("Document search failed: unexpected error", query=query, error=str(e), exc_info=True)
+            raise RetrievalError(query, f"Search failed: {e}") from e
 
     def get_health_status(self) -> Dict[str, Any]:
         """
@@ -534,8 +577,16 @@ class RAGOrchestrator:
             logger.info("Index reload complete", success=self._indexes_loaded)
             return self._indexes_loaded
             
+        except FileNotFoundError as e:
+            logger.error("Index reload failed: index files not found", error=str(e))
+            return False
+        
+        except (IOError, OSError) as e:
+            logger.error("Index reload failed: file system error", error=str(e), exc_info=True)
+            return False
+        
         except Exception as e:
-            logger.error("Index reload failed", error=str(e), exc_info=True)
+            logger.error("Index reload failed: unexpected error", error=str(e), exc_info=True)
             return False
 
 
