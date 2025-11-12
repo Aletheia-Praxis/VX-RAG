@@ -49,6 +49,13 @@ class VectorStoreClient:
             raise ValueError("index_dir must be set")
         self.index_dir = Path(index_dir)
         
+        # Load snapshots_dir from config, or use default relative to index_dir
+        if 'snapshots_dir' in self.config:
+            snapshots_dir = self.config['snapshots_dir']
+        else:
+            snapshots_dir = str(self.index_dir.parent / "snapshots")
+        self.snapshots_dir = Path(snapshots_dir)
+        
         self.index: Optional[VectorStoreIndex] = None
         self.faiss_index: Optional[faiss.Index] = None  # Direct FAISS index access
         
@@ -398,7 +405,7 @@ class VectorStoreClient:
         try:
             timestamp = datetime.datetime.now().strftime("%Y-%m-%d-%H-%M-%S")
             snapshot_name = snapshot_name or f"snapshot_{timestamp}"
-            snapshot_dir = self.index_dir.parent / "snapshots" / snapshot_name
+            snapshot_dir = self.snapshots_dir / snapshot_name
             snapshot_dir.mkdir(parents=True, exist_ok=True)
             
             # Custom JSON encoder to handle non-serializable objects
@@ -489,7 +496,7 @@ class VectorStoreClient:
     def list_snapshots(self) -> List[str]:
         """List available snapshots."""
         try:
-            snapshots_dir = self.index_dir.parent / "snapshots"
+            snapshots_dir = self.snapshots_dir
             if not snapshots_dir.exists():
                 return []
             return [d.name for d in snapshots_dir.iterdir() if d.is_dir()]
@@ -500,7 +507,7 @@ class VectorStoreClient:
     def load_snapshot(self, snapshot_name: str) -> bool:
         """Load a snapshot as the current index."""
         try:
-            snapshots_dir = self.index_dir.parent / "snapshots"
+            snapshots_dir = self.snapshots_dir
             snapshot_dir = snapshots_dir / snapshot_name
             if not snapshot_dir.exists():
                 logger.error(f"Snapshot {snapshot_name} does not exist")
@@ -525,7 +532,7 @@ class VectorStoreClient:
             Dictionary with verification results
         """
         try:
-            snapshots_dir = self.index_dir.parent / "snapshots"
+            snapshots_dir = self.snapshots_dir
             snapshot_dir = snapshots_dir / snapshot_name
             manifest_path = snapshot_dir / "manifest.json"
             
