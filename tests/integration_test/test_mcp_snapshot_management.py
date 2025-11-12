@@ -12,11 +12,14 @@ import json
 import time
 from pathlib import Path
 
+import pytest
+
 from src.rag.services.embedder_service.service import EmbeddingService
 from src.rag.services.vectordb_service.service import VectorStoreClient
 from src.utils.task_queue import get_task_queue
 
 
+@pytest.mark.asyncio
 async def test_snapshot_management():
     """
     Test snapshot creation and verification directly via VectorStoreClient.
