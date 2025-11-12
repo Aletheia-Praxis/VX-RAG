@@ -5,9 +5,8 @@ This module defines Pydantic models for validating configuration loaded from set
 All configuration must pass validation before being used by the application.
 """
 
-from typing import Optional, List, Dict, Any, Literal
-from pathlib import Path
-from pydantic import BaseModel, Field, field_validator, model_validator
+from typing import Optional, List, Literal
+from pydantic import BaseModel, Field, model_validator
 
 
 class EmbeddingConfig(BaseModel):
