@@ -1,0 +1,112 @@
+# Docker Compose configuration for VX-RAG
+
+services:
+  # Production MCP Server (STDIO mode for IDE integration)
+  vx-rag-stdio:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: vx-rag-stdio
+    environment:
+      - PYTHONPATH=/app
+      - PYTHONUNBUFFERED=1
+    volumes:
+      - ./data:/app/data
+      - ./logs:/app/logs
+      - ./config:/app/config
+    profiles:
+      - stdio
+
+  # Development MCP Server (HTTP mode for testing)
+  vx-rag-http:
+    build:
+      context: .
+      dockerfile: Dockerfile.dev
+    container_name: vx-rag-http
+    environment:
+      - PYTHONPATH=/app
+      - PYTHONUNBUFFERED=1
+      - MCP_TRANSPORT=http
+      - MCP_PORT=8000
+      - CONFIG_PATH=./config/settings.yaml
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./data:/app/data
+      - ./logs:/app/logs
+      - ./config:/app/config
+    profiles:
+      - http
+
+  # Development MCP Server (SSE mode for browser/web clients)
+  vx-rag-sse:
+    build:
+      context: .
+      dockerfile: Dockerfile.dev
+    container_name: vx-rag-sse
+    environment:
+      - PYTHONPATH=/app
+      - PYTHONUNBUFFERED=1
+      - MCP_TRANSPORT=sse
+      - MCP_PORT=8000
+      - CONFIG_PATH=./config/settings.yaml
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./data:/app/data
+      - ./logs:/app/logs
+      - ./config:/app/config
+    profiles:
+      - sse
+
+  # Development shell (for running CLI commands)
+  vx-rag-dev:
+    build:
+      context: .
+      dockerfile: Dockerfile.dev
+    container_name: vx-rag-dev
+    environment:
+      - PYTHONPATH=/app
+      - PYTHONUNBUFFERED=1
+    volumes:
+      - ./data:/app/data
+      - ./logs:/app/logs
+      - ./config:/app/config
+      - ./src:/app/src  # Mount source for live editing
+    command: /bin/bash
+    stdin_open: true
+    tty: true
+    profiles:
+      - dev
+
+volumes:
+  # Named volumes for persistent data
+  vx-rag-data:
+    driver: local
+  vx-rag-logs:
+    driver: local
+
+# Usage examples:
+# 
+# Build all images:
+#   docker compose build
+#
+# Start MCP server in HTTP mode:
+#   docker compose --profile http up
+#
+# Start MCP server in SSE mode:
+#   docker compose --profile sse up
+#
+# Start development shell:
+#   docker compose --profile dev up
+#
+# Run CLI commands:
+#   docker compose --profile dev run --rm vx-rag-dev python -m src.cli ingest
+#   docker compose --profile dev run --rm vx-rag-dev python -m src.cli index
+#   docker compose --profile dev run --rm vx-rag-dev python -m src.cli query "malware analysis"
+#
+# Stop all services:
+#   docker compose down
+#
+# Clean up volumes:
+#   docker compose down -v
