@@ -221,7 +221,39 @@ pytest tests/
 ## Requirements
 
 - Python 3.13+
-- Disk space: ~10GB for index (depending on corpus size)
+
+## Docker Deployment
+
+VX-RAG supports deployment via Docker for various usage scenarios.
+
+### Quick Start
+
+```bash
+# Build production image
+docker build -t vx-rag .
+
+# Run MCP server (STDIO mode - default)
+docker run -it \
+   -v $(pwd)/data:/app/data \
+   -v $(pwd)/logs:/app/logs \
+   vx-rag
+
+# Run in HTTP mode for testing
+docker compose --profile http up
+```
+
+### Available Modes
+
+- **STDIO** (default): IDE integration via MCP client
+- **HTTP**: REST API for testing (port 8000)
+- **SSE**: Server-Sent Events for web clients
+
+### Ports
+
+- **25191**: Standard MCP server port
+- **8000**: HTTP/SSE modes for development
+
+More details: [docs/DOCKER_DEPLOYMENT.md](docs/DOCKER_DEPLOYMENT.md)
 
 ## License
 
