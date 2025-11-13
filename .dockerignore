@@ -1,0 +1,141 @@
+# Git files
+.git
+.gitignore
+.gitattributes
+
+# Python cache
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# Virtual environments
+venv/
+ENV/
+env/
+.venv
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+.hypothesis/
+
+# Documentation
+docs/
+*.md
+!README.md
+
+# Development files
+.env
+.env.*
+.env.local
+.env.*.local
+*.log
+logs/
+test_logs/
+
+# Security: Secrets and credentials
+*.pem
+*.key
+*.crt
+*.p12
+*.pfx
+id_rsa
+id_rsa.pub
+*.pub
+secrets/
+credentials/
+*.token
+*.secret
+
+# Data directories (will be mounted as volumes)
+data/raw/
+data/processed/
+data/index/
+data/snapshots/
+
+# Scripts
+scripts/
+
+# CI/CD
+.github/
+.gitlab-ci.yml
+
+# Docker
+docker-compose*.yml
+Dockerfile*
+.dockerignore
+
+# Notebooks
+*.ipynb
+.ipynb_checkpoints/
+
+# Archives
+*.7z
+*.7z.*
+*.zip
+*.tar.gz
+*.rar
+
+# Temporary files
+tmp/
+temp/
+*.tmp
+*.bak
+*.swp
+*~
+
+# OS files
+Thumbs.db
+.DS_Store
+desktop.ini
+
+# Large binary files
+bin/
+chromedriver/
+
+# Configuration for checks (not needed in container)
+config/for_checks/
+
+# Test data
+tests/test_data/
+tests/test_logs/
+
+# Mypy cache
+.mypy_cache/
+.dmypy.json
+dmypy.json
+
+# Ruff cache
+.ruff_cache/
+
+# Index files at root level (test/dev artifacts)
+*_pdf_index.json
+Recording_*.json
