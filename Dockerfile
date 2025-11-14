@@ -8,7 +8,7 @@ WORKDIR /app
 # Install system dependencies for building
 # Security: Update packages and install only necessary tools
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    build-essential=12.9 \
+    build-essential=12.12 \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
