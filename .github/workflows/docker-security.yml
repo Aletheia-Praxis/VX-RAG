@@ -1,0 +1,150 @@
+name: Docker Security Scan
+
+on:
+  push:
+    branches: [ main, develop-den ]
+    paths:
+      - 'Dockerfile'
+      - 'Dockerfile.dev'
+      - 'requirements.txt'
+      - '.github/workflows/docker-security.yml'
+  pull_request:
+    branches: [ main, develop ]
+    paths:
+      - 'Dockerfile'
+      - 'Dockerfile.dev'
+      - 'requirements.txt'
+  schedule:
+    # Run weekly on Mondays at 00:00 UTC
+    - cron: '0 0 * * 1'
+  workflow_dispatch:
+
+jobs:
+  trivy-scan:
+    name: Trivy Security Scan
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
+      actions: read
+    
+    strategy:
+      matrix:
+        dockerfile: ['Dockerfile', 'Dockerfile.dev']
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+      
+      - name: Build Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ./${{ matrix.dockerfile }}
+          push: false
+          load: true
+          tags: vx-rag:${{ matrix.dockerfile }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+      
+      - name: Run Trivy vulnerability scanner
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: vx-rag:${{ matrix.dockerfile }}
+          format: 'sarif'
+          output: 'trivy-results-${{ matrix.dockerfile }}.sarif'
+          severity: 'CRITICAL,HIGH'
+          vuln-type: 'os,library'
+          scanners: 'vuln,secret,config'
+      
+      - name: Upload Trivy results to GitHub Security
+        uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        with:
+          sarif_file: 'trivy-results-${{ matrix.dockerfile }}.sarif'
+          category: trivy-${{ matrix.dockerfile }}
+      
+      - name: Run Trivy in table format
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: vx-rag:${{ matrix.dockerfile }}
+          format: 'table'
+          severity: 'CRITICAL,HIGH'
+          exit-code: '1'
+          ignore-unfixed: true
+
+  dependency-check:
+    name: Python Dependencies Security Check
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      
+      - name: Install pip-audit
+        run: pip install pip-audit
+      
+      - name: Run pip-audit
+        run: |
+          pip-audit -r requirements.txt \
+            --format json \
+            --output pip-audit-results.json || true
+      
+      - name: Display pip-audit results
+        run: |
+          pip-audit -r requirements.txt \
+            --format markdown \
+            || echo "::warning::Vulnerabilities found in dependencies"
+      
+      - name: Upload pip-audit results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: pip-audit-results
+          path: pip-audit-results.json
+
+  hadolint:
+    name: Dockerfile Linting
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Run hadolint on Dockerfile
+        uses: hadolint/hadolint-action@v3.1.0
+        with:
+          dockerfile: Dockerfile
+          failure-threshold: warning
+      
+      - name: Run hadolint on Dockerfile.dev
+        uses: hadolint/hadolint-action@v3.1.0
+        with:
+          dockerfile: Dockerfile.dev
+          failure-threshold: warning
+
+  summary:
+    name: Security Scan Summary
+    runs-on: ubuntu-latest
+    needs: [trivy-scan, dependency-check, hadolint]
+    if: always()
+    
+    steps:
+      - name: Create summary
+        run: |
+          echo "## Docker Security Scan Results" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Scans Completed:" >> $GITHUB_STEP_SUMMARY
+          echo "- Trivy vulnerability scanning" >> $GITHUB_STEP_SUMMARY
+          echo "- Python dependency checking (pip-audit)" >> $GITHUB_STEP_SUMMARY
+          echo "- Dockerfile linting (hadolint)" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "Check the Security tab for detailed vulnerability reports." >> $GITHUB_STEP_SUMMARY
