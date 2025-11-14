@@ -1,6 +1,6 @@
 # Dockerfile for VX-RAG
 # Security: Use specific version to ensure reproducible builds
-FROM python:3.13.9-slim AS builder
+FROM python:3.13.1-slim AS builder
 
 # Set working directory for builder
 WORKDIR /app
@@ -8,7 +8,7 @@ WORKDIR /app
 # Install system dependencies for building
 # Security: Update packages and install only necessary tools
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    build-essential=12.12 \
+    build-essential \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
@@ -18,7 +18,7 @@ RUN pip install --no-cache-dir --prefix=/install -r requirements.txt
 
 # Final stage
 # Security: Use same specific version as builder
-FROM python:3.13.9-slim
+FROM python:3.13.1-slim
 
 # Copy installed packages from builder
 COPY --from=builder /install /usr/local
