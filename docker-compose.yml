@@ -14,8 +14,15 @@ services:
       - ./data:/app/data
       - ./logs:/app/logs
       - ./config:/app/config
+    networks:
+      - vx-rag-internal
     profiles:
       - stdio
+    # Security: Drop unnecessary capabilities
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
 
   # Development MCP Server (HTTP mode for testing)
   vx-rag-http:
@@ -35,8 +42,24 @@ services:
       - ./data:/app/data
       - ./logs:/app/logs
       - ./config:/app/config
+    networks:
+      - vx-rag-public
     profiles:
       - http
+    # Security: Drop unnecessary capabilities
+    cap_drop:
+      - ALL
+    cap_add:
+      - NET_BIND_SERVICE
+    security_opt:
+      - no-new-privileges:true
+    # Health check: Verify HTTP endpoint is responding
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health').read()"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
 
   # Development MCP Server (SSE mode for browser/web clients)
   vx-rag-sse:
@@ -56,8 +79,24 @@ services:
       - ./data:/app/data
       - ./logs:/app/logs
       - ./config:/app/config
+    networks:
+      - vx-rag-public
     profiles:
       - sse
+    # Security: Drop unnecessary capabilities
+    cap_drop:
+      - ALL
+    cap_add:
+      - NET_BIND_SERVICE
+    security_opt:
+      - no-new-privileges:true
+    # Health check: Verify SSE endpoint is responding
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health').read()"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
 
   # Development shell (for running CLI commands)
   vx-rag-dev:
@@ -76,8 +115,15 @@ services:
     command: /bin/bash
     stdin_open: true
     tty: true
+    networks:
+      - vx-rag-internal
     profiles:
       - dev
+    # Security: Drop unnecessary capabilities
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
 
 volumes:
   # Named volumes for persistent data
@@ -85,6 +131,25 @@ volumes:
     driver: local
   vx-rag-logs:
     driver: local
+
+networks:
+  # Internal network - no external access (for STDIO/dev)
+  vx-rag-internal:
+    driver: bridge
+    internal: true
+    ipam:
+      driver: default
+      config:
+        - subnet: 172.28.0.0/16
+  
+  # Public network - external access allowed (for HTTP/SSE)
+  vx-rag-public:
+    driver: bridge
+    internal: false
+    ipam:
+      driver: default
+      config:
+        - subnet: 172.29.0.0/16
 
 # Usage examples:
 # 
