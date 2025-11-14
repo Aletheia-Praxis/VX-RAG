@@ -8,7 +8,7 @@ WORKDIR /app
 # Install system dependencies for building
 # Security: Update packages and install only necessary tools
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    build-essential=12.10 \
+    build-essential=12.9 \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
@@ -49,8 +49,10 @@ ENV PYTHONPATH=/app \
     PYTHONDONTWRITEBYTECODE=1
 
 # Security: Add health check for container monitoring
+# Note: For STDIO mode, we check if Python process is responsive
+# For HTTP/SSE modes, override this healthcheck in docker-compose.yml
 HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
-  CMD python -c "import sys; sys.exit(0)" || exit 1
+  CMD python -c "from src.utils.logging_config import get_logger; logger = get_logger('healthcheck'); logger.info('Health check OK'); import sys; sys.exit(0)" || exit 1
 
 # Run the MCP server via CLI (default: stdio mode for IDE integration)
 # Security: Using exec form to avoid shell injection
