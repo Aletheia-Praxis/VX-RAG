@@ -7,6 +7,7 @@ WORKDIR /app
 
 # Install system dependencies for building
 # Security: Update packages and install only necessary tools
+# hadolint ignore=DL3008
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     && apt-get clean \
