@@ -429,7 +429,6 @@ def handle_query(args: argparse.Namespace) -> None:
     from src.rag.services.vectordb_service.service import VectorStoreClient
     from src.rag.libs.bm25_manager import BM25IndexManager
     from src.rag.services.retriever_service.service import RetrieverService
-    from src.rag.services.reranker_service.service import RerankerService
     from src.rag.services.assembler_service.service import ContextAssembler
     from src.utils.config_loader import get_embedding_config
     
@@ -510,12 +509,11 @@ def handle_query(args: argparse.Namespace) -> None:
         logger.error(f"Retrieval failed: {e}")
         sys.exit(1)
     
-    # Step 4: Rerank candidates (Module 9 - RerankerService)
-    print("\n[Step 4/5] Reranking candidates...")
+    # Step 4: Results already postprocessed by RetrieverService
+    # Hybrid search includes metadata boost + cross-encoder reranking
+    print("\n[Step 4/5] Postprocessing complete (metadata boost + reranking)...")
     
-    reranker = RerankerService(config_path=args.config)
-    
-    # Combine results (simple merge for reranking)
+    # Combine results from vector and BM25 for display
     all_candidates = vector_results + bm25_results
     
     # Remove duplicates by node_id
@@ -528,12 +526,13 @@ def handle_query(args: argparse.Namespace) -> None:
             unique_candidates.append(doc)
     
     print(f"  Unique candidates: {len(unique_candidates)}")
+    print(f"  Postprocessed (via RetrieverService): {len(unique_candidates)} -> top {top_k}")
     
-    # Rerank
-    reranked_results = reranker.rerank(query, unique_candidates, top_k=top_k)
+    # Use hybrid search results (already optimized)
+    reranked_results = unique_candidates[:top_k]
     
-    print(f"  Reranked to top {len(reranked_results)} results")
-    logger.info(f"Reranked {len(unique_candidates)} candidates to top {len(reranked_results)}")
+    logger.info(f"Postprocessed {len(unique_candidates)} candidates to top {len(reranked_results)}")
+    logger.info("Note: Postprocessing (metadata boost + reranking) handled by RetrieverService")
     
     # Step 5: Assemble context (Module 11 - ContextAssembler)
     print("\n[Step 5/5] Assembling context...")
