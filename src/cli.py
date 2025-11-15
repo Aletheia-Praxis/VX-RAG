@@ -282,9 +282,10 @@ def handle_index(args: argparse.Namespace) -> None:
     """Handle index command - create embeddings and build FAISS + BM25 indexes."""
     import json
     from llama_index.core.schema import Document
-    from src.rag.services.embedder_service.service import EmbeddingService
+    from llama_index.embeddings.huggingface import HuggingFaceEmbedding
     from src.rag.services.vectordb_service.service import VectorStoreClient
-    from src.rag.services.bm25_service.service import BM25Service
+    from src.rag.libs.bm25_manager import BM25IndexManager
+    from src.utils.config_loader import get_embedding_config
     
     start_time = time.time()
     data_dir = Path(args.data_dir)
@@ -310,16 +311,21 @@ def handle_index(args: argparse.Namespace) -> None:
     print(f"  Loaded chunks: {len(chunks)}")
     logger.info(f"Loaded {len(chunks)} chunks from {chunks_file}")
     
-    # Step 2: Generate embeddings (Module 5 - EmbedderService)
+    # Step 2: Generate embeddings (using HuggingFaceEmbedding)
     print("\n[Step 2/4] Generating embeddings...")
     
-    embedder = EmbeddingService(config_path=args.config)
+    embed_config = get_embedding_config(args.config)
+    embed_model = HuggingFaceEmbedding(
+        model_name=embed_config['embedding_model'],
+        embed_batch_size=embed_config['embedding_batch_size'],
+        trust_remote_code=embed_config['embedding_trust_remote_code']
+    )
     
     # Extract text from chunks
     chunk_texts = [chunk.get('text', '') for chunk in chunks]
     
     print(f"  Embedding {len(chunk_texts)} chunks...")
-    embeddings_list = embedder.embed_batch(chunk_texts)
+    embeddings_list = embed_model.get_text_embedding_batch(chunk_texts)
     
     embedding_dim = len(embeddings_list[0]) if embeddings_list else 0
     print(f"  Generated embeddings: {len(embeddings_list)}")
@@ -348,7 +354,7 @@ def handle_index(args: argparse.Namespace) -> None:
     # Build FAISS index
     vector_client.build_index(
         documents=documents,
-        embed_model=embedder.embed_model
+        embed_model=embed_model
     )
     
     # Save FAISS index
@@ -359,18 +365,15 @@ def handle_index(args: argparse.Namespace) -> None:
     print(f"  Saved to: {faiss_index_path}")
     logger.info(f"Built and saved FAISS index to {faiss_index_path}")
     
-    # Step 4: Build BM25 index (Module 7 - BM25Service)
+    # Step 4: Build BM25 index (Module 7 - BM25IndexManager)
     print("\n[Step 4/4] Building BM25 index...")
     
-    # Initialize BM25Service with persist directory
+    # Initialize BM25IndexManager with persist directory
     bm25_index_path = persist_dir / "bm25_index"
-    bm25_service = BM25Service(index_dir=str(bm25_index_path), config_path=args.config)
+    bm25_manager = BM25IndexManager(index_dir=str(bm25_index_path), config_path=args.config)
     
-    # Build BM25 index with documents
-    bm25_service.build_index(documents)
-    
-    # Save BM25 index
-    bm25_service.save_index()
+    # Build and persist BM25 index (uses native BM25Retriever.persist())
+    bm25_manager.build_and_persist(documents)
     
     print(f"  BM25 index built: {len(documents)} documents")
     print(f"  Saved to: {bm25_index_path}")
@@ -422,12 +425,13 @@ def handle_index(args: argparse.Namespace) -> None:
 def handle_query(args: argparse.Namespace) -> None:
     """Handle query command - search documents using hybrid retrieval + reranking."""
     import json
-    from src.rag.services.embedder_service.service import EmbeddingService
+    from llama_index.embeddings.huggingface import HuggingFaceEmbedding
     from src.rag.services.vectordb_service.service import VectorStoreClient
-    from src.rag.services.bm25_service.service import BM25Service
+    from src.rag.libs.bm25_manager import BM25IndexManager
     from src.rag.services.retriever_service.service import RetrieverService
     from src.rag.services.reranker_service.service import RerankerService
     from src.rag.services.assembler_service.service import ContextAssembler
+    from src.utils.config_loader import get_embedding_config
     
     start_time = time.time()
     persist_dir = Path(args.persist_dir)
@@ -453,16 +457,21 @@ def handle_query(args: argparse.Namespace) -> None:
     print("[Step 1/5] Loading indexes...")
     
     # Load FAISS index
-    embedder = EmbeddingService(config_path=args.config)
+    embed_config = get_embedding_config(args.config)
+    embed_model = HuggingFaceEmbedding(
+        model_name=embed_config['embedding_model'],
+        embed_batch_size=embed_config['embedding_batch_size'],
+        trust_remote_code=embed_config['embedding_trust_remote_code']
+    )
     vector_client = VectorStoreClient(store_type="faiss", config={'index_dir': str(faiss_index_path)})
-    vector_client.load_index(embed_model=embedder.embed_model)
+    vector_client.load_index(embed_model=embed_model)
     
     print(f"  FAISS index loaded from: {faiss_index_path}")
     logger.info(f"Loaded FAISS index from {faiss_index_path}")
     
-    # Load BM25 index
-    bm25_service = BM25Service(index_dir=str(bm25_index_path), config_path=args.config)
-    bm25_service.load_index()
+    # Load BM25 index (native persist)
+    bm25_manager = BM25IndexManager(index_dir=str(bm25_index_path), config_path=args.config)
+    bm25_retriever = bm25_manager.load()
     
     print(f"  BM25 index loaded from: {bm25_index_path}")
     logger.info(f"Loaded BM25 index from {bm25_index_path}")
@@ -473,7 +482,7 @@ def handle_query(args: argparse.Namespace) -> None:
     retriever = RetrieverService(index=vector_client.index, config_path=args.config)
     if vector_client.index:
         retriever.set_index(vector_client.index)
-        retriever.bm25_retriever = bm25_service.bm25_retriever
+        retriever.bm25_retriever = bm25_retriever
     else:
         print("  ERROR: Failed to load FAISS index")
         logger.error("FAISS index is None after loading")
@@ -580,12 +589,13 @@ def handle_query(args: argparse.Namespace) -> None:
 def handle_update_index(args: argparse.Namespace) -> None:
     """Handle update-index command - add new documents to existing index incrementally."""
     from llama_index.core.schema import Document
-    from src.rag.services.embedder_service.service import EmbeddingService
+    from llama_index.embeddings.huggingface import HuggingFaceEmbedding
     from src.rag.services.vectordb_service.service import VectorStoreClient
-    from src.rag.services.bm25_service.service import BM25Service
+    from src.rag.libs.bm25_manager import BM25IndexManager
     from src.rag.services.ingest_service.service import PDFIngestAdapter
     from src.rag.services.duplicate_detection_service.service import DuplicateDetector
     from src.rag.services.chunker_service.service import Chunker
+    from src.utils.config_loader import get_embedding_config
     
     start_time = time.time()
     persist_dir = Path(args.persist_dir)
@@ -645,7 +655,12 @@ def handle_update_index(args: argparse.Namespace) -> None:
     print("\n[Step 4/4] Updating indexes...")
     
     # Load embedder
-    embedder = EmbeddingService(config_path=args.config)
+    embed_config = get_embedding_config(args.config)
+    embed_model = HuggingFaceEmbedding(
+        model_name=embed_config['embedding_model'],
+        embed_batch_size=embed_config['embedding_batch_size'],
+        trust_remote_code=embed_config['embedding_trust_remote_code']
+    )
     
     # Convert chunks to Documents
     documents = []
@@ -659,10 +674,10 @@ def handle_update_index(args: argparse.Namespace) -> None:
     
     # Load and update FAISS index
     vector_client = VectorStoreClient(store_type="faiss", config={'index_dir': str(faiss_index_path)})
-    vector_client.load_index(embed_model=embedder.embed_model)
+    vector_client.load_index(embed_model=embed_model)
     
     if vector_client.index:
-        success = vector_client.add_documents_incremental(documents, embedder.embed_model)
+        success = vector_client.add_documents_incremental(documents, embed_model)
         if success:
             vector_client.save_index(create_backup=True)
             print(f"  FAISS index updated: +{len(documents)} documents")
@@ -671,12 +686,15 @@ def handle_update_index(args: argparse.Namespace) -> None:
             logger.error("Failed to update FAISS index")
     
     # Load and update BM25 index
-    bm25_service = BM25Service(index_dir=str(bm25_index_path), config_path=args.config)
-    bm25_service.load_index()
+    bm25_manager = BM25IndexManager(index_dir=str(bm25_index_path), config_path=args.config)
+    existing_retriever = bm25_manager.load()
     
-    # BM25 requires full rebuild (limitation of the current implementation)
-    print("  Note: BM25 index requires full rebuild for updates")
-    print("  Run 'index' command to rebuild BM25 with new documents")
+    if existing_retriever:
+        # BM25 requires full rebuild with new documents (limitation)
+        print("  Note: BM25 index requires full rebuild for updates")
+        print("  Run 'index' command to rebuild BM25 with all documents")
+    else:
+        print("  WARNING: BM25 index not loaded")
     
     # Summary
     duration = time.time() - start_time
@@ -703,7 +721,8 @@ def handle_update_index(args: argparse.Namespace) -> None:
 def handle_snapshot(args: argparse.Namespace) -> None:
     """Handle snapshot command - create versioned backup of indexes."""
     from src.rag.services.vectordb_service.service import VectorStoreClient
-    from src.rag.services.embedder_service.service import EmbeddingService
+    from llama_index.embeddings.huggingface import HuggingFaceEmbedding
+    from src.utils.config_loader import get_embedding_config
     
     start_time = time.time()
     persist_dir = Path(args.persist_dir)
@@ -722,12 +741,20 @@ def handle_snapshot(args: argparse.Namespace) -> None:
     print(f"{'='*60}\n")
     
     # Load embedder for model info
-    embedder = EmbeddingService(config_path=args.config)
-    embed_model_info = embedder.get_model_info()
+    embed_config = get_embedding_config(args.config)
+    embed_model = HuggingFaceEmbedding(
+        model_name=embed_config['embedding_model'],
+        embed_batch_size=embed_config['embedding_batch_size'],
+        trust_remote_code=embed_config['embedding_trust_remote_code']
+    )
+    embed_model_info = {
+        'model_name': embed_config['embedding_model'],
+        'embed_dim': embed_config.get('embedding_dim', 384)
+    }
     
     # Load vector store
     vector_client = VectorStoreClient(store_type="faiss", config={'index_dir': str(faiss_index_path)})
-    vector_client.load_index(embed_model=embedder.embed_model)
+    vector_client.load_index(embed_model=embed_model)
     
     if not vector_client.index:
         print("ERROR: Failed to load index")
