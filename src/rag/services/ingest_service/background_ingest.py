@@ -69,7 +69,8 @@ async def run_ingestion_pipeline(
     )
     from rag.services.duplicate_detection_service.service import DuplicateDetector
     from rag.services.chunker_service.service import Chunker
-    from rag.services.embedder_service.service import EmbeddingService
+    from llama_index.core import Settings
+    from llama_index.embeddings.huggingface import HuggingFaceEmbedding
     from rag.services.vectordb_service.service import VectorStoreClient
     from rag.services.retriever_service.service import RetrieverService
     from src.utils.config_loader import (
@@ -236,9 +237,13 @@ async def run_ingestion_pipeline(
         if progress_callback:
             await progress_callback(85, "Building vector index...")
         
-        # Initialize embedder
-        embedder = EmbeddingService(
-            model_name=get_embedding_model_name(config_path)
+        # Configure global embedding model
+        from src.utils.config_loader import get_embedding_config
+        embed_config = get_embedding_config(config_path)
+        Settings.embed_model = HuggingFaceEmbedding(
+            model_name=embed_config['embedding_model'],
+            embed_batch_size=embed_config['embedding_batch_size'],
+            trust_remote_code=embed_config['embedding_trust_remote_code']
         )
         
         # Initialize vector store
@@ -263,7 +268,7 @@ async def run_ingestion_pipeline(
         index = await asyncio.to_thread(
             vector_client.build_index,
             llama_docs,
-            embedder.embed_model
+            Settings.embed_model
         )
         
         if index:
@@ -271,7 +276,7 @@ async def run_ingestion_pipeline(
             await asyncio.to_thread(vector_client.save_index)
             
             # Create snapshot with metadata
-            embed_model_info = {"model_name": embedder.model_name}
+            embed_model_info = {"model_name": embed_config['embedding_model']}
             chunking_params = get_chunking_metadata()
             await asyncio.to_thread(
                 vector_client.create_snapshot,
