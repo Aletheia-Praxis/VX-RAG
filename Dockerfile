@@ -1,8 +1,8 @@
 # Dockerfile for VX-RAG
 # Security: Use specific version to ensure reproducible builds
-FROM python:3.13.1-slim AS builder
+FROM python:3.13.1-slim
 
-# Set working directory for builder
+# Set working directory
 WORKDIR /app
 
 # Install system dependencies for building
@@ -14,18 +14,12 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy requirements and install Python dependencies
+# Use --no-cache-dir and remove build artifacts after installation
 COPY requirements.txt .
-RUN pip install --no-cache-dir --prefix=/install -r requirements.txt
-
-# Final stage
-# Security: Use same specific version as builder
-FROM python:3.13.1-slim
-
-# Copy installed packages from builder
-COPY --from=builder /install /usr/local
-
-# Set working directory
-WORKDIR /app
+RUN pip install --no-cache-dir --upgrade pip && \
+    pip install --no-cache-dir -r requirements.txt && \
+    apt-get purge -y --auto-remove build-essential && \
+    rm -rf /root/.cache
 
 # Copy source code
 COPY src/ ./src/
@@ -33,10 +27,8 @@ COPY config/ ./config/
 
 # Security: Create non-root user with fixed UID/GID for predictability
 RUN groupadd -r -g 1000 appuser && \
-    useradd -r -u 1000 -g appuser -s /sbin/nologin appuser
-
-# Change ownership of the app directory
-RUN chown -R appuser:appuser /app
+    useradd -r -u 1000 -g appuser -s /sbin/nologin appuser && \
+    chown -R appuser:appuser /app
 
 # Security: Switch to non-root user (all processes run as appuser)
 USER appuser

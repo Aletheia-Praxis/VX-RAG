@@ -21,22 +21,21 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy requirements and install Python dependencies
+# Use --no-cache-dir and upgrade pip to reduce disk usage
 COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+RUN pip install --no-cache-dir --upgrade pip && \
+    pip install --no-cache-dir -r requirements.txt && \
+    rm -rf /root/.cache
 
 # Copy source code
 COPY src/ ./src/
 COPY config/ ./config/
 
-# Create directories for data
-RUN mkdir -p /app/data/raw /app/data/processed /app/data/index /app/data/snapshots /app/logs
-
-# Security: Create non-root user with fixed UID/GID
-RUN groupadd -r -g 1000 appuser && \
-    useradd -r -u 1000 -g appuser -s /bin/bash appuser
-
-# Change ownership of the app directory
-RUN chown -R appuser:appuser /app
+# Create directories for data and setup user in one layer
+RUN mkdir -p /app/data/raw /app/data/processed /app/data/index /app/data/snapshots /app/logs && \
+    groupadd -r -g 1000 appuser && \
+    useradd -r -u 1000 -g appuser -s /bin/bash appuser && \
+    chown -R appuser:appuser /app
 
 # Security: Switch to non-root user
 USER appuser
