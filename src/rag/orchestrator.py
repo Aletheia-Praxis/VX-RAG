@@ -6,10 +6,12 @@ It acts as the central orchestration layer between the MCP interface and individ
 RAG services, managing the complete document retrieval and query pipeline.
 
 Key responsibilities:
-- Coordinate retrieval pipeline (embedder -> retriever -> reranker -> assembler)
+- Coordinate retrieval pipeline (embedder -> retriever -> postprocessors -> assembler)
 - Manage service lifecycle and initialization
 - Provide health checks and system status
 - Handle errors and logging at the orchestration level
+
+Note: Reranking is now handled by native LlamaIndex postprocessors within RetrieverService.
 """
 
 from typing import Dict, Any, List, Optional
@@ -21,7 +23,6 @@ from llama_index.embeddings.huggingface import HuggingFaceEmbedding
 from .services.vectordb_service.service import VectorStoreClient
 from src.rag.libs.bm25_manager import BM25IndexManager
 from .services.retriever_service.service import RetrieverService
-from .services.reranker_service.service import RerankerService
 from .services.assembler_service.service import ContextAssembler
 from .exceptions import (
     ServiceInitializationError,
@@ -64,10 +65,10 @@ class RAGOrchestrator:
         
         # Service instances (lazy initialization)
         # Note: Embedding model is now managed via Settings.embed_model (global LlamaIndex config)
+        # Note: Reranking is now handled by RetrieverService postprocessors (no separate service)
         self._vector_store: Optional[VectorStoreClient] = None
         self._bm25_manager: Optional[BM25IndexManager] = None
         self._retriever: Optional[RetrieverService] = None
-        self._reranker: Optional[RerankerService] = None
         self._assembler: Optional[ContextAssembler] = None
         
         # Status flags
@@ -153,22 +154,20 @@ class RAGOrchestrator:
                 log_service_health("bm25_manager", "not_found")
             
             # Initialize retriever (requires loaded indexes)
+            # Note: Reranking now integrated as postprocessors in RetrieverService
             if self._indexes_loaded and self._vector_store.index:
                 self._retriever = RetrieverService(
                     index=self._vector_store.index,
                     config_path=self.config_path
                 )
-                # BM25 retriever is now managed by RetrieverService internally
-                logger.info("Retriever service initialized with hybrid search")
+                # BM25 retriever and reranking postprocessors managed internally
+                logger.info(
+                    "Retriever service initialized with hybrid search and postprocessors"
+                )
                 log_service_health("retriever", "initialized")
             else:
                 logger.error("Cannot initialize retriever: indexes not loaded")
                 log_service_health("retriever", "error", error="indexes_not_loaded")
-            
-            # Initialize reranker
-            self._reranker = RerankerService(config_path=self.config_path)
-            logger.info("Reranker service initialized")
-            log_service_health("reranker", "initialized")
             
             # Initialize context assembler
             self._assembler = ContextAssembler(config_path=self.config_path)
@@ -297,26 +296,15 @@ class RAGOrchestrator:
                 duration_ms=retrieve_duration * 1000
             )
             
-            # Step 2: Rerank candidates
-            rerank_start = time.time()
-            
-            if self._reranker and len(retrieved_docs) > top_k:
-                reranked_docs = self._reranker.rerank(
-                    query,
-                    retrieved_docs,
-                    top_k=top_k
-                )
-            else:
-                # No reranking needed or reranker unavailable
-                reranked_docs = retrieved_docs[:top_k]
-            
-            rerank_duration = time.time() - rerank_start
+            # Step 2: Results already reranked by RetrieverService postprocessors
+            # RetrieverService applies: metadata boost -> cross-encoder reranking
+            # So retrieved_docs are already in optimal order
+            reranked_docs = retrieved_docs[:top_k]
             
             logger.info(
-                "Reranking complete",
+                "Postprocessing complete (via RetrieverService)",
                 request_id=request_id,
-                results=len(reranked_docs),
-                duration_ms=rerank_duration * 1000
+                results=len(reranked_docs)
             )
             
             # Step 3: Assemble context
@@ -367,12 +355,12 @@ class RAGOrchestrator:
                 'sources_count': len(context_payload.context),
                 'retrieval_stats': {
                     'retrieve_duration_ms': round(retrieve_duration * 1000, 2),
-                    'rerank_duration_ms': round(rerank_duration * 1000, 2),
                     'assemble_duration_ms': round(assemble_duration * 1000, 2),
                     'total_duration_ms': round(total_duration * 1000, 2),
                     'candidates_retrieved': len(retrieved_docs),
-                    'results_reranked': len(reranked_docs),
-                    'search_type': search_type
+                    'results_postprocessed': len(reranked_docs),
+                    'search_type': search_type,
+                    'note': 'Postprocessing (metadata boost + reranking) included in retrieve_duration'
                 }
             }
             
@@ -388,7 +376,7 @@ class RAGOrchestrator:
             metrics.increment("orchestrator_queries_total")
             metrics.histogram("orchestrator_query_duration_ms", total_duration * 1000)
             metrics.histogram("orchestrator_retrieve_duration_ms", retrieve_duration * 1000)
-            metrics.histogram("orchestrator_rerank_duration_ms", rerank_duration * 1000)
+            # Note: reranking metrics now included in retrieve_duration
             metrics.gauge("orchestrator_results_count", len(context_payload.context))
             
             return response
@@ -529,9 +517,10 @@ class RAGOrchestrator:
                     'available': self._retriever is not None,
                     'status': 'healthy' if self._retriever else 'not_initialized'
                 },
-                'reranker': {
-                    'available': self._reranker is not None,
-                    'status': 'healthy' if self._reranker else 'not_initialized'
+                'postprocessors': {
+                    'available': self._retriever is not None,
+                    'status': 'integrated_in_retriever',
+                    'note': 'Metadata boost and reranking via RetrieverService postprocessors'
                 },
                 'assembler': {
                     'available': self._assembler is not None,
