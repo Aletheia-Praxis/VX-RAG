@@ -22,10 +22,10 @@ from src.utils.config_loader import get_retriever_config, get_bm25_config, get_r
 logger = get_logger("retriever_service")
 metrics = get_metrics()
 
-# Check BM25 service availability
-_bm25_available = importlib.util.find_spec("src.rag.services.bm25_service.service") is not None
+# Check BM25 manager availability
+_bm25_available = importlib.util.find_spec("src.rag.libs.bm25_manager") is not None
 if not _bm25_available:
-    logger.warning("BM25Service not available")
+    logger.warning("BM25IndexManager not available")
 
 class RetrieverService:
     """Service for retrieving documents from index."""
@@ -35,21 +35,21 @@ class RetrieverService:
         self.vector_retriever: Optional[BaseRetriever] = None
         self.bm25_retriever: Optional[BM25Retriever] = None
         self.hybrid_retriever: Optional[BaseRetriever] = None
-        self.bm25_service: Optional[Any] = None
+        self.bm25_manager: Optional[Any] = None
         self.reranker: Optional['CrossEncoder'] = None
         self.config_path = config_path
         self.config = get_retriever_config(config_path)
         self._initialize_services()
     
     def _initialize_services(self) -> None:
-        """Initialize BM25 service and reranker."""
-        # Initialize BM25 service if available
+        """Initialize BM25 manager and reranker."""
+        # Initialize BM25 manager if available
         if _bm25_available:
-            from ..bm25_service.service import BM25Service as BM25ServiceClass
+            from src.rag.libs.bm25_manager import BM25IndexManager
             bm25_config = get_bm25_config(self.config_path)
             index_dir = bm25_config['index_dir']
-            self.bm25_service = BM25ServiceClass(index_dir=index_dir)
-            logger.info("Initialized BM25 service")
+            self.bm25_manager = BM25IndexManager(index_dir=index_dir)
+            logger.info("Initialized BM25 manager")
         else:
             logger.warning("BM25 service not available")
         
@@ -90,13 +90,14 @@ class RetrieverService:
             similarity_top_k=semantic_top_k
         )
         
-        # Initialize BM25 retriever if service is available
-        if self.bm25_service and self.bm25_service.is_index_built():
+        # Initialize BM25 retriever if manager is available
+        if self.bm25_manager:
             try:
-                self.bm25_retriever = self.bm25_service.bm25_retriever
-                logger.info("BM25 retriever initialized from service")
+                self.bm25_retriever = self.bm25_manager.load()
+                if self.bm25_retriever:
+                    logger.info("BM25 retriever loaded from manager")
             except Exception as e:
-                logger.warning(f"Failed to initialize BM25 retriever: {e}")
+                logger.warning(f"Failed to load BM25 retriever: {e}")
         
         # Initialize hybrid retriever if both vector and BM25 are available
         if self.vector_retriever and self.bm25_retriever:
@@ -136,14 +137,17 @@ class RetrieverService:
                 self.hybrid_retriever = cast(Optional[QueryFusionRetriever], self.vector_retriever)
     
     def build_bm25_index(self, documents: List[Any]) -> None:
-        """Build BM25 index from documents."""
+        """Build BM25 index from documents.
+        
+        DEPRECATED: Use BM25IndexManager.build_and_persist() directly instead.
+        This method is kept for backward compatibility but will be removed.
+        """
         import time
         start_time = time.time()
         
-        if self.bm25_service:
+        if self.bm25_manager:
             try:
-                self.bm25_service.build_index(documents)
-                self.bm25_service.save_index()
+                self.bm25_manager.build_and_persist(documents)
                 # Re-initialize retrievers with new BM25
                 if self.index:
                     self.set_index(self.index)
@@ -161,7 +165,7 @@ class RetrieverService:
                            error=str(e), 
                            duration_ms=duration * 1000)
         else:
-            logger.warning("BM25 service not available")
+            logger.warning("BM25 manager not available")
     
     def retrieve(self, query: str, top_k: int = 5, filters: Optional[Dict[str, Any]] = None, search_type: str = "semantic") -> List[Dict[str, Any]]:
         """Retrieve top-k relevant documents for query.
