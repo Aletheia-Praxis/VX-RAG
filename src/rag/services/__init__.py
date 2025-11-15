@@ -4,10 +4,10 @@ Services for the RAG pipeline.
 Note: 
 - Embedding functionality is now provided via llama_index.core.Settings.embed_model
 - Hybrid search is now provided via llama_index.core.retrievers.QueryFusionRetriever
+- BM25 persistence is now provided via src.rag.libs.bm25_manager.BM25IndexManager
 """
 from . import (
     assembler_service,
-    bm25_service,
     chunker_service,
     duplicate_detection_service,
     ingest_service,
@@ -18,7 +18,6 @@ from . import (
 
 __all__ = [
     "assembler_service",
-    "bm25_service",
     "chunker_service",
     "duplicate_detection_service",
     "ingest_service",
