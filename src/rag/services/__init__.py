@@ -1,12 +1,13 @@
 """
 Services for the RAG pipeline.
+
+Note: Embedding functionality is now provided via llama_index.core.Settings.embed_model
 """
 from . import (
     assembler_service,
     bm25_service,
     chunker_service,
     duplicate_detection_service,
-    embedder_service,
     ingest_service,
     reranker_service,
     retriever_service,
@@ -19,7 +20,6 @@ __all__ = [
     "bm25_service",
     "chunker_service",
     "duplicate_detection_service",
-    "embedder_service",
     "ingest_service",
     "reranker_service",
     "retriever_service",
