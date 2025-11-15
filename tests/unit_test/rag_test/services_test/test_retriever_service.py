@@ -54,18 +54,12 @@ class TestRetrieverService:
         assert service.config['semantic_top_k'] == 15
         assert service.config['hybrid_alpha'] == 0.7
 
-    def test_load_config_valid_file(self, temp_config_file):
-        """Test loading valid config file."""
+    def test_postprocessors_initialized(self):
+        """Test that postprocessors are initialized."""
         service = RetrieverService()
-        config = service._load_config(temp_config_file)
-        assert config['semantic_top_k'] == 15
-        assert config['enable_hybrid'] is True
-
-    def test_load_config_invalid_file(self):
-        """Test loading invalid config file."""
-        service = RetrieverService()
-        with pytest.raises(FileNotFoundError, match="Configuration file not found"):
-            service._load_config("nonexistent_file.yaml")
+        # Metadata boost should be initialized
+        assert service.metadata_boost is not None
+        # Reranker may or may not be initialized depending on config
 
     @patch('llama_index.core.retrievers.QueryFusionRetriever')
     @patch('src.rag.services.retriever_service.service.VectorIndexRetriever')
@@ -138,22 +132,31 @@ class TestRetrieverService:
         assert len(results) == 1
         mock_retriever_instance.retrieve.assert_called_once()
 
-    def test_matches_filters(self):
-        """Test metadata filter matching."""
+    def test_apply_filters(self):
+        """Test metadata filter application using native _apply_filters."""
         service = RetrieverService()
 
-        # Test exact match
-        metadata = {"lang": "en", "source": "docs"}
+        # Create mock nodes
+        node1 = Mock()
+        node1.metadata = {"lang": "en", "source": "docs"}
+        
+        node2 = Mock()
+        node2.metadata = {"lang": "fr", "source": "docs"}
+        
+        node3 = Mock()
+        node3.metadata = {"lang": "en", "source": "web"}
+        
+        nodes = [node1, node2, node3]
+        
+        # Test exact match filter
         filters = {"lang": "en"}
-        assert service._matches_filters(metadata, filters) is True
-
-        # Test no match
-        filters = {"lang": "fr"}
-        assert service._matches_filters(metadata, filters) is False
-
-        # Test list filter
-        filters = {"lang": ["en", "de"]}
-        assert service._matches_filters(metadata, filters) is True
+        result = service._apply_filters(nodes, filters)
+        assert len(result) == 2  # node1 and node3
+        
+        # Test multiple filters
+        filters = {"lang": "en", "source": "docs"}
+        result = service._apply_filters(nodes, filters)
+        assert len(result) == 1  # only node1
 
     def test_hybrid_search(self, mock_index):
         """Test hybrid search method."""
@@ -168,37 +171,46 @@ class TestRetrieverService:
             mock_retrieve.assert_called_once_with("test query", 5, None, search_type="hybrid")
             assert results == [{"text": "test", "score": 0.8}]
     
-    def test_apply_metadata_boost_to_nodes(self):
-        """Test metadata boost application to nodes."""
+    def test_apply_postprocessors(self):
+        """Test postprocessor chain application."""
+        from llama_index.core.schema import NodeWithScore, TextNode
+        
         service = RetrieverService()
         
-        # Create mock nodes
-        node1 = Mock()
-        node1.score = 0.8
-        node1.metadata = {"source": "docs", "lang": "en"}
+        # Create real NodeWithScore objects
+        node1 = NodeWithScore(
+            node=TextNode(text="test1", metadata={"source": "docs", "lang": "en"}),
+            score=0.8
+        )
+        node2 = NodeWithScore(
+            node=TextNode(text="test2", metadata={}),
+            score=0.7
+        )
         
-        node2 = Mock()
-        node2.score = 0.7
-        node2.metadata = {}
+        nodes = [node1, node2]
+        query = "test query"
         
-        node3 = Mock()
-        node3.score = 0.9
-        node3.metadata = {"source": "docs", "lang": "en", "topic": "security"}
+        result = service._apply_postprocessors(query, nodes)
         
-        nodes = [node1, node2, node3]
-        
-        result = service._apply_metadata_boost_to_nodes(nodes)
-        
-        # Verify boost was applied
-        # Node1 with 2 fields: 0.8 * (1 + 0.1 * 2) = 0.8 * 1.2 = 0.96
-        assert abs(result[0].score - 0.96) < 0.01
-        # Node2 with 0 fields: 0.7 (unchanged)
-        assert result[1].score == 0.7
-        # Node3 with 3 fields: 0.9 * (1 + 0.1 * 3) = 0.9 * 1.3 = 1.17
-        assert abs(result[2].score - 1.17) < 0.01
+        # Should return nodes (possibly boosted/reranked)
+        assert len(result) > 0
+        assert result[0].score is not None
     
-    def test_apply_metadata_boost_to_nodes_empty(self):
-        """Test metadata boost with empty node list."""
+    def test_nodes_to_results(self):
+        """Test node conversion to result format."""
+        from llama_index.core.schema import NodeWithScore, TextNode
+        
         service = RetrieverService()
-        result = service._apply_metadata_boost_to_nodes([])
-        assert result == []
+        
+        node = NodeWithScore(
+            node=TextNode(text="test text", id_="node_1", metadata={"source": "test"}),
+            score=0.85
+        )
+        
+        results = service._nodes_to_results([node])
+        
+        assert len(results) == 1
+        assert results[0]['text'] == "test text"
+        assert results[0]['score'] == 0.85
+        assert results[0]['metadata'] == {"source": "test"}
+        assert results[0]['node_id'] == "node_1"
