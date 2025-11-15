@@ -22,6 +22,9 @@ import re
 if TYPE_CHECKING:
     pass
 
+from llama_index.core import Document as LlamaDocument
+from llama_index.readers.file import FlatReader, MarkdownReader
+
 from docling.document_converter import DocumentConverter
 from docling.datamodel.pipeline_options import PdfPipelineOptions
 from docling.datamodel.base_models import InputFormat
@@ -44,15 +47,8 @@ except ImportError:
 
 logger = logging.getLogger(__name__)
 
-class IngestAdapter:
-    """Base class for ingest adapters."""
-    
-    def load_data(self, source: str) -> List[Dict[str, Any]]:
-        """Load data from source and return unified format."""
-        raise NotImplementedError
 
-
-class PDFIngestAdapter(IngestAdapter):
+class PDFIngestAdapter:
     """Adapter for loading PDF documents using Docling for local parsing."""
     
     def __init__(self, config_path: Optional[str] = None) -> None:
@@ -355,23 +351,23 @@ class PDFIngestAdapter(IngestAdapter):
             return []
 
 
-class TXTIngestAdapter(IngestAdapter):
-    """Adapter for loading TXT documents."""
+class TXTIngestAdapter:
+    """Adapter for loading TXT documents using LlamaIndex FlatReader."""
     
     def __init__(self, config_path: Optional[str] = None) -> None:
         """
-        Initialize TXT adapter.
+        Initialize TXT adapter with LlamaIndex FlatReader.
         
         Args:
             config_path: Path to settings.yaml file
         """
-        # Load boilerplate removal configuration
+        self.reader = FlatReader()
         self.boilerplate_config = get_boilerplate_removal_config(config_path)
         self.boilerplate_enabled = self.boilerplate_config['enabled']
     
     def load_data(self, source: str) -> List[Dict[str, Any]]:
         """
-        Load TXT documents from the specified directory.
+        Load TXT documents using LlamaIndex FlatReader.
         
         Args:
             source: Path to the directory containing TXT files
@@ -397,8 +393,15 @@ class TXTIngestAdapter(IngestAdapter):
             result = []
             for file_path in txt_files:
                 try:
-                    with open(file_path, 'r', encoding='utf-8') as f:
-                        text = f.read()
+                    # Use LlamaIndex FlatReader to load document
+                    llama_docs = self.reader.load_data(file_path)
+                    
+                    if not llama_docs:
+                        logger.warning(f"No content extracted from {file_path}")
+                        continue
+                    
+                    # Get text from first document (FlatReader returns single document per file)
+                    text = llama_docs[0].text
                     
                     # Remove boilerplate BEFORE normalization (per standard)
                     if self.boilerplate_enabled:
@@ -421,7 +424,7 @@ class TXTIngestAdapter(IngestAdapter):
                             'file_path': str(file_path),
                             'file_name': file_path.name,
                             'file_size': file_path.stat().st_size,
-                            'title': file_path.stem,  # Use filename without extension as title
+                            'title': file_path.stem,
                             'author': 'Unknown',
                             'creation_date': None,
                             'file_type': 'txt',
@@ -441,23 +444,23 @@ class TXTIngestAdapter(IngestAdapter):
             return []
 
 
-class MDIngestAdapter(IngestAdapter):
-    """Adapter for loading Markdown documents."""
+class MDIngestAdapter:
+    """Adapter for loading Markdown documents using LlamaIndex MarkdownReader."""
     
     def __init__(self, config_path: Optional[str] = None) -> None:
         """
-        Initialize MD adapter.
+        Initialize MD adapter with LlamaIndex MarkdownReader.
         
         Args:
             config_path: Path to settings.yaml file
         """
-        # Load boilerplate removal configuration
+        self.reader = MarkdownReader()
         self.boilerplate_config = get_boilerplate_removal_config(config_path)
         self.boilerplate_enabled = self.boilerplate_config['enabled']
     
     def load_data(self, source: str) -> List[Dict[str, Any]]:
         """
-        Load Markdown documents from the specified directory.
+        Load Markdown documents using LlamaIndex MarkdownReader.
         
         Args:
             source: Path to the directory containing MD files
@@ -483,8 +486,15 @@ class MDIngestAdapter(IngestAdapter):
             result = []
             for file_path in md_files:
                 try:
-                    with open(file_path, 'r', encoding='utf-8') as f:
-                        text = f.read()
+                    # Use LlamaIndex MarkdownReader to load document
+                    llama_docs = self.reader.load_data(str(file_path))
+                    
+                    if not llama_docs:
+                        logger.warning(f"No content extracted from {file_path}")
+                        continue
+                    
+                    # Get text from first document (MarkdownReader returns single document per file)
+                    text = llama_docs[0].text
                     
                     # Remove boilerplate BEFORE normalization (per standard)
                     # Markdown files from Vx Underground may contain blog artifacts
