@@ -19,7 +19,7 @@ import time
 from llama_index.core import Settings
 from llama_index.embeddings.huggingface import HuggingFaceEmbedding
 from .services.vectordb_service.service import VectorStoreClient
-from .services.bm25_service.service import BM25Service
+from src.rag.libs.bm25_manager import BM25IndexManager
 from .services.retriever_service.service import RetrieverService
 from .services.reranker_service.service import RerankerService
 from .services.assembler_service.service import ContextAssembler
@@ -65,7 +65,7 @@ class RAGOrchestrator:
         # Service instances (lazy initialization)
         # Note: Embedding model is now managed via Settings.embed_model (global LlamaIndex config)
         self._vector_store: Optional[VectorStoreClient] = None
-        self._bm25_service: Optional[BM25Service] = None
+        self._bm25_manager: Optional[BM25IndexManager] = None
         self._retriever: Optional[RetrieverService] = None
         self._reranker: Optional[RerankerService] = None
         self._assembler: Optional[ContextAssembler] = None
@@ -132,21 +132,25 @@ class RAGOrchestrator:
                 logger.warning(f"FAISS index not found at {faiss_index_path}")
                 log_service_health("vector_store", "not_found")
             
-            # Initialize BM25 service
+            # Initialize BM25 manager
             bm25_index_path = self.persist_dir / "bm25_index"
-            self._bm25_service = BM25Service(
+            self._bm25_manager = BM25IndexManager(
                 index_dir=str(bm25_index_path),
                 config_path=self.config_path
             )
             
             # Load BM25 index
             if bm25_index_path.exists():
-                self._bm25_service.load_index()
-                logger.info("BM25 index loaded successfully")
-                log_service_health("bm25_service", "loaded")
+                bm25_retriever = self._bm25_manager.load()
+                if bm25_retriever:
+                    logger.info("BM25 index loaded successfully")
+                    log_service_health("bm25_manager", "loaded")
+                else:
+                    logger.warning("BM25 index load returned None")
+                    log_service_health("bm25_manager", "load_failed")
             else:
                 logger.warning(f"BM25 index not found at {bm25_index_path}")
-                log_service_health("bm25_service", "not_found")
+                log_service_health("bm25_manager", "not_found")
             
             # Initialize retriever (requires loaded indexes)
             if self._indexes_loaded and self._vector_store.index:
@@ -154,7 +158,7 @@ class RAGOrchestrator:
                     index=self._vector_store.index,
                     config_path=self.config_path
                 )
-                self._retriever.bm25_retriever = self._bm25_service.bm25_retriever
+                # BM25 retriever is now managed by RetrieverService internally
                 logger.info("Retriever service initialized with hybrid search")
                 log_service_health("retriever", "initialized")
             else:
@@ -508,16 +512,16 @@ class RAGOrchestrator:
                         ) else 'degraded'
                     )
                 },
-                'bm25_service': {
-                    'available': self._bm25_service is not None,
+                'bm25_manager': {
+                    'available': self._bm25_manager is not None,
                     'index_loaded': (
-                        self._bm25_service.bm25_retriever is not None 
-                        if self._bm25_service else False
+                        self._bm25_manager.exists() 
+                        if self._bm25_manager else False
                     ),
                     'status': (
                         'healthy' if (
-                            self._bm25_service and 
-                            self._bm25_service.bm25_retriever
+                            self._bm25_manager and 
+                            self._bm25_manager.exists()
                         ) else 'degraded'
                     )
                 },
@@ -566,9 +570,12 @@ class RAGOrchestrator:
                     logger.info("FAISS index reloaded")
             
             # Reload BM25
-            if self._bm25_service:
-                self._bm25_service.load_index()
-                logger.info("BM25 index reloaded")
+            if self._bm25_manager:
+                bm25_retriever = self._bm25_manager.load()
+                if bm25_retriever:
+                    logger.info("BM25 index reloaded")
+                else:
+                    logger.warning("BM25 index reload returned None")
             
             # Reinitialize retriever
             if self._indexes_loaded and self._vector_store and self._vector_store.index:
@@ -576,8 +583,7 @@ class RAGOrchestrator:
                     index=self._vector_store.index,
                     config_path=self.config_path
                 )
-                if self._bm25_service:
-                    self._retriever.bm25_retriever = self._bm25_service.bm25_retriever
+                # BM25 retriever is now managed by RetrieverService internally
                 logger.info("Retriever reinitialized")
             
             logger.info("Index reload complete", success=self._indexes_loaded)
