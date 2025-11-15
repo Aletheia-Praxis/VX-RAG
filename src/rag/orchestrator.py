@@ -16,7 +16,8 @@ from typing import Dict, Any, List, Optional
 from pathlib import Path
 import time
 
-from .services.embedder_service.service import EmbeddingService
+from llama_index.core import Settings
+from llama_index.embeddings.huggingface import HuggingFaceEmbedding
 from .services.vectordb_service.service import VectorStoreClient
 from .services.bm25_service.service import BM25Service
 from .services.retriever_service.service import RetrieverService
@@ -62,7 +63,7 @@ class RAGOrchestrator:
         self.persist_dir = Path(persist_dir)
         
         # Service instances (lazy initialization)
-        self._embedder: Optional[EmbeddingService] = None
+        # Note: Embedding model is now managed via Settings.embed_model (global LlamaIndex config)
         self._vector_store: Optional[VectorStoreClient] = None
         self._bm25_service: Optional[BM25Service] = None
         self._retriever: Optional[RetrieverService] = None
@@ -93,10 +94,20 @@ class RAGOrchestrator:
             logger.info("Initializing RAG services")
             start_time = time.time()
             
-            # Initialize embedder
-            self._embedder = EmbeddingService(config_path=self.config_path)
-            logger.info("Embedder service initialized")
-            log_service_health("embedder", "initialized")
+            # Configure global embedding model via Settings
+            from src.utils.config_loader import get_embedding_config
+            embed_config = get_embedding_config(self.config_path)
+            Settings.embed_model = HuggingFaceEmbedding(
+                model_name=embed_config['embedding_model'],
+                embed_batch_size=embed_config['embedding_batch_size'],
+                trust_remote_code=embed_config['embedding_trust_remote_code']
+            )
+            logger.info(
+                "Embedding model configured",
+                model=embed_config['embedding_model'],
+                batch_size=embed_config['embedding_batch_size']
+            )
+            log_service_health("embed_model", "initialized")
             
             # Initialize vector store
             faiss_index_path = self.persist_dir / "faiss_index"
@@ -108,7 +119,7 @@ class RAGOrchestrator:
             # Load FAISS index
             if faiss_index_path.exists():
                 index_loaded = self._vector_store.load_index(
-                    embed_model=self._embedder.embed_model
+                    embed_model=Settings.embed_model
                 )
                 if index_loaded and self._vector_store.index:
                     self._indexes_loaded = True
@@ -481,9 +492,9 @@ class RAGOrchestrator:
             'initialized': self._initialized,
             'indexes_loaded': self._indexes_loaded,
             'services': {
-                'embedder': {
-                    'available': self._embedder is not None,
-                    'status': 'healthy' if self._embedder else 'not_initialized'
+                'embed_model': {
+                    'available': Settings.embed_model is not None,
+                    'status': 'healthy' if Settings.embed_model else 'not_initialized'
                 },
                 'vector_store': {
                     'available': self._vector_store is not None,
@@ -546,9 +557,9 @@ class RAGOrchestrator:
             self._retriever = None
             
             # Reload FAISS
-            if self._vector_store and self._embedder:
+            if self._vector_store and Settings.embed_model:
                 index_loaded = self._vector_store.load_index(
-                    embed_model=self._embedder.embed_model
+                    embed_model=Settings.embed_model
                 )
                 if index_loaded and self._vector_store.index:
                     self._indexes_loaded = True
