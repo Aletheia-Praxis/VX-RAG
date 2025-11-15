@@ -8,8 +8,9 @@ the VX-RAG (Retrieval-Augmented Generation) system components.
 import logging
 from typing import Optional, Dict, Any
 
+from llama_index.core import Settings
+from llama_index.embeddings.huggingface import HuggingFaceEmbedding
 from .services.ingest_service.service import PDFIngestAdapter
-from .services.embedder_service.service import EmbeddingService
 from .services.vectordb_service.service import VectorStoreClient
 from .services.retriever_service.service import RetrieverService
 
@@ -20,7 +21,7 @@ class RAGSystem:
     
     def __init__(self) -> None:
         self.ingest_adapter: Optional[PDFIngestAdapter] = None
-        self.embedding_service: Optional[EmbeddingService] = None
+        # Embedding model is now managed via Settings.embed_model (global LlamaIndex config)
         self.vector_store: Optional[VectorStoreClient] = None
         self.retriever: Optional[RetrieverService] = None
         
@@ -31,8 +32,16 @@ class RAGSystem:
         try:
             logger.info("Initializing VX-RAG system services")
             
+            # Configure global embedding model
+            from src.utils.config_loader import get_embedding_config
+            embed_config = get_embedding_config()
+            Settings.embed_model = HuggingFaceEmbedding(
+                model_name=embed_config['embedding_model'],
+                embed_batch_size=embed_config['embedding_batch_size'],
+                trust_remote_code=embed_config['embedding_trust_remote_code']
+            )
+            
             self.ingest_adapter = PDFIngestAdapter()
-            self.embedding_service = EmbeddingService()
             self.vector_store = VectorStoreClient()
             
             # Try to load existing index
@@ -57,7 +66,7 @@ class RAGSystem:
         Returns:
             True if successful
         """
-        if self.vector_store is None or self.embedding_service is None:
+        if self.vector_store is None or Settings.embed_model is None:
             logger.error("Required services not initialized")
             return False
         
@@ -87,7 +96,7 @@ class RAGSystem:
                 return False
             
             # Build index
-            index = self.vector_store.build_index(documents, self.embedding_service.embed_model)
+            index = self.vector_store.build_index(documents, Settings.embed_model)
             
             # Save index
             self.vector_store.save_index()
