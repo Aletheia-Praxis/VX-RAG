@@ -1,7 +1,9 @@
 """
 Services for the RAG pipeline.
 
-Note: Embedding functionality is now provided via llama_index.core.Settings.embed_model
+Note: 
+- Embedding functionality is now provided via llama_index.core.Settings.embed_model
+- Hybrid search is now provided via llama_index.core.retrievers.QueryFusionRetriever
 """
 from . import (
     assembler_service,
@@ -12,7 +14,6 @@ from . import (
     reranker_service,
     retriever_service,
     vectordb_service,
-    hybrid_search_service,
 )
 
 __all__ = [
@@ -24,5 +25,4 @@ __all__ = [
     "reranker_service",
     "retriever_service",
     "vectordb_service",
-    "hybrid_search_service",
 ]
