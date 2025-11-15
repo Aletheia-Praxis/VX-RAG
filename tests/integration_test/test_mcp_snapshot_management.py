@@ -14,9 +14,11 @@ from pathlib import Path
 
 import pytest
 
-from src.rag.services.embedder_service.service import EmbeddingService
+from llama_index.core import Settings
+from llama_index.embeddings.huggingface import HuggingFaceEmbedding
 from src.rag.services.vectordb_service.service import VectorStoreClient
 from src.utils.task_queue import get_task_queue
+from src.utils.config_loader import get_embedding_config
 
 
 @pytest.mark.asyncio
@@ -51,9 +53,16 @@ async def test_snapshot_management():
             config={'index_dir': 'data/index'}
         )
         
-        # Load embedder and index
-        embedder = EmbeddingService()
-        vector_client.load_index(embed_model=embedder.embed_model)
+        # Configure global embedding model
+        embed_config = get_embedding_config()
+        Settings.embed_model = HuggingFaceEmbedding(
+            model_name=embed_config['embedding_model'],
+            embed_batch_size=embed_config['embedding_batch_size'],
+            trust_remote_code=embed_config['embedding_trust_remote_code']
+        )
+        
+        # Load index
+        vector_client.load_index(embed_model=Settings.embed_model)
         
         if not vector_client.index:
             print("\nWARNING: Failed to load index. Skipping tests.")
