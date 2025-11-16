@@ -2,13 +2,16 @@
 Assembler Service implementation.
 
 Provides classes for context assembly and MCP payload creation.
+Integrates with LlamaIndex Node objects and token counting infrastructure.
 """
 
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, Union
 import logging
 
+from llama_index.core.schema import NodeWithScore, BaseNode
+
 from ...libs.schemas.mcp_schemas import (
-    MCPContextPayload, ContextAssemblyRequest, ContextAssemblyResponse
+    MCPContextPayload, ContextAssemblyRequest, ContextAssemblyResponse, ContextItem
 )
 from ...libs.utils.token_utils import TokenBudgeter, budget_and_assemble
 from src.utils.config_loader import get_context_assembler_config
@@ -210,3 +213,108 @@ class ContextAssembler:
         """Reset accumulated token counts in LlamaIndex counter."""
         self.token_budgeter.reset_counts()
         logger.debug("Reset token counts")
+    
+    def assemble_from_nodes(
+        self,
+        query: str,
+        nodes: List[Union[NodeWithScore, BaseNode]],
+        token_budget: Optional[int] = None,
+        max_items: Optional[int] = None,
+        min_score: Optional[float] = None
+    ) -> MCPContextPayload:
+        """
+        Assemble MCP context payload directly from LlamaIndex Node objects.
+        
+        This method provides seamless integration with LlamaIndex retrieval results,
+        converting NodeWithScore objects to VX-RAG MCP format.
+        
+        Args:
+            query: Original user query
+            nodes: List of LlamaIndex Node or NodeWithScore objects
+            token_budget: Maximum token budget (overrides default)
+            max_items: Maximum number of context items
+            min_score: Minimum relevance score
+            
+        Returns:
+            MCPContextPayload with selected context
+        """
+        budget = token_budget or self.default_token_budget
+        
+        # Convert LlamaIndex nodes to VX-RAG document format
+        documents = []
+        for node in nodes:
+            # Handle both NodeWithScore and BaseNode
+            if isinstance(node, NodeWithScore):
+                node_obj = node.node
+                score = node.score
+            else:
+                node_obj = node
+                score = None
+            
+            # Extract metadata
+            metadata = node_obj.metadata if hasattr(node_obj, 'metadata') else {}
+            
+            doc = {
+                'id': node_obj.node_id if hasattr(node_obj, 'node_id') else node_obj.id_,
+                'text': node_obj.get_content(),
+                'score': score,
+                'metadata': metadata
+            }
+            documents.append(doc)
+        
+        # Use standard assembly with LlamaIndex token counting
+        payload_dict = budget_and_assemble(
+            results=documents,
+            token_budget=budget,
+            query=query,
+            max_items=max_items,
+            min_score=min_score,
+            model_name=self.model_name
+        )
+        
+        payload = MCPContextPayload(**payload_dict)
+        
+        logger.info(
+            f"Assembled context from {len(nodes)} LlamaIndex nodes: "
+            f"{len(payload.context)} items selected, "
+            f"~{payload.total_tokens_estimate()} tokens"
+        )
+        
+        return payload
+    
+    def nodes_to_context_items(
+        self,
+        nodes: List[Union[NodeWithScore, BaseNode]]
+    ) -> List[ContextItem]:
+        """
+        Convert LlamaIndex Node objects to MCP ContextItem objects.
+        
+        Args:
+            nodes: List of LlamaIndex Node or NodeWithScore objects
+            
+        Returns:
+            List of ContextItem objects
+        """
+        context_items = []
+        
+        for node in nodes:
+            # Handle both NodeWithScore and BaseNode
+            if isinstance(node, NodeWithScore):
+                node_obj = node.node
+                score = node.score
+            else:
+                node_obj = node
+                score = None
+            
+            # Extract metadata
+            metadata = node_obj.metadata if hasattr(node_obj, 'metadata') else {}
+            
+            item = ContextItem(
+                id=node_obj.node_id if hasattr(node_obj, 'node_id') else node_obj.id_,
+                text=node_obj.get_content(),
+                score=score,
+                meta=metadata
+            )
+            context_items.append(item)
+        
+        return context_items
