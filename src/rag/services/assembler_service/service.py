@@ -17,21 +17,28 @@ logger = logging.getLogger(__name__)
 
 
 class ContextAssembler:
-    """Service for assembling MCP-compatible context for LLM queries."""
+    """
+    Service for assembling MCP-compatible context for LLM queries.
+    
+    Uses LlamaIndex TokenCountingHandler for accurate token tracking
+    and budgeting across the RAG pipeline.
+    """
     
     def __init__(
         self, 
         token_budget: Optional[int] = None,
         model_name: Optional[str] = None,
-        config_path: Optional[str] = None
+        config_path: Optional[str] = None,
+        verbose: bool = False
     ):
         """
-        Initialize context assembler.
+        Initialize context assembler with LlamaIndex integration.
         
         Args:
             token_budget: Default token budget for context. If None, loads from config.
             model_name: Model name for token counting. If None, loads from config.
             config_path: Path to settings.yaml. If None, uses default location.
+            verbose: If True, prints token usage to console
         """
         # Load config if parameters not provided
         if token_budget is None or model_name is None:
@@ -46,10 +53,12 @@ class ContextAssembler:
             raise ValueError("model_name must be set")
         
         self.default_token_budget = token_budget
-        self.token_budgeter = TokenBudgeter(model_name)
+        self.model_name = model_name
+        self.token_budgeter = TokenBudgeter(model_name=model_name, verbose=verbose)
         
         logger.info(
-            f"Initialized context assembler: token_budget={token_budget}, model={model_name}"
+            f"Initialized ContextAssembler with LlamaIndex: "
+            f"token_budget={token_budget}, model={model_name}, verbose={verbose}"
         )
     
     def assemble_context(
@@ -61,7 +70,7 @@ class ContextAssembler:
         min_score: Optional[float] = None
     ) -> MCPContextPayload:
         """
-        Assemble MCP-compatible context payload from documents.
+        Assemble MCP-compatible context payload from documents using LlamaIndex token counting.
         
         Args:
             query: Original user query
@@ -75,13 +84,14 @@ class ContextAssembler:
         """
         budget = token_budget or self.default_token_budget
         
-        # Use the standard budget_and_assemble function
+        # Use LlamaIndex-integrated budget_and_assemble function
         payload_dict = budget_and_assemble(
             results=documents,
             token_budget=budget,
             query=query,
             max_items=max_items,
-            min_score=min_score
+            min_score=min_score,
+            model_name=self.model_name
         )
         
         # Convert back to Pydantic model for validation
@@ -171,15 +181,18 @@ class ContextAssembler:
     
     def get_assembly_stats(self, payload: MCPContextPayload) -> Dict[str, Any]:
         """
-        Get statistics about the assembled context.
+        Get statistics about the assembled context including LlamaIndex token counts.
         
         Args:
             payload: Assembled payload
             
         Returns:
-            Statistics dictionary
+            Statistics dictionary with LlamaIndex metrics
         """
         scores = [item.score for item in payload.context if item.score is not None]
+        
+        # Get LlamaIndex token statistics
+        llamaindex_stats = self.token_budgeter.get_stats()
         
         return {
             'total_items': len(payload.context),
@@ -189,5 +202,11 @@ class ContextAssembler:
             'avg_score': sum(scores) / len(scores) if scores else None,
             'min_score': min(scores) if scores else None,
             'max_score': max(scores) if scores else None,
-            'provenance': payload.provenance
+            'provenance': payload.provenance,
+            'llamaindex_stats': llamaindex_stats
         }
+    
+    def reset_token_counts(self) -> None:
+        """Reset accumulated token counts in LlamaIndex counter."""
+        self.token_budgeter.reset_counts()
+        logger.debug("Reset token counts")
