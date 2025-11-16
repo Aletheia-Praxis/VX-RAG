@@ -12,7 +12,7 @@ from typing import Generator, Any
 
 import pytest
 
-from config_test.test_logging import configure_test_logging, get_test_config_path
+from tests.config_test.test_logging import configure_test_logging, get_test_config_path
 
 # Add src directory to path for imports
 project_root = os.path.dirname(os.path.dirname(__file__))
@@ -82,7 +82,7 @@ def temp_test_dir(tmp_path: Path) -> Path:
     Returns:
         Path to temporary test directory
     """
-    from config_test.test_fixtures import get_temp_test_dir
+    from tests.config_test.test_fixtures import get_temp_test_dir
     return get_temp_test_dir(tmp_path)
 
 
@@ -96,7 +96,7 @@ def mock_config() -> dict[str, Any]:
     Returns:
         Dictionary with test configuration
     """
-    from config_test.test_fixtures import get_mock_config
+    from tests.config_test.test_fixtures import get_mock_config
     return get_mock_config()
 
 
