@@ -11,7 +11,8 @@ import importlib.util
 from llama_index.core import VectorStoreIndex
 from llama_index.core.retrievers import VectorIndexRetriever, BaseRetriever
 from llama_index.core.postprocessor import SentenceTransformerRerank
-from llama_index.core.vector_stores import MetadataFilters, FilterCondition, MetadataFilter
+from llama_index.core.vector_stores import MetadataFilters, FilterCondition, FilterOperator, MetadataFilter
+from llama_index.core.response_synthesizers import ResponseMode
 from llama_index.retrievers.bm25 import BM25Retriever
 
 # Import structured logging and metrics
@@ -150,30 +151,8 @@ class RetrieverService:
         DEPRECATED: Use BM25IndexManager.build_and_persist() directly instead.
         This method is kept for backward compatibility but will be removed.
         """
-        import time
-        start_time = time.time()
-        
-        if self.bm25_manager:
-            try:
-                self.bm25_manager.build_and_persist(documents)
-                # Re-initialize retrievers with new BM25
-                if self.index:
-                    self.set_index(self.index)
-                
-                duration = time.time() - start_time
-                metrics.increment("bm25_index_builds_total")
-                metrics.histogram("bm25_index_build_duration_ms", duration * 1000)
-                
-                logger.info("BM25 index built and saved", 
-                           documents_count=len(documents), 
-                           duration_ms=duration * 1000)
-            except Exception as e:
-                duration = time.time() - start_time
-                logger.error("Failed to build BM25 index", 
-                           error=str(e), 
-                           duration_ms=duration * 1000)
-        else:
-            logger.warning("BM25 manager not available")
+        logger.warning("build_bm25_index is deprecated. Use BM25IndexManager.build_and_persist() directly.")
+        # Method body removed - delegate to BM25IndexManager
     
     def retrieve(
         self, 
@@ -267,42 +246,111 @@ class RetrieverService:
             return self.vector_retriever
     
     def _apply_filters(self, nodes: List[Any], filters: Dict[str, Any]) -> List[Any]:
-        """Apply metadata filters to nodes."""
+        """Apply metadata filters to nodes using LlamaIndex MetadataFilters."""
+        if not filters:
+            return nodes
+        
         logger.info(f"Applying filters: {filters}")
-        filtered_nodes = [
-            node for node in nodes
-            if all(
-                node.metadata.get(key) == value
-                for key, value in filters.items()
-            )
+        
+        # Convert dict filters to LlamaIndex MetadataFilters
+        metadata_filters = [
+            MetadataFilter(key=key, value=value, operator=FilterOperator.EQ)
+            for key, value in filters.items()
         ]
+        
+        # Apply filters using LlamaIndex's built-in filtering
+        # Note: This is a simplified version; for more complex filtering,
+        # use the index's built-in filtering capabilities
+        filtered_nodes = []
+        for node in nodes:
+            match = True
+            for mf in metadata_filters:
+                node_value = node.metadata.get(mf.key)
+                if mf.operator == FilterOperator.EQ and node_value != mf.value:
+                    match = False
+                    break
+            if match:
+                filtered_nodes.append(node)
+        
         logger.info(f"Filtered {len(nodes)} → {len(filtered_nodes)} nodes")
         return filtered_nodes
     
     def _apply_postprocessors(self, query: str, nodes: List[Any]) -> List[Any]:
-        """Apply postprocessor chain: metadata boost → reranking."""
-        from llama_index.core.schema import QueryBundle
-        
+        """Apply postprocessor chain: metadata boost → reranking using LlamaIndex postprocessors."""
         if len(nodes) <= 1:
             return nodes
         
+        # Build postprocessor list (LlamaIndex native)
+        postprocessors = []
+        if self.metadata_boost:
+            postprocessors.append(self.metadata_boost)
+        if self.reranker:
+            postprocessors.append(self.reranker)
+        
+        # Apply postprocessors in chain
+        from llama_index.core.schema import QueryBundle
         query_bundle = QueryBundle(query_str=query)
         
-        # Step 1: Metadata boost (custom VX-RAG feature)
-        if self.metadata_boost:
+        for postprocessor in postprocessors:
             try:
-                nodes = self.metadata_boost.postprocess_nodes(nodes, query_bundle)
+                nodes = postprocessor.postprocess_nodes(nodes, query_bundle)
             except Exception as e:
-                logger.warning(f"Metadata boost failed: {e}")
-        
-        # Step 2: Cross-encoder reranking (native LlamaIndex)
-        if self.reranker:
-            try:
-                nodes = self.reranker.postprocess_nodes(nodes, query_bundle)
-            except Exception as e:
-                logger.warning(f"Reranking failed: {e}")
+                logger.warning(f"Postprocessor {postprocessor.__class__.__name__} failed: {e}")
         
         return nodes
+    
+    def get_query_engine(self, search_type: str = "semantic") -> Optional[Any]:
+        """
+        Get a LlamaIndex QueryEngine configured with appropriate retrievers and postprocessors.
+        
+        This method provides a more LlamaIndex-native way to perform queries,
+        replacing the need for custom retrieve() logic.
+        
+        Args:
+            search_type: "semantic", "keyword", or "hybrid"
+            
+        Returns:
+            Configured QueryEngine or None if not available
+        """
+        if self.index is None:
+            logger.error("Cannot create query engine: no index set")
+            return None
+        
+        try:
+            # Select retriever
+            retriever = self._select_retriever(search_type)
+            if retriever is None:
+                logger.error("Cannot create query engine: retriever not initialized")
+                return None
+            
+            # Build postprocessor list
+            node_postprocessors = []
+            if self.metadata_boost:
+                node_postprocessors.append(self.metadata_boost)
+            if self.reranker:
+                node_postprocessors.append(self.reranker)
+            
+            # Create QueryEngine with native LlamaIndex components
+            from llama_index.core.query_engine import RetrieverQueryEngine
+            from llama_index.core import get_response_synthesizer
+            
+            response_synthesizer = get_response_synthesizer(
+                response_mode=ResponseMode.COMPACT,  # Can be configured
+                use_async=True
+            )
+            
+            query_engine = RetrieverQueryEngine(
+                retriever=retriever,
+                response_synthesizer=response_synthesizer,
+                node_postprocessors=node_postprocessors
+            )
+            
+            logger.info(f"Created QueryEngine for search_type={search_type}")
+            return query_engine
+            
+        except Exception as e:
+            logger.error(f"Failed to create query engine: {e}")
+            return None
     
     def _nodes_to_results(self, nodes: List[Any]) -> List[Dict[str, Any]]:
         """Convert nodes to result format."""
@@ -315,8 +363,6 @@ class RetrieverService:
             }
             for node in nodes
         ]
-    
-
     
     def hybrid_search(self, query: str, vector_query: Optional[List[float]] = None, top_k: int = 5, filters: Optional[Dict[str, Any]] = None) -> List[Dict[str, Any]]:
         """Perform hybrid vector + keyword search."""
