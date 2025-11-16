@@ -2,43 +2,44 @@
 Token utilities for context assembly and budgeting.
 
 Provides functions for estimating token counts and selecting documents within token limits.
+Uses LlamaIndex TokenCountingHandler for native integration.
 """
 
 import logging
 from typing import List, Dict, Any, Tuple, Optional
-import tiktoken  # For accurate token counting
+
+from .token_counter import LlamaIndexTokenCounter
 
 logger = logging.getLogger(__name__)
 
 
 class TokenBudgeter:
-    """Handles token budgeting and document selection for context assembly."""
+    """
+    Handles token budgeting and document selection for context assembly.
     
-    def __init__(self, model_name: str = "gpt-3.5-turbo"):
+    This class now uses LlamaIndex TokenCountingHandler internally
+    for better integration with the LlamaIndex ecosystem.
+    """
+    
+    def __init__(self, model_name: str = "gpt-3.5-turbo", verbose: bool = False):
         """
-        Initialize token budgeter.
+        Initialize token budgeter with LlamaIndex integration.
         
         Args:
             model_name: Name of the model for token encoding (e.g., 'gpt-3.5-turbo', 'gpt-4')
+            verbose: If True, prints token usage to console
         """
         self.model_name = model_name
-        try:
-            self.encoding = tiktoken.encoding_for_model(model_name)
-        except KeyError:
-            # Fallback to cl100k_base for newer models
-            self.encoding = tiktoken.get_encoding("cl100k_base")
-            logger.warning(f"Unknown model {model_name}, using cl100k_base encoding")
+        self._counter = LlamaIndexTokenCounter(model_name=model_name, verbose=verbose)
+        logger.info(f"Initialized TokenBudgeter with LlamaIndex integration: model={model_name}")
     
     def count_tokens(self, text: str) -> int:
-        """Count tokens in text using tiktoken."""
-        return len(self.encoding.encode(text))
+        """Count tokens in text using LlamaIndex tokenizer."""
+        return self._counter.count_tokens(text)
     
     def estimate_document_tokens(self, document: Dict[str, Any]) -> int:
         """Estimate tokens for a document dictionary."""
-        text = document.get('text', '')
-        # Add some overhead for metadata and formatting
-        metadata_overhead = len(str(document.get('metadata', {}))) // 10
-        return self.count_tokens(text) + metadata_overhead
+        return self._counter.estimate_document_tokens(document)
     
     def select_documents_by_budget(
         self,
@@ -59,40 +60,9 @@ class TokenBudgeter:
         Returns:
             Tuple of (selected_documents, total_tokens)
         """
-        # Filter by minimum score if specified
-        if min_score is not None:
-            filtered_docs = [doc for doc in documents if doc.get('score', 0.0) >= min_score]
-        else:
-            filtered_docs = documents
-        
-        # Sort by score descending (highest relevance first)
-        sorted_docs = sorted(
-            filtered_docs,
-            key=lambda x: x.get('score', 0.0),
-            reverse=True
+        return self._counter.select_documents_by_budget(
+            documents, token_budget, max_items, min_score
         )
-        
-        selected: List[Dict[str, Any]] = []
-        total_tokens = 0
-        
-        for doc in sorted_docs:
-            doc_tokens = self.estimate_document_tokens(doc)
-            
-            # Check if adding this document would exceed budget
-            if total_tokens + doc_tokens > token_budget:
-                break
-            
-            # Check max items limit
-            if max_items and len(selected) >= max_items:
-                break
-            
-            selected.append(doc)
-            total_tokens += doc_tokens
-        
-        logger.info(f"Selected {len(selected)} documents with {total_tokens} tokens "
-                   f"(budget: {token_budget})")
-        
-        return selected, total_tokens
     
     def select_documents_by_relevance(
         self,
@@ -111,19 +81,20 @@ class TokenBudgeter:
         Returns:
             Selected documents sorted by score
         """
-        # Filter and sort
-        if min_score is not None:
-            filtered = [doc for doc in documents if doc.get('score', 0.0) >= min_score]
-        else:
-            filtered = documents
+        return self._counter.select_documents_by_relevance(documents, max_items, min_score)
+    
+    def reset_counts(self) -> None:
+        """Reset all accumulated token counts."""
+        self._counter.reset_counts()
+    
+    def get_stats(self) -> Dict[str, Any]:
+        """
+        Get comprehensive token usage statistics from LlamaIndex.
         
-        sorted_docs = sorted(
-            filtered,
-            key=lambda x: x.get('score', 0.0),
-            reverse=True
-        )
-        
-        return sorted_docs[:max_items]
+        Returns:
+            Dictionary with embedding, LLM, and total token counts
+        """
+        return self._counter.get_stats()
 
 
 def budget_and_assemble(
@@ -131,12 +102,14 @@ def budget_and_assemble(
     token_budget: int = 2048,
     query: str = "",
     max_items: Optional[int] = None,
-    min_score: Optional[float] = None
+    min_score: Optional[float] = None,
+    model_name: str = "gpt-3.5-turbo"
 ) -> Dict[str, Any]:
     """
-    Budget and assemble context from retrieval results.
+    Budget and assemble context from retrieval results using LlamaIndex token counting.
     
     This is the main function for Step F according to the standard.
+    Now uses LlamaIndex TokenCountingHandler for accurate token tracking.
     
     Args:
         results: Retrieval results with documents
@@ -144,18 +117,19 @@ def budget_and_assemble(
         query: Original query (for MCP payload)
         max_items: Maximum number of items
         min_score: Minimum relevance score
+        model_name: Model name for token encoding (default: gpt-3.5-turbo)
         
     Returns:
         MCP-compatible context payload
     """
-    budgeter = TokenBudgeter()
+    budgeter = TokenBudgeter(model_name=model_name)
     
     # Extract documents from results (handle different formats)
     documents = []
     for result in results:
         documents.append(result)
     
-    # Select documents within budget
+    # Select documents within budget using LlamaIndex token counting
     selected_docs, total_tokens = budgeter.select_documents_by_budget(
         documents, token_budget, max_items, min_score
     )
