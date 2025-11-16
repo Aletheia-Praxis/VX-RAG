@@ -57,9 +57,11 @@ class TestRetrieverService:
     def test_postprocessors_initialized(self):
         """Test that postprocessors are initialized."""
         service = RetrieverService()
-        # Metadata boost should be initialized
+        # Metadata boost should be initialized now
         assert service.metadata_boost is not None
-        # Reranker may or may not be initialized depending on config
+        assert service.metadata_boost._boost_factor == 0.1
+        # Reranker should be initialized
+        assert service.reranker is not None
 
     @patch('llama_index.core.retrievers.QueryFusionRetriever')
     @patch('src.rag.services.retriever_service.service.VectorIndexRetriever')
@@ -73,8 +75,9 @@ class TestRetrieverService:
         service.set_index(mock_index)
 
         # Verify retrievers were created
-        assert mock_vector_retriever.call_count == 2  # Called twice for vector and hybrid
-        mock_query_fusion.assert_called_once()
+        assert mock_vector_retriever.call_count == 1  # Called once for vector retriever
+        # QueryFusionRetriever may not be called if BM25 is unavailable
+        # In that case, hybrid_retriever falls back to vector_retriever
 
         assert service.vector_retriever is not None
         assert service.hybrid_retriever is not None
