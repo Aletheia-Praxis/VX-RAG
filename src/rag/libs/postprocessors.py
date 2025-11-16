@@ -40,22 +40,24 @@ class MetadataBoostPostprocessor(BaseNodePostprocessor):
         config_path: Optional[str] = None
     ):
         """Initialize the metadata boost postprocessor."""
-        super().__init__()
+        # Don't call super().__init__() to avoid field restrictions
+        # super().__init__()
         
         # Load config if boost_factor not provided
         if boost_factor is None:
             config = get_reranker_config(config_path)
             boost_factor = float(config.get('metadata_boost', 0.1))
         
-        self.boost_factor: float = boost_factor
-        self.priority_fields = priority_fields or [
+        # Store as private attributes to avoid LlamaIndex field restrictions
+        self._boost_factor: float = boost_factor
+        self._priority_fields = priority_fields or [
             'source', 'lang', 'topic', 'author', 'year'
         ]
         
         logger.info(
             f"Initialized MetadataBoostPostprocessor: "
-            f"boost_factor={self.boost_factor}, "
-            f"priority_fields={self.priority_fields}"
+            f"boost_factor={self._boost_factor}, "
+            f"priority_fields={self._priority_fields}"
         )
     
     def _postprocess_nodes(
@@ -80,13 +82,13 @@ class MetadataBoostPostprocessor(BaseNodePostprocessor):
                 
                 # Count populated priority fields
                 populated_fields = sum(
-                    1 for field in self.priority_fields
+                    1 for field in self._priority_fields
                     if field in metadata and metadata[field]
                 )
                 
                 # Apply boost
                 if populated_fields > 0:
-                    boost_multiplier = 1.0 + (self.boost_factor * populated_fields)
+                    boost_multiplier = 1.0 + (self._boost_factor * populated_fields)
                     boosted_score = current_score * boost_multiplier
                     node_with_score.score = boosted_score
                     
@@ -97,7 +99,7 @@ class MetadataBoostPostprocessor(BaseNodePostprocessor):
             
             logger.info(
                 f"Applied metadata boost to {len(nodes)} nodes "
-                f"(factor={self.boost_factor})"
+                f"(factor={self._boost_factor})"
             )
             return nodes
             
