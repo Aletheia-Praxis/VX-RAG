@@ -71,7 +71,8 @@ async def run_ingestion_pipeline(
     from rag.services.chunker_service.service import Chunker
     from llama_index.core import Settings
     from llama_index.embeddings.huggingface import HuggingFaceEmbedding
-    from rag.services.vectordb_service.service import VectorStoreClient
+    from llama_index.vector_stores.faiss import FaissVectorStore
+    from llama_index.core import StorageContext, VectorStoreIndex
     from src.utils.config_loader import (
         get_chunking_metadata,
         get_embedding_model_name,
@@ -245,13 +246,9 @@ async def run_ingestion_pipeline(
             trust_remote_code=embed_config['embedding_trust_remote_code']
         )
         
-        # Initialize vector store
-        vector_config = {'index_dir': str(persist_path)}
-        store_type = get_vector_store_type(config_path)
-        vector_client = VectorStoreClient(
-            store_type=store_type,
-            config=vector_config
-        )
+        # Initialize vector store directly with LlamaIndex
+        vector_store = FaissVectorStore.from_persist_dir(str(persist_path))
+        storage_context = StorageContext.from_defaults(vector_store=vector_store)
         
         # Convert chunks to LlamaIndex documents
         llama_docs = [
@@ -265,29 +262,46 @@ async def run_ingestion_pipeline(
         
         # Build index (CPU-intensive operation)
         index = await asyncio.to_thread(
-            vector_client.build_index,
+            VectorStoreIndex.from_documents,
             llama_docs,
-            Settings.embed_model
+            storage_context=storage_context,
+            embed_model=Settings.embed_model
         )
         
         if index:
             # Save index to disk
-            await asyncio.to_thread(vector_client.save_index)
+            await asyncio.to_thread(index.storage_context.persist, persist_dir=str(persist_path))
             
             # Create snapshot with metadata
+            from datetime import datetime
+            timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+            snapshot_name = f"snapshot_{timestamp}"
+            snapshot_dir = persist_path / "snapshots" / snapshot_name
+            snapshot_dir.mkdir(parents=True, exist_ok=True)
+            
+            # Persist to snapshot directory
+            await asyncio.to_thread(index.storage_context.persist, persist_dir=str(snapshot_dir))
+            
+            # Create manifest
             embed_model_info = {"model_name": embed_config['embedding_model']}
             chunking_params = get_chunking_metadata()
-            await asyncio.to_thread(
-                vector_client.create_snapshot,
-                None,  # Auto-generate snapshot name
-                embed_model_info,
-                chunking_params
-            )
+            manifest = {
+                "timestamp": timestamp,
+                "embed_model_name": embed_model_info['model_name'],
+                "embed_dim": embed_config.get('embedding_dim', 384),
+                "chunking_params": chunking_params,
+                "files": list(snapshot_dir.glob("*"))
+            }
+            
+            import json
+            manifest_path = snapshot_dir / "manifest.json"
+            with open(manifest_path, 'w') as f:
+                json.dump(manifest, f, indent=2, default=str)
             
             summary['indexed'] = True
             logger.info(f"Vector index created and saved to {persist_path}")
         else:
-            logger.error("Index creation failed: build_index returned None")
+            logger.error("Index creation failed: VectorStoreIndex.from_documents returned None")
             raise RuntimeError("Failed to create vector index")
         
         # Step 6: Build BM25 Index (95%)
