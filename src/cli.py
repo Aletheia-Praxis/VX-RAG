@@ -285,7 +285,6 @@ def handle_index(args: argparse.Namespace) -> None:
     from llama_index.embeddings.huggingface import HuggingFaceEmbedding
     from llama_index.vector_stores.faiss import FaissVectorStore
     from llama_index.core import StorageContext, VectorStoreIndex
-    from src.rag.libs.bm25_manager import BM25IndexManager
     from src.utils.config_loader import get_embedding_config
     
     start_time = time.time()
@@ -350,6 +349,9 @@ def handle_index(args: argparse.Namespace) -> None:
     faiss_index_path = persist_dir / "faiss_index"
     faiss_index_path.mkdir(parents=True, exist_ok=True)
     
+    bm25_index_path = persist_dir / "bm25_index"
+    bm25_index_path.mkdir(parents=True, exist_ok=True)
+    
     # Create FAISS index with proper dimensions
     import faiss
     d = len(embeddings_list[0]) if embeddings_list else 384  # Default to 384 for all-MiniLM-L6-v2
@@ -374,17 +376,27 @@ def handle_index(args: argparse.Namespace) -> None:
     print(f"  Saved to: {faiss_index_path}")
     logger.info(f"Built and saved FAISS index to {faiss_index_path}")
     
-    # Step 4: Build BM25 index (Module 7 - BM25IndexManager)
+    # Step 4: Build BM25 index (Module 7 - Direct LlamaIndex)
     print("\n[Step 4/4] Building BM25 index...")
     
-    # Initialize BM25IndexManager with persist directory
+    # Build BM25 retriever directly with LlamaIndex
+    from llama_index.retrievers.bm25 import BM25Retriever
+    from src.utils.config_loader import get_bm25_config
+    
+    bm25_config = get_bm25_config(args.config)
+    similarity_top_k = bm25_config.get('similarity_top_k', 20)
+    
+    bm25_retriever = BM25Retriever.from_defaults(
+        nodes=chunks,  # Use the same chunks as FAISS
+        similarity_top_k=similarity_top_k,
+        verbose=True
+    )
+    
+    # Persist BM25 retriever
     bm25_index_path = persist_dir / "bm25_index"
-    bm25_manager = BM25IndexManager(index_dir=str(bm25_index_path), config_path=args.config)
+    bm25_retriever.persist(str(bm25_index_path))
     
-    # Build and persist BM25 index (uses native BM25Retriever.persist())
-    bm25_manager.build_and_persist(documents)
-    
-    print(f"  BM25 index built: {len(documents)} documents")
+    print(f"  BM25 index built: {len(chunks)} chunks")
     print(f"  Saved to: {bm25_index_path}")
     logger.info(f"Built and saved BM25 index to {bm25_index_path}")
     
@@ -437,7 +449,6 @@ def handle_query(args: argparse.Namespace) -> None:
     from llama_index.embeddings.huggingface import HuggingFaceEmbedding
     from llama_index.vector_stores.faiss import FaissVectorStore
     from llama_index.core import StorageContext, VectorStoreIndex
-    from src.rag.libs.bm25_manager import BM25IndexManager
     from src.rag.services.assembler_service.service import ContextAssembler
     from src.utils.config_loader import get_embedding_config
     
@@ -488,12 +499,18 @@ def handle_query(args: argparse.Namespace) -> None:
         logger.error(f"Failed to load FAISS index: {e}")
         sys.exit(1)
     
-    # Load BM25 index (native persist)
-    bm25_manager = BM25IndexManager(index_dir=str(bm25_index_path), config_path=args.config)
-    bm25_retriever = bm25_manager.load()
+    # Load BM25 index directly with LlamaIndex
+    from llama_index.retrievers.bm25 import BM25Retriever
     
-    print(f"  BM25 index loaded from: {bm25_index_path}")
-    logger.info(f"Loaded BM25 index from {bm25_index_path}")
+    try:
+        bm25_retriever = BM25Retriever.from_persist_dir(str(bm25_index_path))
+        print(f"  BM25 index loaded from: {bm25_index_path}")
+        logger.info(f"Loaded BM25 index from {bm25_index_path}")
+    except Exception as e:
+        print(f"  WARNING: Failed to load BM25 index - {e}")
+        print("  Continuing with vector-only search")
+        bm25_retriever = None
+        logger.warning(f"Failed to load BM25 index: {e}")
     
     # Step 2: Initialize QueryEngine (Module 8)
     print("\n[Step 2/5] Initializing query engine...")
@@ -652,7 +669,6 @@ def handle_update_index(args: argparse.Namespace) -> None:
     from llama_index.embeddings.huggingface import HuggingFaceEmbedding
     from llama_index.vector_stores.faiss import FaissVectorStore
     from llama_index.core import StorageContext, VectorStoreIndex
-    from src.rag.libs.bm25_manager import BM25IndexManager
     from src.rag.services.ingest_service.service import PDFIngestAdapter
     from src.rag.services.duplicate_detection_service.service import DuplicateDetector
     from src.rag.services.chunker_service.service import Chunker
@@ -755,16 +771,10 @@ def handle_update_index(args: argparse.Namespace) -> None:
         print("  ERROR: Failed to load FAISS index")
         logger.error("Failed to load FAISS index for update")
     
-    # Load and update BM25 index
-    bm25_manager = BM25IndexManager(index_dir=str(bm25_index_path), config_path=args.config)
-    existing_retriever = bm25_manager.load()
-    
-    if existing_retriever:
-        # BM25 requires full rebuild with new documents (limitation)
-        print("  Note: BM25 index requires full rebuild for updates")
-        print("  Run 'index' command to rebuild BM25 with all documents")
-    else:
-        print("  WARNING: BM25 index not loaded")
+    # Note: BM25 index requires full rebuild for updates (limitation of sparse retrieval)
+    print("  Note: BM25 index requires full rebuild for updates")
+    print("  Run 'index' command to rebuild BM25 with all documents")
+    logger.info("BM25 index update skipped - requires full rebuild")
     
     # Summary
     duration = time.time() - start_time
