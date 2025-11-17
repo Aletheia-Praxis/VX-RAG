@@ -79,8 +79,8 @@ async def handle_query_knowledge_base(params: QueryKnowledgeBaseRequest) -> str:
         # Get orchestrator instance (lazy import)
         orchestrator = _get_orchestrator()
         
-        # Execute query pipeline
-        rag_result = orchestrator.query(
+        # Execute query pipeline using Workflow
+        rag_result = await orchestrator.query_async(
             query=params.query,
             top_k=params.top_k,
             search_type=params.search_type,
