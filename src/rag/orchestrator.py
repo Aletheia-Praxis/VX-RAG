@@ -11,7 +11,7 @@ Key responsibilities:
 - Provide health checks and system status
 - Handle errors and logging at the orchestration level
 
-Note: Reranking is now handled by native LlamaIndex postprocessors within RetrieverService.
+Note: Reranking is now handled by native LlamaIndex postprocessors within QueryEngine.
 """
 
 from typing import Dict, Any, List, Optional
@@ -32,7 +32,6 @@ from llama_index.vector_stores.faiss import FaissVectorStore
 from llama_index.core import StorageContext, VectorStoreIndex
 from .services.vectordb_service.service import VectorStoreClient
 from src.rag.libs.bm25_manager import BM25IndexManager
-from .services.retriever_service.service import RetrieverService
 from .services.assembler_service.service import ContextAssembler
 from .exceptions import (
     ServiceInitializationError,
@@ -331,13 +330,13 @@ class RAGOrchestrator:
                 }
                 retrieved_docs.append(doc)
             
-            # Step 2: Results already postprocessed by RetrieverService
+            # Step 2: Results already postprocessed by QueryEngine
             # (metadata boost + cross-encoder reranking via native LlamaIndex postprocessors)
             # Limit to final top_k
             final_docs = retrieved_docs[:top_k]
             
             logger.info(
-                "Postprocessing complete (via RetrieverService)",
+                "Postprocessing complete (via QueryEngine)",
                 request_id=request_id,
                 results=len(final_docs)
             )
@@ -630,9 +629,9 @@ class RAGOrchestrator:
                     'status': 'healthy' if self._query_engine else 'not_initialized'
                 },
                 'postprocessors': {
-                    'available': self._retriever is not None,
-                    'status': 'integrated_in_retriever',
-                    'note': 'Metadata boost and reranking via RetrieverService postprocessors'
+                    'available': self._query_engine is not None,
+                    'status': 'integrated_in_query_engine',
+                    'note': 'Metadata boost and reranking via native LlamaIndex postprocessors'
                 },
                 'assembler': {
                     'available': self._assembler is not None,
@@ -663,7 +662,6 @@ class RAGOrchestrator:
         
         try:
             self._indexes_loaded = False
-            self._retriever = None
             
             # Reload FAISS index
             faiss_index_path = self.persist_dir / "faiss_index"
