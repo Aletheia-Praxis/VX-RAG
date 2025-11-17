@@ -251,41 +251,16 @@ class RAGOrchestrator:
         )
         
         try:
-            # Step 1: Initial retrieval (over-retrieve for reranking)
-            initial_k = top_k * 4
+            # Step 1: Retrieve documents using RetrieverService (includes postprocessing)
+            # RetrieverService now handles hybrid search via QueryFusionRetriever
+            initial_k = top_k * 4  # Over-retrieve for better selection
             retrieve_start = time.time()
             
-            if search_type == "hybrid":
-                # Hybrid search: combine vector and BM25
-                vector_results = self._retriever.retrieve(
-                    query,
-                    top_k=initial_k,
-                    search_type="semantic"
-                )
-                bm25_results = self._retriever.retrieve(
-                    query,
-                    top_k=initial_k,
-                    search_type="keyword"
-                )
-                
-                # Merge and deduplicate
-                all_candidates = vector_results + bm25_results
-                seen_ids = set()
-                unique_candidates = []
-                for doc in all_candidates:
-                    node_id = doc.get('node_id', doc.get('id', ''))
-                    if node_id and node_id not in seen_ids:
-                        seen_ids.add(node_id)
-                        unique_candidates.append(doc)
-                
-                retrieved_docs = unique_candidates
-            else:
-                # Single search type
-                retrieved_docs = self._retriever.retrieve(
-                    query,
-                    top_k=initial_k,
-                    search_type=search_type
-                )
+            retrieved_docs = self._retriever.retrieve(
+                query=query,
+                top_k=initial_k,
+                search_type=search_type
+            )
             
             retrieve_duration = time.time() - retrieve_start
             
@@ -296,15 +271,15 @@ class RAGOrchestrator:
                 duration_ms=retrieve_duration * 1000
             )
             
-            # Step 2: Results already reranked by RetrieverService postprocessors
-            # RetrieverService applies: metadata boost -> cross-encoder reranking
-            # So retrieved_docs are already in optimal order
-            reranked_docs = retrieved_docs[:top_k]
+            # Step 2: Results already postprocessed by RetrieverService
+            # (metadata boost + cross-encoder reranking via native LlamaIndex postprocessors)
+            # Limit to final top_k
+            final_docs = retrieved_docs[:top_k]
             
             logger.info(
                 "Postprocessing complete (via RetrieverService)",
                 request_id=request_id,
-                results=len(reranked_docs)
+                results=len(final_docs)
             )
             
             # Step 3: Assemble context
@@ -313,7 +288,7 @@ class RAGOrchestrator:
             if self._assembler:
                 context_payload = self._assembler.assemble_context(
                     query=query,
-                    documents=reranked_docs,
+                    documents=final_docs,
                     token_budget=token_budget,
                     max_items=top_k
                 )
@@ -321,7 +296,7 @@ class RAGOrchestrator:
                 # Fallback: create simple context
                 from .libs.schemas.mcp_schemas import MCPContextPayload, ContextItem
                 context_items = []
-                for doc in reranked_docs[:top_k]:
+                for doc in final_docs[:top_k]:
                     item = ContextItem(
                         id=doc.get('node_id', doc.get('id', '')),
                         text=doc.get('text', ''),
@@ -358,9 +333,9 @@ class RAGOrchestrator:
                     'assemble_duration_ms': round(assemble_duration * 1000, 2),
                     'total_duration_ms': round(total_duration * 1000, 2),
                     'candidates_retrieved': len(retrieved_docs),
-                    'results_postprocessed': len(reranked_docs),
+                    'results_postprocessed': len(final_docs),
                     'search_type': search_type,
-                    'note': 'Postprocessing (metadata boost + reranking) included in retrieve_duration'
+                    'note': 'Hybrid search and postprocessing via native LlamaIndex components'
                 }
             }
             
@@ -376,7 +351,6 @@ class RAGOrchestrator:
             metrics.increment("orchestrator_queries_total")
             metrics.histogram("orchestrator_query_duration_ms", total_duration * 1000)
             metrics.histogram("orchestrator_retrieve_duration_ms", retrieve_duration * 1000)
-            # Note: reranking metrics now included in retrieve_duration
             metrics.gauge("orchestrator_results_count", len(context_payload.context))
             
             return response
