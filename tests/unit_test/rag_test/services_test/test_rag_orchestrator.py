@@ -61,40 +61,15 @@ class TestRAGOrchestrator:
         assert not orchestrator._initialized
         assert not orchestrator._indexes_loaded
         assert orchestrator._vector_store is None
-        assert orchestrator._retriever is None
+        assert orchestrator._query_engine is None
 
-    @patch('src.rag.orchestrator.VectorStoreClient')
-    @patch('src.rag.orchestrator.BM25IndexManager')
-    @patch('src.rag.orchestrator.RetrieverService')
     @patch('src.rag.orchestrator.ContextAssembler')
     @patch('src.rag.orchestrator.Settings')
-    def test_query_hybrid_search(self, mock_settings, mock_assembler, mock_retriever,
-                                mock_bm25_manager, mock_vector_store, temp_config_file, mock_index):
-        """Test query method with hybrid search using QueryFusionRetriever."""
+    def test_query_hybrid_search(self, mock_settings, mock_assembler, temp_config_file, mock_index):
+        """Test query method with QueryEngine."""
         from pathlib import Path
         
         # Setup mocks
-        mock_vector_client = Mock()
-        mock_vector_client.index = mock_index
-        mock_vector_client.load_index.return_value = True
-        mock_vector_store.return_value = mock_vector_client
-
-        mock_bm25 = Mock()
-        mock_bm25.exists.return_value = True
-        mock_bm25.load.return_value = Mock()  # Mock BM25 retriever
-        mock_bm25_manager.return_value = mock_bm25
-
-        mock_retriever_instance = Mock()
-        mock_retriever_instance.retrieve.return_value = [
-            {
-                'text': 'test document',
-                'score': 0.8,
-                'metadata': {'source': 'test'},
-                'node_id': 'node_1'
-            }
-        ]
-        mock_retriever.return_value = mock_retriever_instance
-
         mock_assembler_instance = Mock()
         mock_context_payload = Mock()
         mock_context_payload.context = [
@@ -104,6 +79,16 @@ class TestRAGOrchestrator:
         mock_assembler_instance.assemble_context.return_value = mock_context_payload
         mock_assembler.return_value = mock_assembler_instance
 
+        # Mock QueryEngine response
+        mock_response = Mock()
+        mock_node = Mock()
+        mock_node.text = 'test document'
+        mock_node.score = 0.8
+        mock_node.metadata = {'source': 'test'}
+        mock_node.node_id = 'node_1'
+        mock_node.id_ = 'node_1'
+        mock_response.source_nodes = [mock_node]
+
         # Create orchestrator without auto_load first
         orchestrator = RAGOrchestrator(
             config_path=temp_config_file,
@@ -112,9 +97,8 @@ class TestRAGOrchestrator:
         )
         
         # Manually set up the orchestrator state for testing
-        orchestrator._vector_store = mock_vector_client
-        orchestrator._bm25_manager = mock_bm25
-        orchestrator._retriever = mock_retriever_instance
+        orchestrator._query_engine = Mock()
+        orchestrator._query_engine.query.return_value = mock_response
         orchestrator._assembler = mock_assembler_instance
         orchestrator._initialized = True
         orchestrator._indexes_loaded = True
@@ -132,14 +116,10 @@ class TestRAGOrchestrator:
         assert result['context'][0]['text'] == 'test document'
         assert result['retrieval_stats']['search_type'] == 'hybrid'
         assert 'note' in result['retrieval_stats']
-        assert 'Hybrid search and postprocessing via native LlamaIndex components' in result['retrieval_stats']['note']
+        assert 'Query executed via native LlamaIndex QueryEngine' in result['retrieval_stats']['note']
 
-        # Verify retriever was called with correct parameters
-        mock_retriever_instance.retrieve.assert_called_once_with(
-            query="test query",
-            top_k=20,  # top_k * 4 = 5 * 4
-            search_type="hybrid"
-        )
+        # Verify query engine was called
+        orchestrator._query_engine.query.assert_called_once_with("test query")
 
     def test_query_without_initialization(self, temp_config_file):
         """Test query fails when services not initialized."""
@@ -153,41 +133,42 @@ class TestRAGOrchestrator:
 
     def test_query_without_indexes_loaded(self, temp_config_file):
         """Test query fails when indexes not loaded."""
-        with patch('src.rag.orchestrator.VectorStoreClient') as mock_vector_store:
-            mock_vector_client = Mock()
-            mock_vector_client.index = None  # No index loaded
-            mock_vector_client.load_index.return_value = False
-            mock_vector_store.return_value = mock_vector_client
+        orchestrator = RAGOrchestrator(
+            config_path=temp_config_file,
+            persist_dir="data/index",
+            auto_load=False  # Don't auto-load to avoid initialization issues
+        )
 
-            orchestrator = RAGOrchestrator(
-                config_path=temp_config_file,
-                persist_dir="data/index",
-                auto_load=True
-            )
+        # Manually set state to simulate no indexes loaded
+        orchestrator._initialized = True
+        orchestrator._indexes_loaded = False
+        orchestrator._query_engine = None
 
-            with pytest.raises(RuntimeError, match="Indexes not loaded"):
-                orchestrator.query("test query")
+        with pytest.raises(RuntimeError, match="Indexes not loaded"):
+            orchestrator.query("test query")
 
     def test_search_documents(self, temp_config_file, mock_index):
         """Test document search method."""
-        with patch('src.rag.orchestrator.RetrieverService') as mock_retriever:
-            mock_retriever_instance = Mock()
-            mock_retriever_instance.retrieve.return_value = [
-                {'text': 'test', 'score': 0.8, 'metadata': {}}
-            ]
-            mock_retriever.return_value = mock_retriever_instance
+        # Mock QueryEngine response
+        mock_response = Mock()
+        mock_node = Mock()
+        mock_node.text = 'test'
+        mock_node.score = 0.8
+        mock_node.metadata = {}
+        mock_node.node_id = 'node_1'
+        mock_node.id_ = 'node_1'
+        mock_response.source_nodes = [mock_node]
 
-            orchestrator = RAGOrchestrator(
-                config_path=temp_config_file,
-                auto_load=False
-            )
-            # Manually set retriever for test
-            orchestrator._retriever = mock_retriever_instance
-            orchestrator._initialized = True
+        orchestrator = RAGOrchestrator(
+            config_path=temp_config_file,
+            auto_load=False
+        )
+        # Manually set query engine for test
+        orchestrator._query_engine = Mock()
+        orchestrator._query_engine.query.return_value = mock_response
+        orchestrator._initialized = True
 
-            results = orchestrator.search_documents("test query", top_k=5)
+        results = orchestrator.search_documents("test query", top_k=5)
 
-            assert len(results) == 1
-            mock_retriever_instance.retrieve.assert_called_once_with(
-                "test query", top_k=5, search_type="semantic"
-            )
+        assert len(results) == 1
+        orchestrator._query_engine.query.assert_called_once_with("test query")
