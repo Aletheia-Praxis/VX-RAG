@@ -145,15 +145,6 @@ class RetrieverService:
             self.hybrid_retriever = self.vector_retriever
             logger.info("Hybrid retriever initialized with vector only (BM25 unavailable)")
     
-    def build_bm25_index(self, documents: List[Any]) -> None:
-        """Build BM25 index from documents.
-        
-        DEPRECATED: Use BM25IndexManager.build_and_persist() directly instead.
-        This method is kept for backward compatibility but will be removed.
-        """
-        logger.warning("build_bm25_index is deprecated. Use BM25IndexManager.build_and_persist() directly.")
-        # Method body removed - delegate to BM25IndexManager
-    
     def retrieve(
         self, 
         query: str, 
