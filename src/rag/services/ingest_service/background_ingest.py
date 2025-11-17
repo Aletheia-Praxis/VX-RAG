@@ -72,7 +72,6 @@ async def run_ingestion_pipeline(
     from llama_index.core import Settings
     from llama_index.embeddings.huggingface import HuggingFaceEmbedding
     from rag.services.vectordb_service.service import VectorStoreClient
-    from rag.services.retriever_service.service import RetrieverService
     from src.utils.config_loader import (
         get_chunking_metadata,
         get_embedding_model_name,
@@ -295,12 +294,13 @@ async def run_ingestion_pipeline(
         if progress_callback:
             await progress_callback(95, "Building BM25 index for hybrid search...")
         
-        retriever_service = RetrieverService(
-            index=index,
+        from src.rag.libs.bm25_manager import BM25IndexManager
+        bm25_manager = BM25IndexManager(
+            index_dir=str(Path(persist_dir) / "bm25_index"),
             config_path=config_path
         )
         await asyncio.to_thread(
-            retriever_service.build_bm25_index,
+            bm25_manager.build_and_persist,
             llama_docs
         )
         logger.info("BM25 index built for hybrid search")
