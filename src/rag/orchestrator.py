@@ -30,7 +30,6 @@ from llama_index.core.workflow import (
 )
 from llama_index.vector_stores.faiss import FaissVectorStore
 from llama_index.core import StorageContext, VectorStoreIndex
-from .services.vectordb_service.service import VectorStoreClient
 from src.rag.libs.bm25_manager import BM25IndexManager
 from .services.assembler_service.service import ContextAssembler
 from .exceptions import (
