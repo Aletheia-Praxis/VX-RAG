@@ -283,7 +283,8 @@ def handle_index(args: argparse.Namespace) -> None:
     import json
     from llama_index.core.schema import Document
     from llama_index.embeddings.huggingface import HuggingFaceEmbedding
-    from src.rag.services.vectordb_service.service import VectorStoreClient
+    from llama_index.vector_stores.faiss import FaissVectorStore
+    from llama_index.core import StorageContext, VectorStoreIndex
     from src.rag.libs.bm25_manager import BM25IndexManager
     from src.utils.config_loader import get_embedding_config
     
@@ -332,10 +333,10 @@ def handle_index(args: argparse.Namespace) -> None:
     print(f"  Embedding dimension: {embedding_dim}")
     logger.info(f"Generated {len(embeddings_list)} embeddings with dimension {embedding_dim}")
     
-    # Step 3: Build FAISS vector index (Module 6 - VectorStoreClient)
+    # Step 3: Build FAISS vector index (Module 6 - Direct LlamaIndex)
     print("\n[Step 3/4] Building FAISS vector index...")
     
-    # Convert chunks to LlamaIndex Document objects for VectorStoreClient
+    # Convert chunks to LlamaIndex Document objects for direct indexing
     documents = []
     for chunk in chunks:
         doc = Document(
@@ -345,20 +346,28 @@ def handle_index(args: argparse.Namespace) -> None:
         )
         documents.append(doc)
     
-    # Initialize VectorStoreClient with persist directory
-    vector_store_config = {
-        'index_dir': str(persist_dir / "faiss_index")
-    }
-    vector_client = VectorStoreClient(store_type="faiss", config=vector_store_config)
+    # Initialize FAISS vector store directly with LlamaIndex
+    faiss_index_path = persist_dir / "faiss_index"
+    faiss_index_path.mkdir(parents=True, exist_ok=True)
     
-    # Build FAISS index
-    vector_client.build_index(
+    # Create FAISS index with proper dimensions
+    import faiss
+    d = len(embeddings_list[0]) if embeddings_list else 384  # Default to 384 for all-MiniLM-L6-v2
+    faiss_index = faiss.IndexHNSWFlat(d, 32)  # HNSW with M=32
+    
+    vector_store = FaissVectorStore(faiss_index=faiss_index)
+    storage_context = StorageContext.from_defaults(vector_store=vector_store)
+    
+    # Build FAISS index directly with LlamaIndex
+    index = VectorStoreIndex.from_documents(
         documents=documents,
-        embed_model=embed_model
+        storage_context=storage_context,
+        embed_model=embed_model,
+        show_progress=True
     )
     
-    # Save FAISS index
-    vector_client.save_index(create_backup=False)
+    # Save FAISS index directly with LlamaIndex
+    index.storage_context.persist(persist_dir=str(faiss_index_path))
     
     faiss_index_path = persist_dir / "faiss_index"
     print(f"  FAISS index built: {len(documents)} vectors")
@@ -426,7 +435,8 @@ def handle_query(args: argparse.Namespace) -> None:
     """Handle query command - search documents using hybrid retrieval + reranking."""
     import json
     from llama_index.embeddings.huggingface import HuggingFaceEmbedding
-    from src.rag.services.vectordb_service.service import VectorStoreClient
+    from llama_index.vector_stores.faiss import FaissVectorStore
+    from llama_index.core import StorageContext, VectorStoreIndex
     from src.rag.libs.bm25_manager import BM25IndexManager
     from src.rag.services.assembler_service.service import ContextAssembler
     from src.utils.config_loader import get_embedding_config
@@ -454,18 +464,29 @@ def handle_query(args: argparse.Namespace) -> None:
     # Step 1: Load indexes (Module 8 - QueryEngine setup)
     print("[Step 1/5] Loading indexes...")
     
-    # Load FAISS index
+    # Load embedder
     embed_config = get_embedding_config(args.config)
     embed_model = HuggingFaceEmbedding(
         model_name=embed_config['embedding_model'],
         embed_batch_size=embed_config['embedding_batch_size'],
         trust_remote_code=embed_config['embedding_trust_remote_code']
     )
-    vector_client = VectorStoreClient(store_type="faiss", config={'index_dir': str(faiss_index_path)})
-    vector_client.load_index(embed_model=embed_model)
     
-    print(f"  FAISS index loaded from: {faiss_index_path}")
-    logger.info(f"Loaded FAISS index from {faiss_index_path}")
+    # Load FAISS index directly with LlamaIndex
+    try:
+        vector_store = FaissVectorStore.from_persist_dir(str(faiss_index_path))
+        storage_context = StorageContext.from_defaults(vector_store=vector_store)
+        faiss_index = VectorStoreIndex.from_vector_store(
+            vector_store=vector_store,
+            storage_context=storage_context,
+            embed_model=embed_model
+        )
+        print(f"  FAISS index loaded from: {faiss_index_path}")
+        logger.info(f"Loaded FAISS index from {faiss_index_path}")
+    except Exception as e:
+        print(f"  ERROR: Failed to load FAISS index - {e}")
+        logger.error(f"Failed to load FAISS index: {e}")
+        sys.exit(1)
     
     # Load BM25 index (native persist)
     bm25_manager = BM25IndexManager(index_dir=str(bm25_index_path), config_path=args.config)
@@ -477,7 +498,7 @@ def handle_query(args: argparse.Namespace) -> None:
     # Step 2: Initialize QueryEngine (Module 8)
     print("\n[Step 2/5] Initializing query engine...")
     
-    if vector_client.index:
+    if faiss_index:
         # Create QueryEngine with postprocessors for hybrid search + reranking
         from llama_index.core.postprocessor import SentenceTransformerRerank
         from llama_index.core.retrievers import QueryFusionRetriever
@@ -488,7 +509,7 @@ def handle_query(args: argparse.Namespace) -> None:
         semantic_top_k = retriever_config.get('semantic_top_k', 20)
         
         # Create base retrievers
-        vector_retriever = vector_client.index.as_retriever(similarity_top_k=semantic_top_k)
+        vector_retriever = faiss_index.as_retriever(similarity_top_k=semantic_top_k)
         
         # Create hybrid retriever (fusion of vector and BM25)
         retrievers = [vector_retriever]
@@ -629,7 +650,8 @@ def handle_update_index(args: argparse.Namespace) -> None:
     """Handle update-index command - add new documents to existing index incrementally."""
     from llama_index.core.schema import Document
     from llama_index.embeddings.huggingface import HuggingFaceEmbedding
-    from src.rag.services.vectordb_service.service import VectorStoreClient
+    from llama_index.vector_stores.faiss import FaissVectorStore
+    from llama_index.core import StorageContext, VectorStoreIndex
     from src.rag.libs.bm25_manager import BM25IndexManager
     from src.rag.services.ingest_service.service import PDFIngestAdapter
     from src.rag.services.duplicate_detection_service.service import DuplicateDetector
@@ -712,17 +734,26 @@ def handle_update_index(args: argparse.Namespace) -> None:
         documents.append(doc)
     
     # Load and update FAISS index
-    vector_client = VectorStoreClient(store_type="faiss", config={'index_dir': str(faiss_index_path)})
-    vector_client.load_index(embed_model=embed_model)
+    vector_store = FaissVectorStore.from_persist_dir(str(faiss_index_path))
+    storage_context = StorageContext.from_defaults(vector_store=vector_store)
+    faiss_index = VectorStoreIndex.from_vector_store(
+        vector_store=vector_store,
+        storage_context=storage_context,
+        embed_model=embed_model
+    )
     
-    if vector_client.index:
-        success = vector_client.add_documents_incremental(documents, embed_model)
-        if success:
-            vector_client.save_index(create_backup=True)
-            print(f"  FAISS index updated: +{len(documents)} documents")
-        else:
-            print("  ERROR: Failed to update FAISS index")
-            logger.error("Failed to update FAISS index")
+    if faiss_index:
+        # Add documents incrementally
+        for doc in documents:
+            faiss_index.insert(doc)
+        
+        # Save updated index
+        faiss_index.storage_context.persist(persist_dir=str(faiss_index_path))
+        print(f"  FAISS index updated: +{len(documents)} documents")
+        logger.info(f"FAISS index updated with {len(documents)} new documents")
+    else:
+        print("  ERROR: Failed to load FAISS index")
+        logger.error("Failed to load FAISS index for update")
     
     # Load and update BM25 index
     bm25_manager = BM25IndexManager(index_dir=str(bm25_index_path), config_path=args.config)
@@ -759,7 +790,8 @@ def handle_update_index(args: argparse.Namespace) -> None:
 
 def handle_snapshot(args: argparse.Namespace) -> None:
     """Handle snapshot command - create versioned backup of indexes."""
-    from src.rag.services.vectordb_service.service import VectorStoreClient
+    from llama_index.vector_stores.faiss import FaissVectorStore
+    from llama_index.core import StorageContext, VectorStoreIndex
     from llama_index.embeddings.huggingface import HuggingFaceEmbedding
     from src.utils.config_loader import get_embedding_config
     
@@ -792,19 +824,44 @@ def handle_snapshot(args: argparse.Namespace) -> None:
     }
     
     # Load vector store
-    vector_client = VectorStoreClient(store_type="faiss", config={'index_dir': str(faiss_index_path)})
-    vector_client.load_index(embed_model=embed_model)
+    vector_store = FaissVectorStore.from_persist_dir(str(faiss_index_path))
+    storage_context = StorageContext.from_defaults(vector_store=vector_store)
+    faiss_index = VectorStoreIndex.from_vector_store(
+        vector_store=vector_store,
+        storage_context=storage_context,
+        embed_model=embed_model
+    )
     
-    if not vector_client.index:
+    if not faiss_index:
         print("ERROR: Failed to load index")
         logger.error("Failed to load index for snapshot")
         sys.exit(1)
     
-    # Create snapshot
-    snapshot_path = vector_client.create_snapshot(
-        snapshot_name=snapshot_name,
-        embed_model_info=embed_model_info
-    )
+    # Create snapshot directory
+    from datetime import datetime
+    timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+    snapshot_name = snapshot_name or f"snapshot_{timestamp}"
+    snapshot_dir = persist_dir / "snapshots" / snapshot_name
+    snapshot_dir.mkdir(parents=True, exist_ok=True)
+    
+    # Persist index to snapshot directory
+    faiss_index.storage_context.persist(persist_dir=str(snapshot_dir))
+    
+    # Create manifest
+    manifest = {
+        "timestamp": timestamp,
+        "embed_model_name": embed_model_info['model_name'],
+        "embed_dim": embed_model_info['embed_dim'],
+        "chunking_params": {},  # Would need to load from config
+        "files": list(snapshot_dir.glob("*"))
+    }
+    
+    import json
+    manifest_path = snapshot_dir / "manifest.json"
+    with open(manifest_path, 'w') as f:
+        json.dump(manifest, f, indent=2, default=str)
+    
+    snapshot_path = snapshot_dir
     
     duration = time.time() - start_time
     
@@ -822,17 +879,19 @@ def handle_snapshot(args: argparse.Namespace) -> None:
 
 def handle_verify_snapshot(args: argparse.Namespace) -> None:
     """Handle verify-snapshot command - verify integrity of snapshot."""
-    from src.rag.services.vectordb_service.service import VectorStoreClient
+    import json
+    from pathlib import Path
     
     start_time = time.time()
     persist_dir = Path(args.persist_dir)
     snapshot_name = args.name
     
     faiss_index_path = persist_dir / "faiss_index"
+    snapshot_dir = persist_dir / "snapshots" / snapshot_name
     
-    if not faiss_index_path.exists():
-        print(f"Error: Index directory not found at {faiss_index_path}")
-        logger.error("Verification failed: index directory not found", persist_dir=str(persist_dir))
+    if not snapshot_dir.exists():
+        print(f"Error: Snapshot not found at {snapshot_dir}")
+        logger.error("Verification failed: snapshot not found", snapshot_dir=str(snapshot_dir))
         sys.exit(1)
     
     logger.info("Verifying snapshot", snapshot_name=snapshot_name)
@@ -840,42 +899,70 @@ def handle_verify_snapshot(args: argparse.Namespace) -> None:
     print(f"Verifying Snapshot: {snapshot_name}")
     print(f"{'='*60}\n")
     
-    # Initialize vector store client
-    vector_client = VectorStoreClient(store_type="faiss", config={'index_dir': str(faiss_index_path)})
-    
-    # Verify snapshot
+    # Verify snapshot integrity
     try:
-        result = vector_client.verify_snapshot_integrity(snapshot_name)
+        # Check if manifest exists
+        manifest_path = snapshot_dir / "manifest.json"
+        if not manifest_path.exists():
+            print("  Status: INVALID")
+            print("  Error: Manifest file missing")
+            logger.error("Snapshot verification failed: manifest missing")
+            sys.exit(1)
+        
+        # Load and validate manifest
+        with open(manifest_path, 'r') as f:
+            manifest = json.load(f)
+        
+        # Check required manifest fields
+        required_fields = ['timestamp', 'embed_model_name', 'embed_dim']
+        missing_fields = [field for field in required_fields if field not in manifest]
+        
+        if missing_fields:
+            print("  Status: INVALID")
+            print(f"  Error: Missing manifest fields: {missing_fields}")
+            logger.error("Snapshot verification failed: missing manifest fields", missing_fields=missing_fields)
+            sys.exit(1)
+        
+        # Check if index files exist
+        index_files = list(snapshot_dir.glob("*.faiss")) + list(snapshot_dir.glob("*.pkl"))
+        if not index_files:
+            print("  Status: INVALID")
+            print("  Error: No index files found")
+            logger.error("Snapshot verification failed: no index files")
+            sys.exit(1)
+        
+        # Try to load the snapshot index
+        try:
+            from llama_index.vector_stores.faiss import FaissVectorStore
+            from llama_index.core import StorageContext, VectorStoreIndex
+            
+            vector_store = FaissVectorStore.from_persist_dir(str(snapshot_dir))
+            # If we get here, the index loaded successfully
+            print("  Status: VALID")
+            
+        except Exception as load_error:
+            print("  Status: INVALID")
+            print(f"  Error: Failed to load index - {load_error}")
+            logger.error("Snapshot verification failed: index load error", error=str(load_error))
+            sys.exit(1)
         
         duration = time.time() - start_time
         
         print(f"  Snapshot: {snapshot_name}")
-        print(f"  Status: {'VALID' if result['valid'] else 'INVALID'}")
-        
-        if result.get('manifest'):
-            manifest = result['manifest']
-            print("\n  Manifest Info:")
-            print(f"    Created: {manifest.get('timestamp', 'N/A')}")
-            print(f"    Embedding model: {manifest.get('embed_model_name', 'N/A')}")
-            print(f"    Files: {len(manifest.get('files', []))}")
-        
-        if not result['valid']:
-            print("\n  Errors:")
-            for error in result.get('errors', []):
-                print(f"    - {error}")
+        print("\n  Manifest Info:")
+        print(f"    Created: {manifest.get('timestamp', 'N/A')}")
+        print(f"    Embedding model: {manifest.get('embed_model_name', 'N/A')}")
+        print(f"    Files: {len(index_files)}")
         
         print(f"\n  Verification duration: {duration:.2f}s")
         print(f"{'='*60}\n")
         
         logger.info("Snapshot verification completed",
                    snapshot_name=snapshot_name,
-                   valid=result['valid'],
+                   valid=True,
                    duration_ms=duration * 1000)
         
         metrics.increment("snapshot_verifications_total")
-        
-        if not result['valid']:
-            sys.exit(1)
             
     except Exception as e:
         print(f"  ERROR: Verification failed - {e}")
