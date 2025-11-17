@@ -27,11 +27,14 @@ class VectorStoreClient:
     Implements the incremental update strategy from the technical standard, allowing documents to be
     added to existing indexes without full rebuilds.
     
+    This class is a thin wrapper around LlamaIndex's FaissVectorStore, providing high-level
+    operations while leveraging LlamaIndex's built-in FAISS integration.
+    
     Key features:
     - Incremental document addition (add_documents_incremental)
-    - Snapshot creation with manifest.json and checksums
-    - Integrity verification of snapshots
-    - Automatic backups on index updates
+    - Snapshot creation with manifest.json and checksums (create_snapshot, verify_snapshot_integrity)
+    - Automatic backups on index updates (save_index with create_backup=True)
+    - Persistence and replication (save_index, load_index, replicate_index)
     """
     
     def __init__(self, store_type: str = "faiss", config: Optional[Dict[str, Any]] = None):
@@ -57,7 +60,6 @@ class VectorStoreClient:
         self.snapshots_dir = Path(snapshots_dir)
         
         self.index: Optional[VectorStoreIndex] = None
-        self.faiss_index: Optional[faiss.Index] = None  # Direct FAISS index access
         
         # Create index directory if it doesn't exist
         self.index_dir.mkdir(parents=True, exist_ok=True)
@@ -136,7 +138,6 @@ class VectorStoreClient:
             )
 
             self.index = index
-            self.faiss_index = faiss_index  # Store direct access to FAISS index
             logger.info(f"Successfully built index with {len(documents)} documents")
             return index
 
@@ -227,11 +228,6 @@ class VectorStoreClient:
             storage_context = StorageContext.from_defaults(persist_dir=str(self.index_dir))
             self.index = cast(VectorStoreIndex, load_index_from_storage(storage_context, embed_model=embed_model))
             
-            # Extract FAISS index reference if available
-            vector_store = self.index.vector_store
-            if isinstance(vector_store, FaissVectorStore):
-                self.faiss_index = vector_store.client
-            
             logger.info(f"Index loaded from {self.index_dir}")
             return True
 
@@ -246,6 +242,9 @@ class VectorStoreClient:
     # - For storing: index.insert(document) or index.insert_nodes(nodes)
     # - For searching: index.as_retriever(similarity_top_k=k) or index.as_query_engine()
     # - For deletion: FAISS doesn't support deletion - rebuild index without unwanted documents
+    #
+    # Direct FAISS index access (self.faiss_index) was removed as LlamaIndex handles
+    # all FAISS operations internally through FaissVectorStore.
     
     def create_snapshot(self, snapshot_name: Optional[str] = None, 
                        embed_model_info: Optional[Dict[str, Any]] = None,
