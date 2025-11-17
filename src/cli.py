@@ -428,7 +428,6 @@ def handle_query(args: argparse.Namespace) -> None:
     from llama_index.embeddings.huggingface import HuggingFaceEmbedding
     from src.rag.services.vectordb_service.service import VectorStoreClient
     from src.rag.libs.bm25_manager import BM25IndexManager
-    from src.rag.services.retriever_service.service import RetrieverService
     from src.rag.services.assembler_service.service import ContextAssembler
     from src.utils.config_loader import get_embedding_config
     
@@ -452,7 +451,7 @@ def handle_query(args: argparse.Namespace) -> None:
     print(f"Query: {query}")
     print(f"{'='*60}\n")
     
-    # Step 1: Load indexes (Module 8 - RetrieverService setup)
+    # Step 1: Load indexes (Module 8 - QueryEngine setup)
     print("[Step 1/5] Loading indexes...")
     
     # Load FAISS index
@@ -475,64 +474,105 @@ def handle_query(args: argparse.Namespace) -> None:
     print(f"  BM25 index loaded from: {bm25_index_path}")
     logger.info(f"Loaded BM25 index from {bm25_index_path}")
     
-    # Step 2: Initialize RetrieverService (Module 8)
-    print("\n[Step 2/5] Initializing retriever...")
+    # Step 2: Initialize QueryEngine (Module 8)
+    print("\n[Step 2/5] Initializing query engine...")
     
-    retriever = RetrieverService(index=vector_client.index, config_path=args.config)
     if vector_client.index:
-        retriever.set_index(vector_client.index)
-        retriever.bm25_retriever = bm25_retriever
+        # Create QueryEngine with postprocessors for hybrid search + reranking
+        from llama_index.core.postprocessor import SentenceTransformerRerank
+        from llama_index.core.retrievers import QueryFusionRetriever
+        from llama_index.core.query_engine import RetrieverQueryEngine
+        from src.utils.config_loader import get_retriever_config
+        
+        retriever_config = get_retriever_config(args.config)
+        semantic_top_k = retriever_config.get('semantic_top_k', 20)
+        
+        # Create base retrievers
+        vector_retriever = vector_client.index.as_retriever(similarity_top_k=semantic_top_k)
+        
+        # Create hybrid retriever (fusion of vector and BM25)
+        retrievers = [vector_retriever]
+        if bm25_retriever:
+            retrievers.append(bm25_retriever)
+        
+        # Add reranking postprocessor
+        rerank_postprocessor = SentenceTransformerRerank(
+            model="cross-encoder/ms-marco-MiniLM-L-6-v2",
+            top_n=top_k
+        )
+        
+        if len(retrievers) > 1:
+            # Use QueryFusionRetriever for hybrid search
+            query_fusion_retriever = QueryFusionRetriever(
+                retrievers=retrievers,
+                similarity_top_k=semantic_top_k,
+                num_queries=1,  # Single query
+                use_async=True,
+                verbose=False
+            )
+            query_engine = RetrieverQueryEngine.from_args(
+                retriever=query_fusion_retriever,
+                node_postprocessors=[rerank_postprocessor]
+            )
+        else:
+            # Fallback to vector-only
+            query_engine = RetrieverQueryEngine.from_args(
+                retriever=vector_retriever,
+                node_postprocessors=[rerank_postprocessor]
+            )
+        
+        print("  QueryEngine initialized (hybrid search + reranking)")
+        logger.info("QueryEngine initialized with hybrid search and reranking")
     else:
         print("  ERROR: Failed to load FAISS index")
         logger.error("FAISS index is None after loading")
         sys.exit(1)
     
-    print("  Retriever initialized (vector + BM25)")
-    logger.info("Retriever service initialized")
-    
-    # Step 3: Retrieve candidates (Module 8 - hybrid retrieval)
+    # Step 3: Retrieve candidates (Module 8 - hybrid retrieval via QueryEngine)
     print("\n[Step 3/5] Retrieving candidates...")
     
-    # Retrieve from both sources
-    initial_k = top_k * 4  # Over-retrieve for reranking
+    # Retrieve using QueryEngine (includes postprocessing)
+    initial_k = top_k * 4  # Over-retrieve for better selection
     
     try:
-        vector_results = retriever.retrieve(query, top_k=initial_k, search_type="semantic")
-        print(f"  Vector search: {len(vector_results)} candidates")
+        # Use QueryEngine for retrieval
+        response = query_engine.query(query)
+        retrieved_nodes = response.source_nodes[:initial_k] if response.source_nodes else []
         
-        bm25_results = retriever.retrieve(query, top_k=initial_k, search_type="keyword")
-        print(f"  BM25 search: {len(bm25_results)} candidates")
-        
-        logger.info(f"Retrieved {len(vector_results)} vector + {len(bm25_results)} BM25 candidates")
+        print(f"  Retrieved {len(retrieved_nodes)} candidates via QueryEngine")
+        logger.info(f"Retrieved {len(retrieved_nodes)} candidates via QueryEngine")
     except Exception as e:
         print(f"  ERROR: Retrieval failed - {e}")
         logger.error(f"Retrieval failed: {e}")
         sys.exit(1)
     
-    # Step 4: Results already postprocessed by RetrieverService
-    # Hybrid search includes metadata boost + cross-encoder reranking
-    print("\n[Step 4/5] Postprocessing complete (metadata boost + reranking)...")
+    # Convert nodes to document format
+    retrieved_docs = []
+    for node in retrieved_nodes:
+        doc = {
+            'text': node.text,
+            'score': getattr(node, 'score', 0.0),
+            'metadata': node.metadata,
+            'node_id': getattr(node, 'node_id', getattr(node, 'id_', ''))
+        }
+        retrieved_docs.append(doc)
     
-    # Combine results from vector and BM25 for display
-    all_candidates = vector_results + bm25_results
+    # Step 4: Results already postprocessed by QueryEngine
+    # Hybrid search + metadata boost + cross-encoder reranking via native LlamaIndex postprocessors
+    print("\n[Step 4/5] Postprocessing complete (hybrid search + reranking)...")
     
-    # Remove duplicates by node_id
-    seen_ids = set()
-    unique_candidates = []
-    for doc in all_candidates:
-        node_id = doc.get('node_id', doc.get('id', ''))
-        if node_id not in seen_ids:
-            seen_ids.add(node_id)
-            unique_candidates.append(doc)
+    # Results are already postprocessed by QueryEngine
+    # Limit to final top_k
+    unique_candidates = retrieved_docs[:top_k]
     
     print(f"  Unique candidates: {len(unique_candidates)}")
-    print(f"  Postprocessed (via RetrieverService): {len(unique_candidates)} -> top {top_k}")
+    print(f"  Postprocessed (via QueryEngine): {len(unique_candidates)} -> top {top_k}")
     
-    # Use hybrid search results (already optimized)
+    # Use postprocessed results
     reranked_results = unique_candidates[:top_k]
     
     logger.info(f"Postprocessed {len(unique_candidates)} candidates to top {len(reranked_results)}")
-    logger.info("Note: Postprocessing (metadata boost + reranking) handled by RetrieverService")
+    logger.info("Note: Postprocessing (hybrid search + reranking) handled by QueryEngine")
     
     # Step 5: Assemble context (Module 11 - ContextAssembler)
     print("\n[Step 5/5] Assembling context...")
