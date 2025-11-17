@@ -20,6 +20,16 @@ import time
 
 from llama_index.core import Settings
 from llama_index.embeddings.huggingface import HuggingFaceEmbedding
+from llama_index.core.workflow import (
+    Context,
+    Workflow,
+    StartEvent,
+    StopEvent,
+    step,
+    Event,
+)
+from llama_index.vector_stores.faiss import FaissVectorStore
+from llama_index.core import StorageContext, VectorStoreIndex
 from .services.vectordb_service.service import VectorStoreClient
 from src.rag.libs.bm25_manager import BM25IndexManager
 from .services.retriever_service.service import RetrieverService
@@ -31,6 +41,23 @@ from .exceptions import (
 
 from src.utils.logging_config import get_logger, log_service_health
 from src.utils.metrics import get_metrics
+
+
+# Custom Events for RAG Workflow
+class RetrieveEvent(Event):
+    """Event triggered after retrieval step."""
+    nodes: List[Any]
+
+
+class RerankEvent(Event):
+    """Event triggered after reranking step."""
+    nodes: List[Any]
+
+
+class AssembleEvent(Event):
+    """Event triggered after context assembly."""
+    context_payload: Any
+
 
 logger = get_logger("rag_orchestrator")
 metrics = get_metrics()
@@ -63,13 +90,11 @@ class RAGOrchestrator:
         self.config_path = config_path
         self.persist_dir = Path(persist_dir)
         
-        # Service instances (lazy initialization)
-        # Note: Embedding model is now managed via Settings.embed_model (global LlamaIndex config)
-        # Note: Reranking is now handled by RetrieverService postprocessors (no separate service)
-        self._vector_store: Optional[VectorStoreClient] = None
-        self._bm25_manager: Optional[BM25IndexManager] = None
-        self._retriever: Optional[RetrieverService] = None
-        self._assembler: Optional[ContextAssembler] = None
+        # Initialize native LlamaIndex components
+        self._vector_store: Optional[FaissVectorStore] = None
+        self._storage_context: Optional[StorageContext] = None
+        self._index: Optional[VectorStoreIndex] = None
+        self._query_engine: Optional[Any] = None
         
         # Status flags
         self._initialized = False
@@ -110,28 +135,40 @@ class RAGOrchestrator:
             )
             log_service_health("embed_model", "initialized")
             
-            # Initialize vector store
+            # Initialize vector store and storage context
             faiss_index_path = self.persist_dir / "faiss_index"
-            self._vector_store = VectorStoreClient(
-                store_type="faiss",
-                config={'index_dir': str(faiss_index_path)}
-            )
             
-            # Load FAISS index
-            if faiss_index_path.exists():
-                index_loaded = self._vector_store.load_index(
-                    embed_model=Settings.embed_model
+            # Try to load existing vector store, create empty if not exists
+            try:
+                self._vector_store = FaissVectorStore.from_persist_dir(str(faiss_index_path))
+                self._storage_context = StorageContext.from_defaults(
+                    vector_store=self._vector_store,
+                    persist_dir=str(faiss_index_path)
                 )
-                if index_loaded and self._vector_store.index:
-                    self._indexes_loaded = True
-                    logger.info("FAISS index loaded successfully")
-                    log_service_health("vector_store", "loaded")
-                else:
-                    logger.warning("FAISS index exists but failed to load")
-                    log_service_health("vector_store", "error", error="load_failed")
-            else:
-                logger.warning(f"FAISS index not found at {faiss_index_path}")
-                log_service_health("vector_store", "not_found")
+                self._index = VectorStoreIndex.from_vector_store(
+                    vector_store=self._vector_store,
+                    storage_context=self._storage_context
+                )
+                self._indexes_loaded = True
+                logger.info("FAISS index loaded successfully")
+                log_service_health("vector_store", "loaded")
+            except (ValueError, FileNotFoundError) as e:
+                logger.warning(f"No existing FAISS index found: {e}, creating empty index")
+                # Create empty FAISS vector store
+                import faiss
+                d = 384  # Dimension for all-MiniLM-L6-v2
+                faiss_index = faiss.IndexFlatIP(d)  # Inner product for cosine similarity
+                self._vector_store = FaissVectorStore(faiss_index=faiss_index)
+                # Create empty storage context
+                self._storage_context = StorageContext.from_defaults(
+                    vector_store=self._vector_store
+                )
+                self._index = VectorStoreIndex.from_vector_store(
+                    vector_store=self._vector_store,
+                    storage_context=self._storage_context
+                )
+                self._indexes_loaded = False
+                log_service_health("vector_store", "created_empty")
             
             # Initialize BM25 manager
             bm25_index_path = self.persist_dir / "bm25_index"
@@ -153,26 +190,41 @@ class RAGOrchestrator:
                 logger.warning(f"BM25 index not found at {bm25_index_path}")
                 log_service_health("bm25_manager", "not_found")
             
-            # Initialize retriever (requires loaded indexes)
-            # Note: Reranking now integrated as postprocessors in RetrieverService
-            if self._indexes_loaded and self._vector_store.index:
-                self._retriever = RetrieverService(
-                    index=self._vector_store.index,
-                    config_path=self.config_path
+            # Initialize query engine directly from index
+            # Note: Reranking now integrated as postprocessors in QueryEngine
+            if self._indexes_loaded and self._index:
+                from src.utils.config_loader import get_retriever_config
+                retriever_config = get_retriever_config(self.config_path)
+                semantic_top_k = retriever_config.get('semantic_top_k', 20)
+                
+                self._query_engine = self._index.as_query_engine(
+                    similarity_top_k=semantic_top_k,
+                    response_mode="compact"
                 )
-                # BM25 retriever and reranking postprocessors managed internally
                 logger.info(
-                    "Retriever service initialized with hybrid search and postprocessors"
+                    "QueryEngine initialized with native LlamaIndex components"
                 )
-                log_service_health("retriever", "initialized")
+                log_service_health("query_engine", "initialized")
             else:
-                logger.error("Cannot initialize retriever: indexes not loaded")
-                log_service_health("retriever", "error", error="indexes_not_loaded")
+                logger.error("Cannot initialize query engine: indexes not loaded")
+                log_service_health("query_engine", "error", error="indexes_not_loaded")
             
             # Initialize context assembler
             self._assembler = ContextAssembler(config_path=self.config_path)
             logger.info("Context assembler initialized")
             log_service_health("assembler", "initialized")
+            
+            # Initialize RAG Workflow with QueryEngine
+            if self._indexes_loaded and self._query_engine:
+                self._workflow = RAGWorkflow(
+                    query_engine=self._query_engine,
+                    assembler=self._assembler
+                )
+                logger.info("RAG Workflow initialized with QueryEngine")
+                log_service_health("workflow", "initialized")
+            else:
+                logger.warning("Cannot initialize Workflow: query engine not available")
+                log_service_health("workflow", "not_initialized")
             
             self._initialized = True
             duration = time.time() - start_time
@@ -236,8 +288,8 @@ class RAGOrchestrator:
         if not self._indexes_loaded:
             raise RuntimeError("Indexes not loaded")
         
-        if not self._retriever:
-            raise RuntimeError("Retriever service not available")
+        if not self._query_engine:
+            raise RuntimeError("Query engine not available")
         
         start_time = time.time()
         request_id = f"query_{int(time.time() * 1000)}"
@@ -251,25 +303,33 @@ class RAGOrchestrator:
         )
         
         try:
-            # Step 1: Retrieve documents using RetrieverService (includes postprocessing)
-            # RetrieverService now handles hybrid search via QueryFusionRetriever
+            # Step 1: Retrieve documents using QueryEngine
             initial_k = top_k * 4  # Over-retrieve for better selection
             retrieve_start = time.time()
             
-            retrieved_docs = self._retriever.retrieve(
-                query=query,
-                top_k=initial_k,
-                search_type=search_type
-            )
+            # Use QueryEngine to get response with nodes
+            response = self._query_engine.query(query)
+            retrieved_nodes = response.source_nodes[:initial_k] if response.source_nodes else []
             
             retrieve_duration = time.time() - retrieve_start
             
             logger.info(
                 "Retrieval complete",
                 request_id=request_id,
-                candidates=len(retrieved_docs),
+                candidates=len(retrieved_nodes),
                 duration_ms=retrieve_duration * 1000
             )
+            
+            # Convert nodes to document format
+            retrieved_docs = []
+            for node in retrieved_nodes:
+                doc = {
+                    'text': node.text,
+                    'score': getattr(node, 'score', 0.0),
+                    'metadata': node.metadata,
+                    'node_id': getattr(node, 'node_id', getattr(node, 'id_', ''))
+                }
+                retrieved_docs.append(doc)
             
             # Step 2: Results already postprocessed by RetrieverService
             # (metadata boost + cross-encoder reranking via native LlamaIndex postprocessors)
@@ -335,7 +395,7 @@ class RAGOrchestrator:
                     'candidates_retrieved': len(retrieved_docs),
                     'results_postprocessed': len(final_docs),
                     'search_type': search_type,
-                    'note': 'Hybrid search and postprocessing via native LlamaIndex components'
+                    'note': 'Query executed via native LlamaIndex QueryEngine'
                 }
             }
             
@@ -382,19 +442,94 @@ class RAGOrchestrator:
             metrics.increment("orchestrator_query_errors_total")
             raise RetrievalError(query, f"Data structure error: {e}") from e
         
+    async def query_async(
+        self,
+        query: str,
+        top_k: int = 5,
+        search_type: str = "hybrid",
+        token_budget: int = 4000
+    ) -> Dict[str, Any]:
+        """
+        Execute query pipeline using LlamaIndex Workflow (async).
+        
+        Args:
+            query: The search query string
+            top_k: Number of top results to return after reranking
+            search_type: Type of search ("semantic", "keyword", "hybrid")
+            token_budget: Maximum token budget for assembled context
+            
+        Returns:
+            Dictionary containing query results
+        """
+        if not self._workflow:
+            raise RuntimeError("RAG Workflow not initialized")
+        
+        start_time = time.time()
+        request_id = f"query_{int(time.time() * 1000)}"
+        
+        logger.info(
+            "Starting async query pipeline with Workflow",
+            request_id=request_id,
+            query=query,
+            top_k=top_k,
+            search_type=search_type
+        )
+        
+        try:
+            # Run workflow
+            result = await self._workflow.run(
+                query=query,
+                top_k=top_k,
+                search_type=search_type,
+                token_budget=token_budget
+            )
+            
+            context_payload = result
+            
+            total_duration = time.time() - start_time
+            
+            # Build response
+            response = {
+                'query': query,
+                'context': [
+                    {
+                        'id': item.id,
+                        'text': item.text,
+                        'score': item.score,
+                        'metadata': item.meta
+                    }
+                    for item in context_payload.context
+                ],
+                'total_tokens_estimate': context_payload.total_tokens_estimate(),
+                'sources_count': len(context_payload.context),
+                'retrieval_stats': {
+                    'total_duration_ms': round(total_duration * 1000, 2),
+                    'search_type': search_type,
+                    'note': 'Query executed via LlamaIndex Workflow'
+                }
+            }
+            
+            logger.info(
+                "Async query pipeline complete",
+                request_id=request_id,
+                results=len(context_payload.context),
+                tokens=context_payload.total_tokens_estimate(),
+                duration_ms=total_duration * 1000
+            )
+            
+            return response
+            
         except Exception as e:
-            # Unexpected errors
             duration = time.time() - start_time
             logger.error(
-                "Query pipeline failed: unexpected error",
+                "Async query pipeline failed",
                 request_id=request_id,
                 query=query,
                 error=str(e),
                 duration_ms=duration * 1000,
                 exc_info=True
             )
-            metrics.increment("orchestrator_query_errors_total")
-            raise RetrievalError(query, f"Unexpected error: {e}") from e
+            raise RetrievalError(query, f"Workflow query failed: {e}") from e
 
     def search_documents(
         self,
@@ -413,7 +548,7 @@ class RAGOrchestrator:
         Returns:
             List of document dictionaries with text, score, and metadata
         """
-        if not self._initialized or not self._retriever:
+        if not self._initialized or not self._query_engine:
             raise RuntimeError("RAG services not initialized")
         
         logger.info(
@@ -424,11 +559,19 @@ class RAGOrchestrator:
         )
         
         try:
-            results = self._retriever.retrieve(
-                query,
-                top_k=top_k,
-                search_type=search_type
-            )
+            # Use QueryEngine for search
+            response = self._query_engine.query(query)
+            nodes = response.source_nodes[:top_k] if response.source_nodes else []
+            
+            results = []
+            for node in nodes:
+                result = {
+                    'text': node.text,
+                    'score': getattr(node, 'score', 0.0),
+                    'metadata': node.metadata,
+                    'node_id': getattr(node, 'node_id', getattr(node, 'id_', ''))
+                }
+                results.append(result)
             
             logger.info(
                 "Document search complete",
@@ -464,14 +607,9 @@ class RAGOrchestrator:
                 },
                 'vector_store': {
                     'available': self._vector_store is not None,
-                    'index_loaded': (
-                        self._vector_store.index is not None 
-                        if self._vector_store else False
-                    ),
+                    'index_loaded': self._index is not None,
                     'status': (
-                        'healthy' if (
-                            self._vector_store and self._vector_store.index
-                        ) else 'degraded'
+                        'healthy' if self._index else 'degraded'
                     )
                 },
                 'bm25_manager': {
@@ -488,8 +626,8 @@ class RAGOrchestrator:
                     )
                 },
                 'retriever': {
-                    'available': self._retriever is not None,
-                    'status': 'healthy' if self._retriever else 'not_initialized'
+                    'available': self._query_engine is not None,
+                    'status': 'healthy' if self._query_engine else 'not_initialized'
                 },
                 'postprocessors': {
                     'available': self._retriever is not None,
@@ -499,6 +637,10 @@ class RAGOrchestrator:
                 'assembler': {
                     'available': self._assembler is not None,
                     'status': 'healthy' if self._assembler else 'not_initialized'
+                },
+                'workflow': {
+                    'available': self._workflow is not None,
+                    'status': 'healthy' if self._workflow else 'not_initialized'
                 }
             },
             'persist_dir': str(self.persist_dir),
@@ -523,14 +665,23 @@ class RAGOrchestrator:
             self._indexes_loaded = False
             self._retriever = None
             
-            # Reload FAISS
-            if self._vector_store and Settings.embed_model:
-                index_loaded = self._vector_store.load_index(
-                    embed_model=Settings.embed_model
+            # Reload FAISS index
+            faiss_index_path = self.persist_dir / "faiss_index"
+            try:
+                self._vector_store = FaissVectorStore.from_persist_dir(str(faiss_index_path))
+                self._storage_context = StorageContext.from_defaults(
+                    vector_store=self._vector_store,
+                    persist_dir=str(faiss_index_path)
                 )
-                if index_loaded and self._vector_store.index:
-                    self._indexes_loaded = True
-                    logger.info("FAISS index reloaded")
+                self._index = VectorStoreIndex.from_vector_store(
+                    vector_store=self._vector_store,
+                    storage_context=self._storage_context
+                )
+                self._indexes_loaded = True
+                logger.info("FAISS index reloaded")
+            except Exception as e:
+                logger.error(f"Failed to reload FAISS index: {e}")
+                return False
             
             # Reload BM25
             if self._bm25_manager:
@@ -540,14 +691,27 @@ class RAGOrchestrator:
                 else:
                     logger.warning("BM25 index reload returned None")
             
-            # Reinitialize retriever
-            if self._indexes_loaded and self._vector_store and self._vector_store.index:
-                self._retriever = RetrieverService(
-                    index=self._vector_store.index,
-                    config_path=self.config_path
+            # Reinitialize query engine
+            if self._indexes_loaded and self._index:
+                from src.utils.config_loader import get_retriever_config
+                retriever_config = get_retriever_config(self.config_path)
+                semantic_top_k = retriever_config.get('semantic_top_k', 20)
+                
+                self._query_engine = self._index.as_query_engine(
+                    similarity_top_k=semantic_top_k,
+                    response_mode="compact"
                 )
-                # BM25 retriever is now managed by RetrieverService internally
-                logger.info("Retriever reinitialized")
+                logger.info("QueryEngine reinitialized")
+            
+            # Reinitialize workflow
+            if self._indexes_loaded and self._query_engine:
+                self._workflow = RAGWorkflow(
+                    query_engine=self._query_engine,
+                    assembler=self._assembler
+                )
+                logger.info("Workflow reinitialized with QueryEngine")
+            else:
+                logger.warning("Cannot reinitialize Workflow: query engine not available")
             
             logger.info("Index reload complete", success=self._indexes_loaded)
             return self._indexes_loaded
@@ -563,6 +727,92 @@ class RAGOrchestrator:
         except Exception as e:
             logger.error("Index reload failed: unexpected error", error=str(e), exc_info=True)
             return False
+
+
+class RAGWorkflow(Workflow):
+    """
+    LlamaIndex Workflow for RAG query pipeline.
+    
+    Implements the RAG pipeline using native LlamaIndex QueryEngine:
+    - retrieve: Get documents using QueryEngine
+    - assemble: Assemble context using ContextAssembler
+    """
+
+    def __init__(self, query_engine: Any, assembler: Any, **kwargs):
+        super().__init__(**kwargs)
+        self.query_engine = query_engine
+        self.assembler = assembler
+
+    @step
+    async def retrieve_and_assemble(
+        self, ctx: Context, ev: StartEvent
+    ) -> StopEvent:
+        """Retrieve documents and assemble context using LlamaIndex QueryEngine."""
+        query = ev.get("query")
+        top_k = ev.get("top_k", 5)
+        search_type = ev.get("search_type", "hybrid")
+        token_budget = ev.get("token_budget", 4000)
+
+        if not query:
+            raise ValueError("Query is required")
+
+        logger.info(f"Workflow step: query='{query}', top_k={top_k}, search_type={search_type}")
+
+        try:
+            # Use QueryEngine for retrieval (includes postprocessing)
+            from llama_index.core import QueryBundle
+            query_bundle = QueryBundle(query_str=query)
+            
+            # Retrieve nodes
+            response = await self.query_engine.aretrieve(query_bundle)
+            nodes = response[:top_k * 4]  # Over-retrieve for better selection
+
+            # Convert nodes to document format
+            documents = []
+            for node in nodes:
+                doc = {
+                    'text': node.text,
+                    'score': getattr(node, 'score', 0.0),
+                    'metadata': node.metadata,
+                    'node_id': getattr(node, 'node_id', getattr(node, 'id_', ''))
+                }
+                documents.append(doc)
+
+            # Limit to final top_k
+            final_docs = documents[:top_k]
+
+            # Assemble context
+            if self.assembler:
+                context_payload = self.assembler.assemble_context(
+                    query=query,
+                    documents=final_docs,
+                    token_budget=token_budget,
+                    max_items=top_k
+                )
+            else:
+                # Fallback
+                from .libs.schemas.mcp_schemas import MCPContextPayload, ContextItem
+                context_items = []
+                for doc in final_docs:
+                    item = ContextItem(
+                        id=doc.get('node_id', ''),
+                        text=doc.get('text', ''),
+                        score=doc.get('score', 0.0),
+                        meta=doc.get('metadata', {})
+                    )
+                    context_items.append(item)
+                context_payload = MCPContextPayload(
+                    query=query,
+                    context=context_items,
+                    schema_version="1.0",
+                    token_budget=token_budget
+                )
+
+            return StopEvent(result=context_payload)
+
+        except Exception as e:
+            logger.error(f"Workflow step failed: {e}")
+            raise
 
 
 # Global orchestrator instance
