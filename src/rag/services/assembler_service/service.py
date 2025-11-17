@@ -5,15 +5,15 @@ Provides classes for context assembly and MCP payload creation.
 Integrates with LlamaIndex Node objects and token counting infrastructure.
 """
 
-from typing import List, Dict, Any, Optional, Union
+from typing import Any, Dict, List, Optional, Tuple, Union
 import logging
 
 from llama_index.core.schema import NodeWithScore, BaseNode
+from llama_index.core.callbacks import TokenCountingHandler
 
 from ...libs.schemas.mcp_schemas import (
     MCPContextPayload, ContextAssemblyRequest, ContextAssemblyResponse, ContextItem
 )
-from ...libs.utils.token_utils import TokenBudgeter, budget_and_assemble
 from src.utils.config_loader import get_context_assembler_config
 
 logger = logging.getLogger(__name__)
@@ -57,10 +57,23 @@ class ContextAssembler:
         
         self.default_token_budget = token_budget
         self.model_name = model_name
-        self.token_budgeter = TokenBudgeter(model_name=model_name, verbose=verbose)
+        
+        # Initialize LlamaIndex TokenCountingHandler for native token tracking
+        import tiktoken
+        try:
+            tokenizer_fn = tiktoken.encoding_for_model(model_name).encode
+        except KeyError:
+            # Fallback to cl100k_base for newer models
+            tokenizer_fn = tiktoken.get_encoding("cl100k_base").encode
+            logger.warning(f"Unknown model {model_name}, using cl100k_base encoding")
+        
+        self.token_counter = TokenCountingHandler(
+            tokenizer=tokenizer_fn,
+            verbose=verbose
+        )
         
         logger.info(
-            f"Initialized ContextAssembler with LlamaIndex: "
+            f"Initialized ContextAssembler with LlamaIndex TokenCountingHandler: "
             f"token_budget={token_budget}, model={model_name}, verbose={verbose}"
         )
     
@@ -73,7 +86,7 @@ class ContextAssembler:
         min_score: Optional[float] = None
     ) -> MCPContextPayload:
         """
-        Assemble MCP-compatible context payload from documents using LlamaIndex token counting.
+        Assemble MCP-compatible context payload from documents using LlamaIndex TokenCountingHandler.
         
         Args:
             query: Original user query
@@ -87,23 +100,126 @@ class ContextAssembler:
         """
         budget = token_budget or self.default_token_budget
         
-        # Use LlamaIndex-integrated budget_and_assemble function
-        payload_dict = budget_and_assemble(
-            results=documents,
-            token_budget=budget,
-            query=query,
-            max_items=max_items,
-            min_score=min_score,
-            model_name=self.model_name
+        # Select documents within token budget using native LlamaIndex token counting
+        selected_docs, total_tokens = self._select_documents_by_budget(
+            documents, budget, max_items, min_score
         )
         
-        # Convert back to Pydantic model for validation
-        payload = MCPContextPayload(**payload_dict)
+        # Normalize scores to 0.0-1.0 range (CrossEncoder can return values outside this range)
+        if selected_docs:
+            scores = [doc.get('score', 0.0) for doc in selected_docs if doc.get('score') is not None]
+            if scores:
+                max_score = max(scores)
+                min_score_val = min(scores)
+                score_range = max_score - min_score_val if max_score > min_score_val else 1.0
+                
+                for doc in selected_docs:
+                    if 'score' in doc and doc['score'] is not None:
+                        # Normalize to 0.0-1.0 (min-max scaling)
+                        doc['score'] = (doc['score'] - min_score_val) / score_range
         
-        logger.info(f"Assembled context: {len(payload.context)} items, "
-                   f"~{payload.total_tokens_estimate()} tokens")
+        # Convert to MCP ContextItems
+        context_items = []
+        for doc in selected_docs:
+            item = ContextItem(
+                id=doc.get('id', ''),
+                text=doc.get('text', ''),
+                score=doc.get('score'),
+                meta=doc.get('metadata', {})
+            )
+            context_items.append(item)
+        
+        # Create MCP payload
+        payload = MCPContextPayload(
+            schema_version="1.0",
+            context=context_items,
+            query=query,
+            token_budget=budget,
+            provenance={
+                'total_candidates': len(documents),
+                'selected_count': len(selected_docs),
+                'total_tokens': total_tokens,
+                'selection_method': 'token_budget_relevance'
+            }
+        )
+        
+        logger.info(f"Assembled context: {len(context_items)} items, "
+                   f"~{total_tokens} tokens (budget: {budget})")
         
         return payload
+    
+    def _select_documents_by_budget(
+        self,
+        documents: List[Dict[str, Any]],
+        token_budget: int,
+        max_items: Optional[int] = None,
+        min_score: Optional[float] = None
+    ) -> Tuple[List[Dict[str, Any]], int]:
+        """
+        Select documents within token budget, prioritizing by relevance score.
+        
+        Uses LlamaIndex TokenCountingHandler for accurate token counting.
+        
+        Args:
+            documents: List of document dictionaries with optional 'score' field
+            token_budget: Maximum token budget
+            max_items: Maximum number of documents to select
+            min_score: Minimum relevance score to consider
+            
+        Returns:
+            Tuple of (selected_documents, total_tokens)
+        """
+        # Filter by minimum score if specified
+        if min_score is not None:
+            filtered_docs = [
+                doc for doc in documents 
+                if doc.get('score', 0.0) >= min_score
+            ]
+        else:
+            filtered_docs = documents
+        
+        # Sort by score descending (highest relevance first)
+        sorted_docs = sorted(
+            filtered_docs,
+            key=lambda x: x.get('score', 0.0),
+            reverse=True
+        )
+        
+        # Greedy selection within budget
+        selected: List[Dict[str, Any]] = []
+        total_tokens = 0
+        
+        for doc in sorted_docs:
+            # Estimate tokens for this document
+            text = doc.get('text', '')
+            tokens = len(self.token_counter.tokenizer(text))
+            
+            # Add overhead for metadata formatting (conservative estimate)
+            metadata = doc.get('metadata', {})
+            if metadata:
+                metadata_tokens = len(str(metadata)) // 10  # Rough estimate
+            else:
+                metadata_tokens = 0
+            
+            doc_tokens = tokens + metadata_tokens
+            
+            # Check if adding this document would exceed budget
+            if total_tokens + doc_tokens > token_budget:
+                break
+            
+            # Check max items limit
+            if max_items and len(selected) >= max_items:
+                break
+            
+            selected.append(doc)
+            total_tokens += doc_tokens
+        
+        logger.info(
+            f"Selected {len(selected)}/{len(documents)} documents "
+            f"with {total_tokens}/{token_budget} tokens"
+        )
+        
+        return selected, total_tokens
     
     def assemble_from_request(self, request: ContextAssemblyRequest) -> ContextAssemblyResponse:
         """
@@ -151,7 +267,7 @@ class ContextAssembler:
         Returns:
             Selected documents
         """
-        selected, _ = self.token_budgeter.select_documents_by_budget(
+        selected, _ = self._select_documents_by_budget(
             documents, max_tokens, max_items, min_score
         )
         return selected
@@ -184,18 +300,15 @@ class ContextAssembler:
     
     def get_assembly_stats(self, payload: MCPContextPayload) -> Dict[str, Any]:
         """
-        Get statistics about the assembled context including LlamaIndex token counts.
+        Get statistics about the assembled context.
         
         Args:
             payload: Assembled payload
             
         Returns:
-            Statistics dictionary with LlamaIndex metrics
+            Statistics dictionary
         """
         scores = [item.score for item in payload.context if item.score is not None]
-        
-        # Get LlamaIndex token statistics
-        llamaindex_stats = self.token_budgeter.get_stats()
         
         return {
             'total_items': len(payload.context),
@@ -205,14 +318,13 @@ class ContextAssembler:
             'avg_score': sum(scores) / len(scores) if scores else None,
             'min_score': min(scores) if scores else None,
             'max_score': max(scores) if scores else None,
-            'provenance': payload.provenance,
-            'llamaindex_stats': llamaindex_stats
+            'provenance': payload.provenance
         }
     
     def reset_token_counts(self) -> None:
         """Reset accumulated token counts in LlamaIndex counter."""
-        self.token_budgeter.reset_counts()
-        logger.debug("Reset token counts")
+        # TokenCountingHandler doesn't have reset functionality
+        logger.debug("Token counter reset not supported")
     
     def assemble_from_nodes(
         self,
@@ -263,16 +375,13 @@ class ContextAssembler:
             documents.append(doc)
         
         # Use standard assembly with LlamaIndex token counting
-        payload_dict = budget_and_assemble(
-            results=documents,
-            token_budget=budget,
+        payload = self.assemble_context(
             query=query,
+            documents=documents,
+            token_budget=budget,
             max_items=max_items,
-            min_score=min_score,
-            model_name=self.model_name
+            min_score=min_score
         )
-        
-        payload = MCPContextPayload(**payload_dict)
         
         logger.info(
             f"Assembled context from {len(nodes)} LlamaIndex nodes: "
