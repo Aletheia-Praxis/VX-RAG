@@ -6,7 +6,7 @@ with only essential persistence functionality. All core BM25 logic is handled
 by LlamaIndex directly.
 """
 
-from typing import Optional, List
+from typing import Optional, List, Any
 from pathlib import Path
 
 from llama_index.retrievers.bm25 import BM25Retriever
@@ -97,6 +97,48 @@ class BM25IndexManager:
 
         except Exception as e:
             logger.error(f"Failed to build BM25 index: {e}")
+            raise
+
+    def build_from_docstore(self, docstore: Any, similarity_top_k: Optional[int] = None) -> BM25Retriever:
+        """
+        Build BM25 retriever from existing docstore and persist to disk.
+        
+        This method is useful when you already have a VectorStoreIndex with a docstore
+        and want to create a BM25 retriever that works with the same documents.
+        
+        Args:
+            docstore: LlamaIndex DocumentStore instance
+            similarity_top_k: Number of top results to return (uses config if None)
+            
+        Returns:
+            BM25Retriever instance
+        """
+        try:
+            if similarity_top_k is None:
+                config = get_bm25_config(self.config_path)
+                similarity_top_k = config.get('similarity_top_k', 20)
+            
+            # Ensure it's an int and not None
+            if similarity_top_k is None or not isinstance(similarity_top_k, int):
+                similarity_top_k = 20 if similarity_top_k is None else int(similarity_top_k)
+            
+            logger.info(f"Building BM25 retriever from docstore with top_k={similarity_top_k}")
+            
+            # Create BM25 retriever from docstore using LlamaIndex native method
+            retriever = BM25Retriever.from_defaults(
+                docstore=docstore,
+                similarity_top_k=similarity_top_k,  # Now guaranteed to be int
+                verbose=True
+            )
+
+            # Persist using native BM25Retriever method
+            retriever.persist(str(self.index_dir))
+            
+            logger.info(f"BM25 retriever built from docstore and persisted")
+            return retriever
+
+        except Exception as e:
+            logger.error(f"Failed to build BM25 retriever from docstore: {e}")
             raise
 
     def load(self) -> Optional[BM25Retriever]:
