@@ -4,7 +4,7 @@ Services for the RAG pipeline.
 Note: 
 - Embedding functionality is now provided via llama_index.core.Settings.embed_model
 - Hybrid search is now provided via llama_index.core.retrievers.QueryFusionRetriever
-- BM25 persistence is now provided via src.rag.libs.bm25_manager.BM25IndexManager
+- BM25 retrieval is now provided via llama_index.retrievers.bm25.BM25Retriever
 - Reranking functionality is now provided via llama_index.postprocessor.SentenceTransformerRerank
   (integrated in native LlamaIndex QueryEngine postprocessors)
 """
