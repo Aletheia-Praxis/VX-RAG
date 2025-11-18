@@ -30,7 +30,6 @@ from llama_index.core.workflow import (
 )
 from llama_index.vector_stores.faiss import FaissVectorStore
 from llama_index.core import StorageContext, VectorStoreIndex
-from src.rag.libs.bm25_manager import BM25IndexManager
 from .services.assembler_service.service import ContextAssembler
 from .exceptions import (
     ServiceInitializationError,
@@ -93,6 +92,7 @@ class RAGOrchestrator:
         self._storage_context: Optional[StorageContext] = None
         self._index: Optional[VectorStoreIndex] = None
         self._query_engine: Optional[Any] = None
+        self._bm25_retriever: Optional[Any] = None
         
         # Status flags
         self._initialized = False
@@ -168,25 +168,22 @@ class RAGOrchestrator:
                 self._indexes_loaded = False
                 log_service_health("vector_store", "created_empty")
             
-            # Initialize BM25 manager
+            # Initialize BM25 retriever directly with LlamaIndex
             bm25_index_path = self.persist_dir / "bm25_index"
-            self._bm25_manager = BM25IndexManager(
-                index_dir=str(bm25_index_path),
-                config_path=self.config_path
-            )
-            
-            # Load BM25 index
             if bm25_index_path.exists():
-                bm25_retriever = self._bm25_manager.load()
-                if bm25_retriever:
-                    logger.info("BM25 index loaded successfully")
-                    log_service_health("bm25_manager", "loaded")
-                else:
-                    logger.warning("BM25 index load returned None")
-                    log_service_health("bm25_manager", "load_failed")
+                try:
+                    from llama_index.retrievers.bm25 import BM25Retriever
+                    self._bm25_retriever = BM25Retriever.from_persist_dir(str(bm25_index_path))
+                    logger.info("BM25 retriever loaded successfully")
+                    log_service_health("bm25_retriever", "loaded")
+                except Exception as e:
+                    logger.warning(f"Failed to load BM25 retriever: {e}")
+                    self._bm25_retriever = None
+                    log_service_health("bm25_retriever", "load_failed")
             else:
                 logger.warning(f"BM25 index not found at {bm25_index_path}")
-                log_service_health("bm25_manager", "not_found")
+                self._bm25_retriever = None
+                log_service_health("bm25_retriever", "not_found")
             
             # Initialize query engine directly from index
             # Note: Reranking now integrated as postprocessors in QueryEngine
@@ -610,18 +607,9 @@ class RAGOrchestrator:
                         'healthy' if self._index else 'degraded'
                     )
                 },
-                'bm25_manager': {
-                    'available': self._bm25_manager is not None,
-                    'index_loaded': (
-                        self._bm25_manager.exists() 
-                        if self._bm25_manager else False
-                    ),
-                    'status': (
-                        'healthy' if (
-                            self._bm25_manager and 
-                            self._bm25_manager.exists()
-                        ) else 'degraded'
-                    )
+                'bm25_retriever': {
+                    'available': self._bm25_retriever is not None,
+                    'status': 'healthy' if self._bm25_retriever else 'not_loaded'
                 },
                 'retriever': {
                     'available': self._query_engine is not None,
@@ -680,13 +668,19 @@ class RAGOrchestrator:
                 logger.error(f"Failed to reload FAISS index: {e}")
                 return False
             
-            # Reload BM25
-            if self._bm25_manager:
-                bm25_retriever = self._bm25_manager.load()
-                if bm25_retriever:
-                    logger.info("BM25 index reloaded")
-                else:
-                    logger.warning("BM25 index reload returned None")
+            # Reload BM25 retriever
+            bm25_index_path = self.persist_dir / "bm25_index"
+            if bm25_index_path.exists():
+                try:
+                    from llama_index.retrievers.bm25 import BM25Retriever
+                    self._bm25_retriever = BM25Retriever.from_persist_dir(str(bm25_index_path))
+                    logger.info("BM25 retriever reloaded")
+                except Exception as e:
+                    logger.warning(f"Failed to reload BM25 retriever: {e}")
+                    self._bm25_retriever = None
+            else:
+                logger.warning(f"BM25 index not found at {bm25_index_path}")
+                self._bm25_retriever = None
             
             # Reinitialize query engine
             if self._indexes_loaded and self._index:
