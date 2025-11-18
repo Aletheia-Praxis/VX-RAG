@@ -78,7 +78,7 @@ async def run_ingestion_pipeline(
         get_embedding_model_name,
         get_vector_store_type,
     )
-    from llama_index.core.schema import Document as LlamaDocument
+    from llama_index.core.schema import Document, BaseNode
     
     data_path = Path(data_dir)
     processed_dir = Path("./data/processed")
@@ -252,7 +252,7 @@ async def run_ingestion_pipeline(
         
         # Convert chunks to LlamaIndex documents
         llama_docs = [
-            LlamaDocument(
+            Document(
                 text=chunk['text'],
                 metadata=chunk.get('metadata', {}),
                 id_=chunk['id']
@@ -308,15 +308,25 @@ async def run_ingestion_pipeline(
         if progress_callback:
             await progress_callback(95, "Building BM25 index for hybrid search...")
         
-        from src.rag.libs.bm25_manager import BM25IndexManager
-        bm25_manager = BM25IndexManager(
-            index_dir=str(Path(persist_dir) / "bm25_index"),
-            config_path=config_path
+        from llama_index.retrievers.bm25 import BM25Retriever
+        from src.utils.config_loader import get_bm25_config
+        from typing import cast, List
+        from llama_index.core.schema import BaseNode
+        
+        bm25_config = get_bm25_config(config_path)
+        similarity_top_k = bm25_config.get('similarity_top_k', 20)
+        
+        bm25_retriever = await asyncio.to_thread(
+            BM25Retriever.from_defaults,
+            nodes=cast(List[BaseNode], llama_docs),
+            similarity_top_k=similarity_top_k,
+            verbose=True
         )
-        await asyncio.to_thread(
-            bm25_manager.build_and_persist,
-            llama_docs
-        )
+        
+        # Persist BM25 retriever
+        bm25_index_path = Path(persist_dir) / "bm25_index"
+        await asyncio.to_thread(bm25_retriever.persist, str(bm25_index_path))
+        
         logger.info("BM25 index built for hybrid search")
         
         # Step 7: Complete (100%)
