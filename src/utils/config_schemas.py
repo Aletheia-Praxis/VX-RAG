@@ -97,15 +97,6 @@ class RerankerConfig(BaseModel):
     enable_metadata_prioritization: bool = Field(default=True, description="Enable metadata prioritization")
 
 
-class ContextAssemblerConfig(BaseModel):
-    """Context assembler configuration."""
-    
-    token_budget: int = Field(default=2048, ge=512, le=32000, description="Token budget")
-    model_name: str = Field(default="gpt-3.5-turbo", description="Model for token counting")
-    max_items: Optional[int] = Field(default=None, ge=1, description="Max context items")
-    min_score: Optional[float] = Field(default=None, ge=0.0, le=1.0, description="Min relevance score")
-
-
 class RateLimitConfig(BaseModel):
     """Rate limiting configuration."""
     
@@ -247,7 +238,6 @@ class VXRAGSettings(BaseModel):
     retriever: RetrieverConfig = Field(default_factory=RetrieverConfig)
     bm25: BM25Config = Field(default_factory=BM25Config)
     reranker: RerankerConfig = Field(default_factory=RerankerConfig)
-    context_assembler: ContextAssemblerConfig = Field(default_factory=ContextAssemblerConfig)
     mcp: MCPConfig = Field(default_factory=MCPConfig)
     duplicate_detection: DuplicateDetectionConfig = Field(default_factory=DuplicateDetectionConfig)
     paddle_ocr: PaddleOCRConfig = Field(default_factory=PaddleOCRConfig)
