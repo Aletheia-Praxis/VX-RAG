@@ -63,23 +63,12 @@ class TestRAGOrchestrator:
         assert orchestrator._vector_store is None
         assert orchestrator._query_engine is None
 
-    @patch('src.rag.orchestrator.ContextAssembler')
     @patch('src.rag.orchestrator.Settings')
-    def test_query_hybrid_search(self, mock_settings, mock_assembler, temp_config_file, mock_index):
+    def test_query_hybrid_search(self, mock_settings, temp_config_file, mock_index):
         """Test query method with QueryEngine."""
         from pathlib import Path
         
         # Setup mocks
-        mock_assembler_instance = Mock()
-        mock_context_payload = Mock()
-        mock_context_payload.context = [
-            Mock(id='node_1', text='test document', score=0.8, meta={'source': 'test'})
-        ]
-        mock_context_payload.total_tokens_estimate.return_value = 100
-        mock_assembler_instance.assemble_context.return_value = mock_context_payload
-        mock_assembler.return_value = mock_assembler_instance
-
-        # Mock QueryEngine response
         mock_response = Mock()
         mock_node = Mock()
         mock_node.text = 'test document'
@@ -99,7 +88,6 @@ class TestRAGOrchestrator:
         # Manually set up the orchestrator state for testing
         orchestrator._query_engine = Mock()
         orchestrator._query_engine.query.return_value = mock_response
-        orchestrator._assembler = mock_assembler_instance
         orchestrator._initialized = True
         orchestrator._indexes_loaded = True
 
