@@ -30,7 +30,10 @@ from llama_index.core.workflow import (
 )
 from llama_index.vector_stores.faiss import FaissVectorStore
 from llama_index.core import StorageContext, VectorStoreIndex
-from .services.assembler_service.service import ContextAssembler
+from llama_index.core import get_response_synthesizer
+from llama_index.core.callbacks import TokenCountingHandler
+from llama_index.core.schema import NodeWithScore
+from llama_index.core.response_synthesizers import ResponseMode
 from .exceptions import (
     ServiceInitializationError,
     RetrievalError,
@@ -93,6 +96,7 @@ class RAGOrchestrator:
         self._index: Optional[VectorStoreIndex] = None
         self._query_engine: Optional[Any] = None
         self._bm25_retriever: Optional[Any] = None
+        self._response_synthesizer: Optional[Any] = None
         
         # Status flags
         self._initialized = False
@@ -194,28 +198,50 @@ class RAGOrchestrator:
                 
                 self._query_engine = self._index.as_query_engine(
                     similarity_top_k=semantic_top_k,
-                    response_mode="compact"
+                    response_synthesizer=self._response_synthesizer
                 )
                 logger.info(
-                    "QueryEngine initialized with native LlamaIndex components"
+                    "QueryEngine initialized with native LlamaIndex components and Response Synthesizer"
                 )
                 log_service_health("query_engine", "initialized")
             else:
                 logger.error("Cannot initialize query engine: indexes not loaded")
                 log_service_health("query_engine", "error", error="indexes_not_loaded")
             
-            # Initialize context assembler
-            self._assembler = ContextAssembler(config_path=self.config_path)
-            logger.info("Context assembler initialized")
-            log_service_health("assembler", "initialized")
+            # Initialize response synthesizer directly with LlamaIndex
+            from src.utils.config_loader import get_context_assembler_config
+            assembler_config = get_context_assembler_config(self.config_path)
+            
+            # Initialize TokenCountingHandler for token tracking
+            import tiktoken
+            try:
+                tokenizer_fn = tiktoken.encoding_for_model(assembler_config['model_name']).encode
+            except KeyError:
+                tokenizer_fn = tiktoken.get_encoding("cl100k_base").encode
+                logger.warning(f"Unknown model {assembler_config['model_name']}, using cl100k_base encoding")
+            
+            token_counter = TokenCountingHandler(
+                tokenizer=tokenizer_fn,
+                verbose=False
+            )
+            
+            # Initialize Response Synthesizer with token counting
+            self._response_synthesizer = get_response_synthesizer(
+                response_mode=ResponseMode.COMPACT,
+                use_async=False,
+                streaming=False
+            )
+            
+            logger.info("Response synthesizer initialized with native LlamaIndex components")
+            log_service_health("response_synthesizer", "initialized")
             
             # Initialize RAG Workflow with QueryEngine
             if self._indexes_loaded and self._query_engine:
                 self._workflow = RAGWorkflow(
                     query_engine=self._query_engine,
-                    assembler=self._assembler
+                    response_synthesizer=self._response_synthesizer
                 )
-                logger.info("RAG Workflow initialized with QueryEngine")
+                logger.info("RAG Workflow initialized with QueryEngine and Response Synthesizer")
                 log_service_health("workflow", "initialized")
             else:
                 logger.warning("Cannot initialize Workflow: query engine not available")
@@ -337,15 +363,52 @@ class RAGOrchestrator:
                 results=len(final_docs)
             )
             
-            # Step 3: Assemble context
+            # Step 3: Use Response Synthesizer to assemble context
             assemble_start = time.time()
             
-            if self._assembler:
-                context_payload = self._assembler.assemble_context(
+            if self._response_synthesizer:
+                # Convert retrieved docs to NodeWithScore objects for Response Synthesizer
+                nodes_with_scores = []
+                for doc in final_docs:
+                    from llama_index.core.schema import TextNode
+                    node = TextNode(
+                        text=doc.get('text', ''),
+                        metadata=doc.get('metadata', {}),
+                        id_=doc.get('node_id', doc.get('id', ''))
+                    )
+                    score = doc.get('score', 0.0)
+                    node_with_score = NodeWithScore(node=node, score=score)
+                    nodes_with_scores.append(node_with_score)
+                
+                # Use Response Synthesizer to generate context
+                response = self._response_synthesizer.synthesize(
+                    query_str=query,
+                    nodes=nodes_with_scores
+                )
+                
+                # Create MCP-compatible payload from Response Synthesizer output
+                from .libs.schemas.mcp_schemas import MCPContextPayload, ContextItem
+                context_items = []
+                for node_with_score in nodes_with_scores[:top_k]:  # Limit to top_k
+                    item = ContextItem(
+                        id=node_with_score.node.node_id or node_with_score.node.id_,
+                        text=node_with_score.node.get_content(),
+                        score=node_with_score.score,
+                        meta=node_with_score.node.metadata
+                    )
+                    context_items.append(item)
+                
+                context_payload = MCPContextPayload(
+                    schema_version="1.0",
+                    context=context_items,
                     query=query,
-                    documents=final_docs,
                     token_budget=token_budget,
-                    max_items=top_k
+                    provenance={
+                        'total_candidates': len(retrieved_docs),
+                        'selected_count': len(context_items),
+                        'total_tokens': len(str(response)) // 4,  # Rough token estimate
+                        'selection_method': 'response_synthesizer_compact'
+                    }
                 )
             else:
                 # Fallback: create simple context
@@ -621,8 +684,9 @@ class RAGOrchestrator:
                     'note': 'Metadata boost and reranking via native LlamaIndex postprocessors'
                 },
                 'assembler': {
-                    'available': self._assembler is not None,
-                    'status': 'healthy' if self._assembler else 'not_initialized'
+                    'available': self._response_synthesizer is not None,
+                    'status': 'healthy' if self._response_synthesizer else 'not_initialized',
+                    'note': 'Replaced with native LlamaIndex Response Synthesizer'
                 },
                 'workflow': {
                     'available': self._workflow is not None,
@@ -698,9 +762,9 @@ class RAGOrchestrator:
             if self._indexes_loaded and self._query_engine:
                 self._workflow = RAGWorkflow(
                     query_engine=self._query_engine,
-                    assembler=self._assembler
+                    response_synthesizer=self._response_synthesizer
                 )
-                logger.info("Workflow reinitialized with QueryEngine")
+                logger.info("Workflow reinitialized with QueryEngine and Response Synthesizer")
             else:
                 logger.warning("Cannot reinitialize Workflow: query engine not available")
             
@@ -724,21 +788,21 @@ class RAGWorkflow(Workflow):
     """
     LlamaIndex Workflow for RAG query pipeline.
     
-    Implements the RAG pipeline using native LlamaIndex QueryEngine:
+    Implements the RAG pipeline using native LlamaIndex QueryEngine and Response Synthesizer:
     - retrieve: Get documents using QueryEngine
-    - assemble: Assemble context using ContextAssembler
+    - synthesize: Generate response using native Response Synthesizer
     """
 
-    def __init__(self, query_engine: Any, assembler: Any, **kwargs):
+    def __init__(self, query_engine: Any, response_synthesizer: Any, **kwargs):
         super().__init__(**kwargs)
         self.query_engine = query_engine
-        self.assembler = assembler
+        self.response_synthesizer = response_synthesizer
 
     @step
     async def retrieve_and_assemble(
         self, ctx: Context, ev: StartEvent
     ) -> StopEvent:
-        """Retrieve documents and assemble context using LlamaIndex QueryEngine."""
+        """Retrieve documents and synthesize response using native LlamaIndex components."""
         query = ev.get("query")
         top_k = ev.get("top_k", 5)
         search_type = ev.get("search_type", "hybrid")
@@ -758,38 +822,62 @@ class RAGWorkflow(Workflow):
             response = await self.query_engine.aretrieve(query_bundle)
             nodes = response[:top_k * 4]  # Over-retrieve for better selection
 
-            # Convert nodes to document format
-            documents = []
+            # Convert nodes to NodeWithScore objects
+            nodes_with_scores = []
             for node in nodes:
-                doc = {
-                    'text': node.text,
-                    'score': getattr(node, 'score', 0.0),
-                    'metadata': node.metadata,
-                    'node_id': getattr(node, 'node_id', getattr(node, 'id_', ''))
-                }
-                documents.append(doc)
+                from llama_index.core.schema import NodeWithScore
+                if isinstance(node, NodeWithScore):
+                    nodes_with_scores.append(node)
+                else:
+                    # Create NodeWithScore if not already
+                    score = getattr(node, 'score', 0.0)
+                    node_with_score = NodeWithScore(node=node, score=score)
+                    nodes_with_scores.append(node_with_score)
 
             # Limit to final top_k
-            final_docs = documents[:top_k]
+            final_nodes = nodes_with_scores[:top_k]
 
-            # Assemble context
-            if self.assembler:
-                context_payload = self.assembler.assemble_context(
+            # Use Response Synthesizer to generate context
+            if self.response_synthesizer:
+                synthesized_response = await self.response_synthesizer.asynthesize(
+                    query_str=query,
+                    nodes=final_nodes
+                )
+                
+                # Create MCP-compatible payload
+                from .libs.schemas.mcp_schemas import MCPContextPayload, ContextItem
+                context_items = []
+                for node_with_score in final_nodes:
+                    item = ContextItem(
+                        id=node_with_score.node.node_id or node_with_score.node.id_,
+                        text=node_with_score.node.get_content(),
+                        score=node_with_score.score,
+                        meta=node_with_score.node.metadata
+                    )
+                    context_items.append(item)
+                
+                context_payload = MCPContextPayload(
+                    schema_version="1.0",
+                    context=context_items,
                     query=query,
-                    documents=final_docs,
                     token_budget=token_budget,
-                    max_items=top_k
+                    provenance={
+                        'total_candidates': len(nodes),
+                        'selected_count': len(final_nodes),
+                        'total_tokens': len(str(synthesized_response)) // 4,  # Rough token estimate
+                        'selection_method': 'response_synthesizer_async'
+                    }
                 )
             else:
                 # Fallback
                 from .libs.schemas.mcp_schemas import MCPContextPayload, ContextItem
                 context_items = []
-                for doc in final_docs:
+                for node_with_score in final_nodes:
                     item = ContextItem(
-                        id=doc.get('node_id', ''),
-                        text=doc.get('text', ''),
-                        score=doc.get('score', 0.0),
-                        meta=doc.get('metadata', {})
+                        id=node_with_score.node.node_id or node_with_score.node.id_,
+                        text=node_with_score.node.get_content(),
+                        score=node_with_score.score,
+                        meta=node_with_score.node.metadata
                     )
                     context_items.append(item)
                 context_payload = MCPContextPayload(
