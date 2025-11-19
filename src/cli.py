@@ -15,6 +15,8 @@ from src.utils.logging_config import get_logger
 from src.utils.metrics import get_metrics
 from src.utils.task_queue import get_task_queue
 
+from llama_index.core.response_synthesizers import ResponseMode
+
 logger = get_logger("cli")
 metrics = get_metrics()
 
@@ -449,7 +451,8 @@ def handle_query(args: argparse.Namespace) -> None:
     from llama_index.embeddings.huggingface import HuggingFaceEmbedding
     from llama_index.vector_stores.faiss import FaissVectorStore
     from llama_index.core import StorageContext, VectorStoreIndex
-    from src.rag.services.assembler_service.service import ContextAssembler
+    from llama_index.core import get_response_synthesizer
+    from llama_index.core.callbacks import TokenCountingHandler
     from src.utils.config_loader import get_embedding_config
     
     start_time = time.time()
@@ -612,20 +615,75 @@ def handle_query(args: argparse.Namespace) -> None:
     logger.info(f"Postprocessed {len(unique_candidates)} candidates to top {len(reranked_results)}")
     logger.info("Note: Postprocessing (hybrid search + reranking) handled by QueryEngine")
     
-    # Step 5: Assemble context (Module 11 - ContextAssembler)
-    print("\n[Step 5/5] Assembling context...")
+    # Step 5: Synthesize response using native LlamaIndex Response Synthesizer
+    print("\n[Step 5/5] Synthesizing response...")
     
-    assembler = ContextAssembler(config_path=args.config)
-    context_payload = assembler.assemble_context(
-        query=query,
-        documents=reranked_results,
-        token_budget=4000,  # Default budget
-        max_items=top_k
+    # Initialize Response Synthesizer with token counting
+    from src.utils.config_loader import get_context_assembler_config
+    assembler_config = get_context_assembler_config(args.config)
+    
+    import tiktoken
+    try:
+        tokenizer_fn = tiktoken.encoding_for_model(assembler_config['model_name']).encode
+    except KeyError:
+        tokenizer_fn = tiktoken.get_encoding("cl100k_base").encode
+        logger.warning(f"Unknown model {assembler_config['model_name']}, using cl100k_base encoding")
+    
+    token_counter = TokenCountingHandler(tokenizer=tokenizer_fn, verbose=False)
+    
+    response_synthesizer = get_response_synthesizer(
+        response_mode=ResponseMode.COMPACT,
+        use_async=False,
+        streaming=False
     )
     
-    print(f"  Context assembled: {len(context_payload.context)} items")
+    # Convert reranked results to NodeWithScore objects
+    from llama_index.core.schema import TextNode, NodeWithScore
+    nodes_with_scores = []
+    for doc in reranked_results:
+        node = TextNode(
+            text=doc.get('text', ''),
+            metadata=doc.get('metadata', {}),
+            id_=doc.get('node_id', doc.get('id', ''))
+        )
+        score = doc.get('score', 0.0)
+        node_with_score = NodeWithScore(node=node, score=score)
+        nodes_with_scores.append(node_with_score)
+    
+    # Synthesize response
+    synthesized_response = response_synthesizer.synthesize(
+        query_str=query,
+        nodes=nodes_with_scores
+    )
+    
+    # Create MCP-compatible context items from synthesized results
+    from src.rag.libs.schemas.mcp_schemas import MCPContextPayload, ContextItem
+    context_items = []
+    for node_with_score in nodes_with_scores:
+        item = ContextItem(
+            id=node_with_score.node.node_id or node_with_score.node.id_,
+            text=node_with_score.node.get_content(),
+            score=node_with_score.score,
+            meta=node_with_score.node.metadata
+        )
+        context_items.append(item)
+    
+    context_payload = MCPContextPayload(
+        schema_version="1.0",
+        context=context_items,
+        query=query,
+        token_budget=4000,  # Default budget
+        provenance={
+            'total_candidates': len(retrieved_docs),
+            'selected_count': len(reranked_results),
+            'total_tokens': len(str(synthesized_response)) // 4,  # Rough token estimate
+            'selection_method': 'response_synthesizer_compact'
+        }
+    )
+    
+    print(f"  Response synthesized: {len(context_payload.context)} items")
     print(f"  Estimated tokens: ~{context_payload.total_tokens_estimate()}")
-    logger.info(f"Context assembled: {len(context_payload.context)} items")
+    logger.info(f"Response synthesized: {len(context_payload.context)} items")
     
     # Display results
     duration = time.time() - start_time
