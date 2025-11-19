@@ -18,33 +18,36 @@ class TestRAGWorkflow:
     def mock_query_engine(self):
         """Create a mock QueryEngine."""
         mock_engine = AsyncMock()
-        # Mock the aretrieve method to return mock nodes
+        # Mock the aretrieve method to return mock NodeWithScore objects
+        from unittest.mock import Mock
+        from llama_index.core.schema import NodeWithScore, TextNode
+        
+        # Create proper NodeWithScore objects
+        node1 = TextNode(text="Document 1 text", id_="node1", metadata={"source": "test"})
+        node2 = TextNode(text="Document 2 text", id_="node2", metadata={"source": "test"})
+        
         mock_nodes = [
-            Mock(text="Document 1 text", score=0.9, metadata={"source": "test"}, node_id="node1"),
-            Mock(text="Document 2 text", score=0.8, metadata={"source": "test"}, node_id="node2"),
+            NodeWithScore(node=node1, score=0.9),
+            NodeWithScore(node=node2, score=0.8),
         ]
         mock_engine.aretrieve.return_value = mock_nodes
         return mock_engine
 
     @pytest.fixture
-    def mock_assembler(self):
-        """Create a mock ContextAssembler."""
-        mock_assembler = Mock()
-        mock_payload = Mock()
-        mock_payload.total_tokens_estimate.return_value = 150
-        mock_payload.context = [
-            Mock(id="node1", text="Document 1 text", score=0.9, meta={"source": "test"}),
-            Mock(id="node2", text="Document 2 text", score=0.8, meta={"source": "test"}),
-        ]
-        mock_assembler.assemble_context.return_value = mock_payload
-        return mock_assembler
+    def mock_response_synthesizer(self):
+        """Create a mock Response Synthesizer."""
+        mock_synthesizer = AsyncMock()
+        mock_response = Mock()
+        mock_response.response = "Synthesized response text"
+        mock_synthesizer.asynthesize.return_value = mock_response
+        return mock_synthesizer
 
     @pytest.mark.asyncio
-    async def test_workflow_retrieve_and_assemble_success(self, mock_query_engine, mock_assembler):
+    async def test_workflow_retrieve_and_assemble_success(self, mock_query_engine, mock_response_synthesizer):
         """Test successful workflow execution."""
         workflow = RAGWorkflow(
             query_engine=mock_query_engine,
-            assembler=mock_assembler
+            response_synthesizer=mock_response_synthesizer
         )
 
         # Run workflow
@@ -59,38 +62,21 @@ class TestRAGWorkflow:
         assert result is not None
         assert hasattr(result, 'context')
         assert len(result.context) == 2
-        assert result.total_tokens_estimate() == 150
+        assert result.query == "test query"
+        assert result.schema_version == "1.0"
 
         # Verify query engine was called
         mock_query_engine.aretrieve.assert_called_once()
 
-        # Verify assembler was called
-        mock_assembler.assemble_context.assert_called_once_with(
-            query="test query",
-            documents=[
-                {
-                    'text': 'Document 1 text',
-                    'score': 0.9,
-                    'metadata': {'source': 'test'},
-                    'node_id': 'node1'
-                },
-                {
-                    'text': 'Document 2 text',
-                    'score': 0.8,
-                    'metadata': {'source': 'test'},
-                    'node_id': 'node2'
-                }
-            ],
-            token_budget=1000,
-            max_items=2
-        )
+        # Verify response synthesizer was called
+        mock_response_synthesizer.asynthesize.assert_called_once()
 
     @pytest.mark.asyncio
-    async def test_workflow_without_assembler_fallback(self, mock_query_engine):
-        """Test workflow execution without assembler (fallback)."""
+    async def test_workflow_without_synthesizer_fallback(self, mock_query_engine):
+        """Test workflow execution without response synthesizer (fallback)."""
         workflow = RAGWorkflow(
             query_engine=mock_query_engine,
-            assembler=None
+            response_synthesizer=None
         )
 
         # Run workflow
@@ -105,15 +91,19 @@ class TestRAGWorkflow:
         assert result is not None
         assert hasattr(result, 'context')
         assert len(result.context) == 2
+        assert result.query == "test query"
         assert result.schema_version == "1.0"
         assert result.token_budget == 1000
+        # Fallback case has empty provenance
+        assert hasattr(result, 'provenance')
+        assert result.provenance == {}
 
     @pytest.mark.asyncio
-    async def test_workflow_query_validation(self, mock_query_engine, mock_assembler):
+    async def test_workflow_query_validation(self, mock_query_engine, mock_response_synthesizer):
         """Test workflow query validation."""
         workflow = RAGWorkflow(
             query_engine=mock_query_engine,
-            assembler=mock_assembler
+            response_synthesizer=mock_response_synthesizer
         )
 
         # Test with empty query
@@ -121,14 +111,14 @@ class TestRAGWorkflow:
             await workflow.run(query="")
 
     @pytest.mark.asyncio
-    async def test_workflow_error_handling(self, mock_query_engine, mock_assembler):
+    async def test_workflow_error_handling(self, mock_query_engine, mock_response_synthesizer):
         """Test workflow error handling."""
         # Make query engine raise an exception
         mock_query_engine.aretrieve.side_effect = Exception("Retrieval failed")
 
         workflow = RAGWorkflow(
             query_engine=mock_query_engine,
-            assembler=mock_assembler
+            response_synthesizer=mock_response_synthesizer
         )
 
         # Run workflow and expect exception
