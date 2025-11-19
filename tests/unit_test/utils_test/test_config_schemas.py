@@ -15,7 +15,6 @@ from src.utils.config_schemas import (
     FAISSConfig,
     RetrieverConfig,
     RerankerConfig,
-    ContextAssemblerConfig,
     MCPConfig,
     RateLimitConfig,
     DuplicateDetectionConfig,
@@ -175,28 +174,6 @@ class TestRerankerConfig:
         with pytest.raises(ValidationError) as exc_info:
             RerankerConfig(top_k=100)
         assert "top_k" in str(exc_info.value)
-
-
-class TestContextAssemblerConfig:
-    """Tests for ContextAssemblerConfig validation."""
-    
-    def test_valid_config(self) -> None:
-        """Test valid context assembler configuration."""
-        config = ContextAssemblerConfig(
-            token_budget=2048,
-            model_name="gpt-3.5-turbo"
-        )
-        assert config.token_budget == 2048
-    
-    def test_token_budget_bounds(self) -> None:
-        """Test token budget must be within valid range."""
-        with pytest.raises(ValidationError) as exc_info:
-            ContextAssemblerConfig(token_budget=256)  # Too small
-        assert "token_budget" in str(exc_info.value)
-        
-        with pytest.raises(ValidationError) as exc_info:
-            ContextAssemblerConfig(token_budget=50000)  # Too large
-        assert "token_budget" in str(exc_info.value)
 
 
 class TestRateLimitConfig:
