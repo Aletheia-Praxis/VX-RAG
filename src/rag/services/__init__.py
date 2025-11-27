@@ -9,17 +9,19 @@ Note:
   (integrated in native LlamaIndex QueryEngine postprocessors)
 """
 from . import (
-    assembler_service,
+    boilerplate_removal_service,
     chunker_service,
     duplicate_detection_service,
     ingest_service,
-    vectordb_service,
+    ingestion_pipeline_service,
+    paddle_ocr_service,
 )
 
 __all__ = [
-    "assembler_service",
+    "boilerplate_removal_service",
     "chunker_service",
     "duplicate_detection_service",
     "ingest_service",
-    "vectordb_service",
+    "ingestion_pipeline_service",
+    "paddle_ocr_service",
 ]
