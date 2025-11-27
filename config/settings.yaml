@@ -154,6 +154,15 @@ paddle_ocr:
   extracted_images_dir: "./data/extracted_images"  # Directory for extracted images
   replace_image_placeholders: true       # Replace <!-- image --> markers with extracted text
 
+# Ingestion Pipeline configuration
+ingestion:
+  enable_caching: true                    # Enable pipeline caching
+  enable_metadata_extraction: false       # Enable title/metadata extraction
+  enable_embedding: true                  # Enable embedding generation
+  enable_vector_store: true               # Enable vector store integration
+  faiss_index: null                       # FAISS index path (null = in-memory)
+  vector_store_kwargs: {}                 # Additional vector store parameters
+
 # Boilerplate removal configuration
 boilerplate_removal:
   enabled: true                        # Enable aggressive boilerplate removal
