@@ -157,13 +157,18 @@ class Chunker:
                 chunk_overlap=chunk_overlap
             )
         
-        # Initialize CodeSplitter for code block detection
-        self.code_splitter = CodeSplitter(
-            language="python",  # Will be detected dynamically
-            chunk_lines=40,
-            chunk_lines_overlap=15,
-            max_chars=1500,
-        )
+        # Initialize CodeSplitter for code block detection if available
+        try:
+            self.code_splitter = CodeSplitter(
+                language="python",  # Will be detected dynamically
+                chunk_lines=40,
+                chunk_lines_overlap=15,
+                max_chars=1500,
+            )
+            logger.debug("Initialized CodeSplitter for code block handling")
+        except Exception as e:
+            logger.warning(f"CodeSplitter initialization failed (tree_sitter not available?): {e}")
+            self.code_splitter = None
         logger.debug("Initialized CodeSplitter for code block handling")
     
     def chunk_documents(self, documents: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
