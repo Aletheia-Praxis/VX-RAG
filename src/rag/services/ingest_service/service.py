@@ -23,7 +23,7 @@ if TYPE_CHECKING:
     pass
 
 from llama_index.core import Document as LlamaDocument
-from llama_index.readers.file import FlatReader, MarkdownReader
+from llama_index.core import SimpleDirectoryReader
 
 from docling.document_converter import DocumentConverter
 from docling.datamodel.pipeline_options import PdfPipelineOptions
@@ -32,7 +32,7 @@ from docling.document_converter import PdfFormatOption
 
 from ..duplicate_detection_service import DuplicateDetector
 from ...libs.utils.text_utils import normalize_text, detect_language
-from ..boilerplate_removal_service import remove_boilerplate
+from ..boilerplate_removal_service.service import BoilerplateRemovalService
 from src.utils.config_loader import (
     get_paddle_ocr_config,
     get_boilerplate_removal_config
@@ -110,6 +110,10 @@ class PDFIngestAdapter:
                 )
             }
         )
+        # Initialize boilerplate removal service
+        self.boilerplate_service = BoilerplateRemovalService(
+            aggressive_mode=self.boilerplate_config.get('aggressive_mode', True)
+        ) if self.boilerplate_enabled else None
     
     def _process_images_with_ocr(
         self,
@@ -296,10 +300,9 @@ class PDFIngestAdapter:
                     
                     # Remove boilerplate AFTER OCR but BEFORE normalization
                     # This ensures OCR patterns (<!-- image -->) are preserved during OCR processing
-                    if self.boilerplate_enabled:
-                        aggressive_mode = self.boilerplate_config['aggressive_mode']
-                        cleaned_text = remove_boilerplate(markdown_text, aggressive_mode=aggressive_mode)
-                        logger.debug(f"Boilerplate removal applied (aggressive={aggressive_mode})")
+                    if self.boilerplate_enabled and self.boilerplate_service:
+                        cleaned_text = self.boilerplate_service.remove_boilerplate(markdown_text)
+                        logger.debug("Boilerplate removal applied (aggressive=%s)", self.boilerplate_config.get('aggressive_mode', True))
                     else:
                         cleaned_text = markdown_text
                         logger.debug("Boilerplate removal disabled")
@@ -361,9 +364,10 @@ class TXTIngestAdapter:
         Args:
             config_path: Path to settings.yaml file
         """
-        self.reader = FlatReader()
-        self.boilerplate_config = get_boilerplate_removal_config(config_path)
-        self.boilerplate_enabled = self.boilerplate_config['enabled']
+        self.reader = SimpleDirectoryReader
+        self.boilerplate_config = get_boilerplate_removal_config(config_path) or {}
+        self.boilerplate_enabled = bool(self.boilerplate_config.get('enabled', True))
+        self.boilerplate_service = BoilerplateRemovalService(aggressive_mode=self.boilerplate_config.get('aggressive_mode', True)) if self.boilerplate_enabled else None
     
     def load_data(self, source: str) -> List[Dict[str, Any]]:
         """
@@ -393,21 +397,16 @@ class TXTIngestAdapter:
             result = []
             for file_path in txt_files:
                 try:
-                    # Use LlamaIndex FlatReader to load document
-                    llama_docs = self.reader.load_data(file_path)
-                    
-                    if not llama_docs:
+                    # Read file content directly (SimpleDirectoryReader/FlatReader fallback)
+                    text = Path(file_path).read_text(encoding='utf-8')
+                    if not text:
                         logger.warning(f"No content extracted from {file_path}")
                         continue
                     
-                    # Get text from first document (FlatReader returns single document per file)
-                    text = llama_docs[0].text
-                    
                     # Remove boilerplate BEFORE normalization (per standard)
-                    if self.boilerplate_enabled:
-                        aggressive_mode = self.boilerplate_config['aggressive_mode']
-                        cleaned_text = remove_boilerplate(text, aggressive_mode=aggressive_mode)
-                        logger.debug(f"Boilerplate removal applied to TXT (aggressive={aggressive_mode})")
+                    if self.boilerplate_enabled and self.boilerplate_service:
+                        cleaned_text = self.boilerplate_service.remove_boilerplate(text)
+                        logger.debug("Boilerplate removal applied to TXT (aggressive=%s)", self.boilerplate_config.get('aggressive_mode', True))
                     else:
                         cleaned_text = text
                         logger.debug("Boilerplate removal disabled for TXT")
@@ -454,9 +453,10 @@ class MDIngestAdapter:
         Args:
             config_path: Path to settings.yaml file
         """
-        self.reader = MarkdownReader()
-        self.boilerplate_config = get_boilerplate_removal_config(config_path)
-        self.boilerplate_enabled = self.boilerplate_config['enabled']
+        self.reader = SimpleDirectoryReader
+        self.boilerplate_config = get_boilerplate_removal_config(config_path) or {}
+        self.boilerplate_enabled = bool(self.boilerplate_config.get('enabled', True))
+        self.boilerplate_service = BoilerplateRemovalService(aggressive_mode=self.boilerplate_config.get('aggressive_mode', True)) if self.boilerplate_enabled else None
     
     def load_data(self, source: str) -> List[Dict[str, Any]]:
         """
@@ -486,22 +486,17 @@ class MDIngestAdapter:
             result = []
             for file_path in md_files:
                 try:
-                    # Use LlamaIndex MarkdownReader to load document
-                    llama_docs = self.reader.load_data(str(file_path))
-                    
-                    if not llama_docs:
+                    # Read markdown file content directly
+                    text = Path(file_path).read_text(encoding='utf-8')
+                    if not text:
                         logger.warning(f"No content extracted from {file_path}")
                         continue
                     
-                    # Get text from first document (MarkdownReader returns single document per file)
-                    text = llama_docs[0].text
-                    
                     # Remove boilerplate BEFORE normalization (per standard)
                     # Markdown files from Vx Underground may contain blog artifacts
-                    if self.boilerplate_enabled:
-                        aggressive_mode = self.boilerplate_config['aggressive_mode']
-                        cleaned_text = remove_boilerplate(text, aggressive_mode=aggressive_mode)
-                        logger.debug(f"Boilerplate removal applied to MD (aggressive={aggressive_mode})")
+                    if self.boilerplate_enabled and self.boilerplate_service:
+                        cleaned_text = self.boilerplate_service.remove_boilerplate(text)
+                        logger.debug("Boilerplate removal applied to MD (aggressive=%s)", self.boilerplate_config.get('aggressive_mode', True))
                     else:
                         cleaned_text = text
                         logger.debug("Boilerplate removal disabled for MD")
