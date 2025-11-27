@@ -694,6 +694,42 @@ def get_paddle_ocr_config(config_path: Optional[str] = None) -> Dict[str, Any]:
     return ocr_config
 
 
+def get_ingestion_config(config_path: Optional[str] = None) -> Dict[str, Any]:
+    """
+    Get ingestion pipeline configuration from settings.yaml.
+    
+    Args:
+        config_path: Path to settings.yaml file
+        
+    Returns:
+        Dictionary with ingestion configuration:
+        - chunk_size: Default chunk size for text splitting
+        - chunk_overlap: Default chunk overlap
+        - enable_caching: Enable pipeline caching
+        - enable_metadata_extraction: Enable metadata extraction
+        - enable_persistence: Enable pipeline persistence
+    """
+    config = load_settings(config_path)
+    
+    ingestion_section = config.get('ingestion', {})
+    
+    ingestion_config = {
+        'chunk_size': config.get('chunk_size', 1024),
+        'chunk_overlap': config.get('chunk_overlap', 200),
+        'enable_caching': ingestion_section.get('enable_caching', True),
+        'enable_metadata_extraction': ingestion_section.get('enable_metadata_extraction', False),
+        'enable_persistence': ingestion_section.get('enable_persistence', True),
+        'enable_embedding': ingestion_section.get('enable_embedding', False),
+        'enable_vector_store': ingestion_section.get('enable_vector_store', False),
+        'embedding_model': config.get('embedding_model', 'all-MiniLM-L6-v2'),
+        'faiss_index': ingestion_section.get('faiss_index'),
+        'vector_store_kwargs': ingestion_section.get('vector_store_kwargs', {})
+    }
+    
+    logger.info(f"Loaded ingestion config: chunk_size={ingestion_config['chunk_size']}, enable_caching={ingestion_config['enable_caching']}")
+    return ingestion_config
+
+
 def get_router_config(config_path: Optional[str] = None) -> Dict[str, Any]:
     """
     Get router query engine configuration from settings.yaml.
@@ -705,7 +741,7 @@ def get_router_config(config_path: Optional[str] = None) -> Dict[str, Any]:
         Dictionary with router configuration:
         - selector_type: Selector type ('pydantic' or 'llm')
         - use_multi_select: Whether to allow multiple tool selection
-        - verbose: Enable verbose logging
+        - verbose: Enable verbose logging for routing decisions
     """
     config = load_settings(config_path)
     
@@ -719,3 +755,40 @@ def get_router_config(config_path: Optional[str] = None) -> Dict[str, Any]:
     
     logger.info(f"Loaded router config: selector_type={router_config['selector_type']}, verbose={router_config['verbose']}")
     return router_config
+
+
+def get_boilerplate_removal_config(config_path: Optional[str] = None) -> Dict[str, Any]:
+    """
+    Get boilerplate removal configuration from settings.yaml.
+    
+    Args:
+        config_path: Path to settings.yaml file
+        
+    Returns:
+        Dictionary with boilerplate removal configuration:
+        - enabled: Enable boilerplate removal
+        - aggressive_mode: Use aggressive mode
+        - position: Application position ('after_ocr' or 'before_normalization')
+        - patterns: Dictionary with pattern settings
+    """
+    config = load_settings(config_path)
+    
+    boilerplate_section = config.get('boilerplate_removal', {})
+    
+    boilerplate_config = {
+        'enabled': boilerplate_section.get('enabled', True),
+        'aggressive_mode': boilerplate_section.get('aggressive_mode', True),
+        'position': boilerplate_section.get('position', 'after_ocr'),
+        'patterns': boilerplate_section.get('patterns', {
+            'remove_html_comments': True,
+            'remove_blog_metadata': True,
+            'remove_footer_timestamps': True,
+            'remove_navigation': True,
+            'remove_social_sharing': True,
+            'preserve_code_blocks': True,
+            'preserve_markdown_structure': True
+        })
+    }
+    
+    logger.info(f"Loaded boilerplate removal config: enabled={boilerplate_config['enabled']}, aggressive_mode={boilerplate_config['aggressive_mode']}")
+    return boilerplate_config
