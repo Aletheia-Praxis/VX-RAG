@@ -155,18 +155,13 @@ def main() -> None:
 
 def handle_ingest(args: argparse.Namespace) -> None:
     """Handle ingest command."""
-    from src.rag.services.ingest_service.service import (
-        PDFIngestAdapter, 
-        TXTIngestAdapter, 
-        MDIngestAdapter,
-        save_processed_text
-    )
+    from src.rag.services.ingestion_pipeline_service import IngestionPipelineService
     from src.rag.services.duplicate_detection_service.service import DuplicateDetector
-    from src.rag.services.chunker_service.service import Chunker
+    from src.utils.config_loader import get_ingestion_config
     
     start_time = time.time()
     data_path = Path(args.data_dir)
-    processed_dir = data_path / "processed"
+    persist_dir = Path(args.persist_dir) if args.persist_dir else None
     
     if not data_path.exists():
         print(f"Error: Data directory {data_path} does not exist")
@@ -174,81 +169,97 @@ def handle_ingest(args: argparse.Namespace) -> None:
         sys.exit(1)
     
     # Ensure processed directory exists
+    processed_dir = data_path / "processed"
     processed_dir.mkdir(parents=True, exist_ok=True)
     
     logger.info("Starting ingestion pipeline", data_dir=str(data_path))
     
-    # Step 1: Parse documents
-    print(f"\n[Step 1/4] Parsing documents from {data_path}...")
+    # Step 1: Initialize IngestionPipelineService
+    print(f"\n[Step 1/4] Initializing IngestionPipelineService...")
     
-    pdf_adapter = PDFIngestAdapter()
-    txt_adapter = TXTIngestAdapter()
-    md_adapter = MDIngestAdapter()
+    ingestion_service = IngestionPipelineService(
+        config_path=args.config,
+        persist_dir=str(persist_dir) if persist_dir else None
+    )
     
-    pdf_docs = pdf_adapter.load_data(str(data_path / "pdf"))
-    txt_docs = txt_adapter.load_data(str(data_path / "txt"))
-    md_docs = md_adapter.load_data(str(data_path / "md"))
+    print("  IngestionPipelineService initialized")
     
-    all_docs = pdf_docs + txt_docs + md_docs
+    # Step 2: Process documents using new pipeline
+    print(f"\n[Step 2/4] Processing documents from {data_path}...")
     
-    print(f"  PDF: {len(pdf_docs)}, TXT: {len(txt_docs)}, MD: {len(md_docs)}")
-    print(f"  Total parsed: {len(all_docs)} documents")
+    all_nodes = []
     
-    # Step 2: Remove duplicates
-    print("\n[Step 2/4] Removing duplicates...")
+    # Process PDFs
+    if (data_path / "pdf").exists():
+        print("  Processing PDF files...")
+        pdf_nodes = asyncio.run(ingestion_service.process_pdf_directory(data_path / "pdf"))
+        all_nodes.extend(pdf_nodes)
+        print(f"    PDF nodes: {len(pdf_nodes)}")
     
-    detector = DuplicateDetector(config_path=args.config)
-    unique_docs = detector.remove_duplicates(all_docs)
+    # Process TXT files
+    if (data_path / "txt").exists():
+        print("  Processing TXT files...")
+        txt_nodes = asyncio.run(ingestion_service.process_text_directory(data_path / "txt", "*.txt"))
+        all_nodes.extend(txt_nodes)
+        print(f"    TXT nodes: {len(txt_nodes)}")
     
-    duplicates_removed = len(all_docs) - len(unique_docs)
-    print(f"  Duplicates removed: {duplicates_removed}")
-    print(f"  Unique documents: {len(unique_docs)}")
+    # Process MD files
+    if (data_path / "md").exists():
+        print("  Processing MD files...")
+        md_nodes = asyncio.run(ingestion_service.process_text_directory(data_path / "md", "*.md"))
+        all_nodes.extend(md_nodes)
+        print(f"    MD nodes: {len(md_nodes)}")
     
-    # Step 3: Save processed documents
+    print(f"  Total processed nodes: {len(all_nodes)}")
+    
+    # Step 3: Convert nodes to serializable format and save
     print(f"\n[Step 3/4] Saving processed documents to {processed_dir}...")
     
-    saved_count = save_processed_text(unique_docs, processed_dir)
-    print(f"  Saved files: {saved_count}")
+    # Convert nodes to documents for compatibility
+    processed_docs = []
+    for node in all_nodes:
+        doc = {
+            'id': node.id_,
+            'text': node.text,
+            'metadata': node.metadata,
+            'node_type': type(node).__name__
+        }
+        processed_docs.append(doc)
     
-    # Step 4: Chunk documents
-    print("\n[Step 4/4] Chunking documents...")
+    # Save processed documents
+    import json
+    processed_file = processed_dir / "processed_documents.json"
+    with open(processed_file, 'w', encoding='utf-8') as f:
+        json.dump(processed_docs, f, ensure_ascii=False, indent=2)
     
-    chunker = Chunker(config_path=args.config)
-    chunks = chunker.chunk_documents(unique_docs)
+    print(f"  Saved {len(processed_docs)} documents to: {processed_file}")
     
-    chunking_stats = chunker.get_chunking_stats(chunks)
-    print(f"  Total chunks: {chunking_stats['total_chunks']}")
-    print(f"  Avg chunk length: {chunking_stats['avg_chunk_length']:.0f} chars")
-    print(f"  Chunk distribution: {chunking_stats['chunk_size_distribution']}")
+    # Step 4: Create chunks for indexing (legacy compatibility)
+    print("\n[Step 4/4] Creating chunks for indexing...")
+    
+    # Convert nodes to chunk format for backward compatibility
+    chunks = []
+    for i, node in enumerate(all_nodes):
+        chunk = {
+            'id': f"chunk_{i}",
+            'text': node.text,
+            'metadata': node.metadata,
+            'node_id': node.id_
+        }
+        chunks.append(chunk)
     
     # Save chunks to file for indexing
-    import json
     chunks_file = data_path / "processed" / "chunks.json"
+    with open(chunks_file, 'w', encoding='utf-8') as f:
+        json.dump(chunks, f, ensure_ascii=False, indent=2)
     
-    # Filter out non-serializable LlamaIndex objects
-    def make_serializable(obj: Any) -> Any:
-        """Recursively remove non-serializable objects."""
-        if isinstance(obj, dict):
-            return {
-                k: make_serializable(v) 
-                for k, v in obj.items() 
-                if k not in ['node_info', 'relationships', 'excluded_llm_metadata_keys', 
-                             'excluded_embed_metadata_keys', 'metadata_seperator', 
-                             'metadata_template', 'text_template']
-            }
-        elif isinstance(obj, list):
-            return [make_serializable(item) for item in obj]
-        else:
-            return obj
+    print(f"  Created {len(chunks)} chunks")
+    print(f"  Saved chunks to: {chunks_file}")
     
-    try:
-        serializable_chunks = make_serializable(chunks)
-        with open(chunks_file, 'w', encoding='utf-8') as f:
-            json.dump(serializable_chunks, f, ensure_ascii=False, indent=2)
-        print(f"  Saved chunks to: {chunks_file}")
-    except TypeError as e:
-        logger.error(f"Failed to serialize chunks: {e}")
-        print("  Warning: Could not save chunks (serialization error)")
+    # Persist pipeline state
+    if persist_dir:
+        ingestion_service.persist_pipeline()
+        print("  Pipeline state persisted")
     
     # Summary
     duration = time.time() - start_time
@@ -256,26 +267,19 @@ def handle_ingest(args: argparse.Namespace) -> None:
     print(f"\n{'='*50}")
     print("Ingestion Summary:")
     print(f"{'='*50}")
-    print(f"  Documents parsed:     {len(all_docs)}")
-    print(f"  Duplicates removed:   {duplicates_removed}")
-    print(f"  Unique documents:     {len(unique_docs)}")
-    print(f"  Saved to disk:        {saved_count}")
-    print(f"  Total chunks:         {len(chunks)}")
-    print(f"  Chunks file:          {chunks_file}")
-    print(f"  Duration:             {duration:.2f}s")
+    print(f"  Documents processed:   {len(processed_docs)}")
+    print(f"  Total chunks created:  {len(chunks)}")
+    print(f"  Processed file:        {processed_file}")
+    print(f"  Chunks file:           {chunks_file}")
+    print(f"  Duration:              {duration:.2f}s")
     print(f"{'='*50}\n")
     
     logger.info("Ingestion pipeline completed", 
-               parsed=len(all_docs), 
-               duplicates_removed=duplicates_removed,
-               unique=len(unique_docs),
-               saved=saved_count,
+               processed=len(processed_docs), 
                chunks=len(chunks),
                duration_ms=duration * 1000)
     
-    metrics.increment("ingestion_documents_parsed_total", len(all_docs))
-    metrics.increment("ingestion_duplicates_removed_total", duplicates_removed)
-    metrics.increment("ingestion_documents_saved_total", saved_count)
+    metrics.increment("ingestion_documents_processed_total", len(processed_docs))
     metrics.increment("ingestion_chunks_created_total", len(chunks))
     metrics.histogram("ingestion_pipeline_duration_ms", duration * 1000)
 
@@ -284,9 +288,9 @@ def handle_index(args: argparse.Namespace) -> None:
     """Handle index command - create embeddings and build FAISS + BM25 indexes."""
     import json
     from llama_index.core.schema import Document
-    from llama_index.embeddings.huggingface import HuggingFaceEmbedding
     from llama_index.vector_stores.faiss import FaissVectorStore
     from llama_index.core import StorageContext, VectorStoreIndex
+    from src.rag.services.ingestion_pipeline_service import IngestionPipelineService
     from src.utils.config_loader import get_embedding_config
     
     start_time = time.time()
@@ -313,15 +317,21 @@ def handle_index(args: argparse.Namespace) -> None:
     print(f"  Loaded chunks: {len(chunks)}")
     logger.info(f"Loaded {len(chunks)} chunks from {chunks_file}")
     
-    # Step 2: Generate embeddings (using HuggingFaceEmbedding)
-    print("\n[Step 2/4] Generating embeddings...")
+    # Step 2: Initialize IngestionPipelineService for embedder
+    print("\n[Step 2/4] Initializing embedder...")
     
-    embed_config = get_embedding_config(args.config)
-    embed_model = HuggingFaceEmbedding(
-        model_name=embed_config['embedding_model'],
-        embed_batch_size=embed_config['embedding_batch_size'],
-        trust_remote_code=embed_config['embedding_trust_remote_code']
-    )
+    ingestion_service = IngestionPipelineService(config_path=args.config)
+    embed_model = ingestion_service.get_embedder()
+    
+    if not embed_model:
+        print("  ERROR: Embedder not configured")
+        logger.error("Embedder not configured in IngestionPipelineService")
+        sys.exit(1)
+    
+    print("  Embedder initialized")
+    
+    # Step 3: Generate embeddings
+    print("\n[Step 3/4] Generating embeddings...")
     
     # Extract text from chunks
     chunk_texts = [chunk.get('text', '') for chunk in chunks]
@@ -334,8 +344,8 @@ def handle_index(args: argparse.Namespace) -> None:
     print(f"  Embedding dimension: {embedding_dim}")
     logger.info(f"Generated {len(embeddings_list)} embeddings with dimension {embedding_dim}")
     
-    # Step 3: Build FAISS vector index (Module 6 - Direct LlamaIndex)
-    print("\n[Step 3/4] Building FAISS vector index...")
+    # Step 4: Build FAISS vector index
+    print("\n[Step 4/4] Building FAISS vector index...")
     
     # Convert chunks to LlamaIndex Document objects for direct indexing
     documents = []
@@ -378,8 +388,8 @@ def handle_index(args: argparse.Namespace) -> None:
     print(f"  Saved to: {faiss_index_path}")
     logger.info(f"Built and saved FAISS index to {faiss_index_path}")
     
-    # Step 4: Build BM25 index (Module 7 - Direct LlamaIndex)
-    print("\n[Step 4/4] Building BM25 index...")
+    # Build BM25 index
+    print("\n[Step 5/5] Building BM25 index...")
     
     # Build BM25 retriever directly with LlamaIndex
     from llama_index.retrievers.bm25 import BM25Retriever
@@ -622,14 +632,11 @@ def handle_query(args: argparse.Namespace) -> None:
     from src.utils.config_loader import get_context_assembler_config
     assembler_config = get_context_assembler_config(args.config)
     
-    import tiktoken
-    try:
-        tokenizer_fn = tiktoken.encoding_for_model(assembler_config['model_name']).encode
-    except KeyError:
-        tokenizer_fn = tiktoken.get_encoding("cl100k_base").encode
-        logger.warning(f"Unknown model {assembler_config['model_name']}, using cl100k_base encoding")
-    
-    token_counter = TokenCountingHandler(tokenizer=tokenizer_fn, verbose=False)
+    from src.rag.libs.utils.llamaindex_integration import ensure_global_token_counter, get_global_token_counter
+    # Ensure a global TokenCountingHandler, reusing existing if one exists
+    token_counter = get_global_token_counter() or ensure_global_token_counter(
+        model_name=assembler_config['model_name'], verbose=False
+    )
     
     response_synthesizer = get_response_synthesizer(
         response_mode=ResponseMode.COMPACT,
@@ -724,12 +731,9 @@ def handle_query(args: argparse.Namespace) -> None:
 def handle_update_index(args: argparse.Namespace) -> None:
     """Handle update-index command - add new documents to existing index incrementally."""
     from llama_index.core.schema import Document
-    from llama_index.embeddings.huggingface import HuggingFaceEmbedding
     from llama_index.vector_stores.faiss import FaissVectorStore
     from llama_index.core import StorageContext, VectorStoreIndex
-    from src.rag.services.ingest_service.service import PDFIngestAdapter
-    from src.rag.services.duplicate_detection_service.service import DuplicateDetector
-    from src.rag.services.chunker_service.service import Chunker
+    from src.rag.services.ingestion_pipeline_service import IngestionPipelineService
     from src.utils.config_loader import get_embedding_config
     
     start_time = time.time()
@@ -751,85 +755,93 @@ def handle_update_index(args: argparse.Namespace) -> None:
     print("Incremental Index Update")
     print(f"{'='*60}\n")
     
-    # Step 1: Parse new documents
-    print(f"[Step 1/4] Parsing new documents from {data_dir}...")
+    # Step 1: Process new documents using IngestionPipelineService
+    print(f"[Step 1/4] Processing new documents from {data_dir}...")
     
-    pdf_adapter = PDFIngestAdapter(config_path=args.config)
+    ingestion_service = IngestionPipelineService(config_path=args.config)
     
-    new_docs = []
+    new_nodes = []
     
-    # Parse new PDFs
+    # Process new PDFs
     if (data_dir / "pdf").exists():
         pdf_files = list((data_dir / "pdf").glob("*.pdf"))
-        for pdf_file in pdf_files:
-            try:
-                docs = pdf_adapter.load_data(str(pdf_file))
-                new_docs.extend(docs)
-            except Exception as e:
-                logger.error(f"Failed to parse {pdf_file.name}: {e}")
+        if pdf_files:
+            print("  Processing new PDF files...")
+            pdf_nodes = asyncio.run(ingestion_service.process_pdf_directory(data_dir / "pdf"))
+            new_nodes.extend(pdf_nodes)
+            print(f"    New PDF nodes: {len(pdf_nodes)}")
     
-    print(f"  Found {len(new_docs)} new documents")
+    # Process new TXT files
+    if (data_dir / "txt").exists():
+        txt_files = list((data_dir / "txt").glob("*.txt"))
+        if txt_files:
+            print("  Processing new TXT files...")
+            txt_nodes = asyncio.run(ingestion_service.process_text_directory(data_dir / "txt", "*.txt"))
+            new_nodes.extend(txt_nodes)
+            print(f"    New TXT nodes: {len(txt_nodes)}")
     
-    if not new_docs:
+    # Process new MD files
+    if (data_dir / "md").exists():
+        md_files = list((data_dir / "md").glob("*.md"))
+        if md_files:
+            print("  Processing new MD files...")
+            md_nodes = asyncio.run(ingestion_service.process_text_directory(data_dir / "md", "*.md"))
+            new_nodes.extend(md_nodes)
+            print(f"    New MD nodes: {len(md_nodes)}")
+    
+    if not new_nodes:
         print("  No new documents to add.")
         return
     
-    # Step 2: Remove duplicates
-    print("\n[Step 2/4] Checking for duplicates...")
-    deduplicator = DuplicateDetector()
-    unique_docs = deduplicator.remove_duplicates(new_docs)
-    print(f"  Unique new documents: {len(unique_docs)}")
+    print(f"  Total new nodes: {len(new_nodes)}")
     
-    # Step 3: Chunk documents
-    print("\n[Step 3/4] Chunking documents...")
-    chunker = Chunker(config_path=args.config)
-    chunks = chunker.chunk_documents(unique_docs)
-    print(f"  Created {len(chunks)} chunks")
+    # Step 2: Convert nodes to documents for indexing
+    print("\n[Step 2/4] Converting nodes to documents...")
     
-    # Step 4: Update indexes
-    print("\n[Step 4/4] Updating indexes...")
-    
-    # Load embedder
-    embed_config = get_embedding_config(args.config)
-    embed_model = HuggingFaceEmbedding(
-        model_name=embed_config['embedding_model'],
-        embed_batch_size=embed_config['embedding_batch_size'],
-        trust_remote_code=embed_config['embedding_trust_remote_code']
-    )
-    
-    # Convert chunks to Documents
-    documents = []
-    for chunk in chunks:
+    new_documents = []
+    for node in new_nodes:
         doc = Document(
-            text=chunk.get('text', ''),
-            metadata=chunk.get('metadata', {}),
-            id_=chunk.get('id', '')
+            text=node.text,
+            metadata=node.metadata,
+            id_=node.id_
         )
-        documents.append(doc)
+        new_documents.append(doc)
     
-    # Load and update FAISS index
+    print(f"  Created {len(new_documents)} documents")
+    
+    # Step 3: Update FAISS index
+    print("\n[Step 3/4] Updating FAISS index...")
+    
+    # Load existing FAISS index
     vector_store = FaissVectorStore.from_persist_dir(str(faiss_index_path))
     storage_context = StorageContext.from_defaults(vector_store=vector_store)
-    faiss_index = VectorStoreIndex.from_vector_store(
-        vector_store=vector_store,
-        storage_context=storage_context,
-        embed_model=embed_model
-    )
+    embed_model = ingestion_service.get_embedder()
     
-    if faiss_index:
-        # Add documents incrementally
-        for doc in documents:
-            faiss_index.insert(doc)
+    if embed_model:
+        faiss_index = VectorStoreIndex.from_vector_store(
+            vector_store=vector_store,
+            storage_context=storage_context,
+            embed_model=embed_model
+        )
         
-        # Save updated index
-        faiss_index.storage_context.persist(persist_dir=str(faiss_index_path))
-        print(f"  FAISS index updated: +{len(documents)} documents")
-        logger.info(f"FAISS index updated with {len(documents)} new documents")
+        if faiss_index:
+            # Add documents incrementally
+            for doc in new_documents:
+                faiss_index.insert(doc)
+            
+            # Save updated index
+            faiss_index.storage_context.persist(persist_dir=str(faiss_index_path))
+            print(f"  FAISS index updated: +{len(new_documents)} documents")
+            logger.info(f"FAISS index updated with {len(new_documents)} new documents")
+        else:
+            print("  ERROR: Failed to load FAISS index")
+            logger.error("Failed to load FAISS index for update")
     else:
-        print("  ERROR: Failed to load FAISS index")
-        logger.error("Failed to load FAISS index for update")
+        print("  ERROR: Embedder not configured")
+        logger.error("Embedder not configured for index update")
     
-    # Note: BM25 index requires full rebuild for updates (limitation of sparse retrieval)
+    # Step 4: Note about BM25 update
+    print("\n[Step 4/4] BM25 index update...")
     print("  Note: BM25 index requires full rebuild for updates")
     print("  Run 'index' command to rebuild BM25 with all documents")
     logger.info("BM25 index update skipped - requires full rebuild")
@@ -840,19 +852,17 @@ def handle_update_index(args: argparse.Namespace) -> None:
     print(f"\n{'='*60}")
     print("Update Summary:")
     print(f"{'='*60}")
-    print(f"  New documents added:  {len(unique_docs)}")
-    print(f"  New chunks created:   {len(chunks)}")
+    print(f"  New documents added:  {len(new_documents)}")
     print("  FAISS index updated:  Yes")
     print("  BM25 index updated:   Requires manual rebuild")
     print(f"  Duration:             {duration:.2f}s")
     print(f"{'='*60}\n")
     
     logger.info("Incremental index update completed",
-               new_docs=len(unique_docs),
-               new_chunks=len(chunks),
+               new_docs=len(new_documents),
                duration_ms=duration * 1000)
     
-    metrics.increment("index_update_documents_added", len(unique_docs))
+    metrics.increment("index_update_documents_added", len(new_documents))
     metrics.histogram("index_update_duration_ms", duration * 1000)
 
 
