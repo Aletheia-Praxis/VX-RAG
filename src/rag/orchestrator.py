@@ -31,7 +31,7 @@ from llama_index.core.workflow import (
 from llama_index.vector_stores.faiss import FaissVectorStore
 from llama_index.core import StorageContext, VectorStoreIndex
 from llama_index.core import get_response_synthesizer
-from llama_index.core.callbacks import TokenCountingHandler
+from .libs.utils.llamaindex_integration import ensure_global_token_counter, get_global_token_counter
 from llama_index.core.schema import NodeWithScore
 from llama_index.core.response_synthesizers import ResponseMode
 from .exceptions import (
@@ -212,17 +212,9 @@ class RAGOrchestrator:
             from src.utils.config_loader import get_context_assembler_config
             assembler_config = get_context_assembler_config(self.config_path)
             
-            # Initialize TokenCountingHandler for token tracking
-            import tiktoken
-            try:
-                tokenizer_fn = tiktoken.encoding_for_model(assembler_config['model_name']).encode
-            except KeyError:
-                tokenizer_fn = tiktoken.get_encoding("cl100k_base").encode
-                logger.warning(f"Unknown model {assembler_config['model_name']}, using cl100k_base encoding")
-            
-            token_counter = TokenCountingHandler(
-                tokenizer=tokenizer_fn,
-                verbose=False
+            # Ensure a global TokenCountingHandler is registered (or reuse existing)
+            token_counter = get_global_token_counter() or ensure_global_token_counter(
+                model_name=assembler_config['model_name'], verbose=False
             )
             
             # Initialize Response Synthesizer with token counting
