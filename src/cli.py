@@ -462,7 +462,6 @@ def handle_query(args: argparse.Namespace) -> None:
     from llama_index.vector_stores.faiss import FaissVectorStore
     from llama_index.core import StorageContext, VectorStoreIndex
     from llama_index.core import get_response_synthesizer
-    from llama_index.core.callbacks import TokenCountingHandler
     from src.utils.config_loader import get_embedding_config
     
     start_time = time.time()
