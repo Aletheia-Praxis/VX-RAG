@@ -7,9 +7,8 @@ using LlamaIndex native token counting infrastructure.
 
 import logging
 from typing import List, Dict, Any, Tuple, Optional
-import tiktoken
 
-from llama_index.core.callbacks import TokenCountingHandler
+from .llamaindex_integration import get_global_token_counter, ensure_global_token_counter
 
 logger = logging.getLogger(__name__)
 
@@ -33,18 +32,13 @@ class LlamaIndexTokenCounter:
         self.model_name = model_name
         self.verbose = verbose
         
-        try:
-            tokenizer_fn = tiktoken.encoding_for_model(model_name).encode
-        except KeyError:
-            # Fallback to cl100k_base for newer models
-            tokenizer_fn = tiktoken.get_encoding("cl100k_base").encode
-            logger.warning(f"Unknown model {model_name}, using cl100k_base encoding")
-        
-        # Initialize LlamaIndex TokenCountingHandler
-        self.token_counter = TokenCountingHandler(
-            tokenizer=tokenizer_fn,
-            verbose=verbose
-        )
+        # Prefer existing global TokenCountingHandler registered in Settings
+        handler = get_global_token_counter()
+        if handler is None:
+            # Ensure and register a global TokenCountingHandler
+            handler = ensure_global_token_counter(model_name=model_name, verbose=verbose)
+
+        self.token_counter = handler
         
         logger.info(
             f"Initialized LlamaIndex token counter: model={model_name}, verbose={verbose}"
