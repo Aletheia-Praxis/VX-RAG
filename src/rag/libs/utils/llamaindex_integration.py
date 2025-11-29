@@ -38,30 +38,9 @@ class VXRAGLlamaIndexAdapter:
         Returns:
             Configured TokenCountingHandler
         """
-        try:
-            tokenizer_fn = tiktoken.encoding_for_model(model_name).encode
-        except KeyError:
-            tokenizer_fn = tiktoken.get_encoding("cl100k_base").encode
-            logger.warning(f"Unknown model {model_name}, using cl100k_base encoding")
-        
-        token_counter = TokenCountingHandler(
-            tokenizer=tokenizer_fn,
-            verbose=verbose
-        )
-        
-        # Register with global CallbackManager
-        if Settings.callback_manager is None:
-            Settings.callback_manager = CallbackManager([token_counter])
-        else:
-            # Add to existing callback manager
-            Settings.callback_manager.handlers.append(token_counter)
-        
-        logger.info(
-            f"Global LlamaIndex token counting configured: model={model_name}, "
-            f"verbose={verbose}"
-        )
-        
-        return token_counter
+        # Delegate to centralized helper which performs the same operation and
+        # ensures a single global TokenCountingHandler is registered.
+        return ensure_global_token_counter(model_name=model_name, verbose=verbose)
     
     @staticmethod
     def vxrag_doc_to_llama_node(document: Dict[str, Any]) -> NodeWithScore:
@@ -201,7 +180,8 @@ def setup_vxrag_llamaindex_integration(
     Returns:
         TokenCountingHandler instance
     """
-    return VXRAGLlamaIndexAdapter.setup_global_token_counting(model_name, verbose)
+    # Ensure global counter is registered and return the handler
+    return ensure_global_token_counter(model_name=model_name, verbose=verbose)
 
 
 def get_token_stats() -> Dict[str, Any]:
@@ -212,3 +192,55 @@ def get_token_stats() -> Dict[str, Any]:
 def reset_token_counts() -> None:
     """Reset global token counts shorthand."""
     VXRAGLlamaIndexAdapter.reset_global_token_counts()
+
+
+def get_global_token_counter() -> Optional[TokenCountingHandler]:
+    """
+    Return the TokenCountingHandler currently registered in LlamaIndex Settings.callback_manager.
+
+    Returns:
+        TokenCountingHandler | None
+    """
+    if Settings.callback_manager is None:
+        return None
+
+    for handler in Settings.callback_manager.handlers:
+        if isinstance(handler, TokenCountingHandler):
+            return handler
+    return None
+
+
+def ensure_global_token_counter(model_name: str = "gpt-3.5-turbo", verbose: bool = False) -> TokenCountingHandler:
+    """
+    Ensure that a TokenCountingHandler is registered in the global LlamaIndex CallbackManager.
+    Creates and registers a TokenCountingHandler if none exists and returns it.
+
+    Args:
+        model_name: Model name for tokenizer
+        verbose: If True, prints token usage to console
+
+    Returns:
+        Configured TokenCountingHandler
+    """
+    token_counter = get_global_token_counter()
+    if token_counter is not None:
+        return token_counter
+
+    try:
+        tokenizer_fn = tiktoken.encoding_for_model(model_name).encode
+    except KeyError:
+        tokenizer_fn = tiktoken.get_encoding("cl100k_base").encode
+        logger.warning(f"Unknown model {model_name}, using cl100k_base encoding")
+
+    token_counter = TokenCountingHandler(
+        tokenizer=tokenizer_fn,
+        verbose=verbose
+    )
+
+    if Settings.callback_manager is None:
+        Settings.callback_manager = CallbackManager([token_counter])
+    else:
+        Settings.callback_manager.handlers.append(token_counter)
+
+    logger.info(f"Global TokenCountingHandler registered: model={model_name}, verbose={verbose}")
+    return token_counter
