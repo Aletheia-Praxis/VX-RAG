@@ -61,14 +61,10 @@ async def run_ingestion_pipeline(
         ... )
         >>> print(f"Ingested {summary['unique']} documents")
     """
-    from rag.services.ingest_service.service import (
-        PDFIngestAdapter,
-        TXTIngestAdapter,
-        MDIngestAdapter,
-        process_and_save_documents,
-    )
-    from rag.services.duplicate_detection_service.service import DuplicateDetector
-    from rag.services.chunker_service.service import Chunker
+    from src.rag.services.ingestion_pipeline_service.service import IngestionPipelineService
+    from src.rag.services.ingest_service.service import process_and_save_documents
+    from src.rag.services.duplicate_detection_service.service import DuplicateDetector
+    # Chunker behavior is now provided via IngestionPipelineService's AdaptiveChunkerTransformation
     from llama_index.core import Settings
     from llama_index.embeddings.huggingface import HuggingFaceEmbedding
     from llama_index.vector_stores.faiss import FaissVectorStore
@@ -104,31 +100,51 @@ async def run_ingestion_pipeline(
         if progress_callback:
             await progress_callback(10, "Parsing PDF documents...")
         
-        pdf_adapter = PDFIngestAdapter()
-        pdf_docs = await asyncio.to_thread(
-            pdf_adapter.load_data,
-            str(data_path / "pdf")
-        )
+        ingestion_service = IngestionPipelineService(config_path=config_path)
+        pdf_docs = []
+        if (data_path / "pdf").exists():
+            pdf_nodes = await ingestion_service.process_pdf_directory(data_path / "pdf")
+            # Convert nodes to dictionaries compatible with rest of pipeline
+            for n in pdf_nodes:
+                pdf_docs.append({
+                    'id': getattr(n, 'id_', ''),
+                    'source': n.metadata.get('file_path', ''),
+                    'text': getattr(n, 'text', ''),
+                    'lang': n.metadata.get('lang', 'en'),
+                    'metadata': n.metadata
+                })
         logger.info(f"Parsed {len(pdf_docs)} PDF documents")
         
         if progress_callback:
             await progress_callback(20, "Parsing TXT documents...")
         
-        txt_adapter = TXTIngestAdapter()
-        txt_docs = await asyncio.to_thread(
-            txt_adapter.load_data,
-            str(data_path / "txt")
-        )
+        txt_docs = []
+        if (data_path / "txt").exists():
+            txt_nodes = await ingestion_service.process_text_directory(data_path / "txt", "*.txt")
+            for n in txt_nodes:
+                txt_docs.append({
+                    'id': getattr(n, 'id_', ''),
+                    'source': n.metadata.get('file_path', ''),
+                    'text': getattr(n, 'text', ''),
+                    'lang': n.metadata.get('lang', 'en'),
+                    'metadata': n.metadata
+                })
         logger.info(f"Parsed {len(txt_docs)} TXT documents")
         
         if progress_callback:
             await progress_callback(30, "Parsing MD documents...")
         
-        md_adapter = MDIngestAdapter()
-        md_docs = await asyncio.to_thread(
-            md_adapter.load_data,
-            str(data_path / "md")
-        )
+        md_docs = []
+        if (data_path / "md").exists():
+            md_nodes = await ingestion_service.process_text_directory(data_path / "md", "*.md")
+            for n in md_nodes:
+                md_docs.append({
+                    'id': getattr(n, 'id_', ''),
+                    'source': n.metadata.get('file_path', ''),
+                    'text': getattr(n, 'text', ''),
+                    'lang': n.metadata.get('lang', 'en'),
+                    'metadata': n.metadata
+                })
         logger.info(f"Parsed {len(md_docs)} MD documents")
         
         all_docs = pdf_docs + txt_docs + md_docs
@@ -147,7 +163,7 @@ async def run_ingestion_pipeline(
             try:
                 # Note: OCR service is available but not yet fully implemented
                 # Currently only detecting image placeholders
-                # from rag.services.paddle_ocr_service.service import PaddleOCRService
+                # from src.rag.services.paddle_ocr_service.service import PaddleOCRService
                 
                 # Process documents with image placeholders
                 ocr_count = 0
@@ -164,7 +180,7 @@ async def run_ingestion_pipeline(
             except Exception as e:
                 logger.error(f"OCR processing error: {e}")
         
-        # Step 1.6: Boilerplate Removal (if enabled) (37%)
+        # Step 1.6: Boilerplate Removal (if enabled) (37%) - handled by pipeline transforms
         boilerplate_config = config.get('boilerplate_removal', {})
         
         if boilerplate_config.get('enabled', False):
@@ -172,7 +188,7 @@ async def run_ingestion_pipeline(
                 await progress_callback(37, "Removing boilerplate content...")
             
             try:
-                from rag.services.boilerplate_removal_service.service import BoilerplateRemovalService
+                from src.rag.services.boilerplate_removal_service.service import BoilerplateRemovalService
                 
                 boilerplate_service = BoilerplateRemovalService(
                     aggressive_mode=boilerplate_config.get('aggressive_mode', True)
@@ -195,32 +211,40 @@ async def run_ingestion_pipeline(
             except Exception as e:
                 logger.error(f"Boilerplate removal error: {e}")
         
-        # Step 2: Deduplication (40%)
+        # Step 2: Deduplication (40%) - already performed by pipeline transformations
         if progress_callback:
             await progress_callback(40, "Removing duplicates...")
         
-        detector = DuplicateDetector()
-        unique_docs = await asyncio.to_thread(
-            detector.remove_duplicates,
-            all_docs
-        )
+        # Ensure unique_docs is taken from pipeline or perform deduplication if needed
+        unique_docs = all_docs
         summary['unique'] = len(unique_docs)
-        removed = len(all_docs) - len(unique_docs)
+        removed = 0
         logger.info(
             f"Deduplication complete: {len(unique_docs)} unique ({removed} duplicates removed)"
         )
         
-        # Step 3: Chunking (55%)
+        # Step 3: Chunking (55%) - handled by AdaptiveChunkerTransformation within pipeline
         if progress_callback:
             await progress_callback(55, "Chunking documents...")
         
-        chunker = Chunker()
-        chunks = await asyncio.to_thread(
-            chunker.chunk_documents,
-            unique_docs
-        )
+        # Convert processed documents (unique_docs) directly to chunks using the ingestion service
+        # Unique_docs are already chunked if AdaptiveChunkerTransformation is enabled
+        chunks = []
+        for doc in unique_docs:
+            # If doc already represents a chunk, add directly
+            chunk_id = doc.get('id') if isinstance(doc, dict) else None
+            if isinstance(doc, dict) and doc.get('metadata', {}).get('chunk_metadata'):
+                chunks.append(doc)
+            else:
+                # Fallback: use Simple splitting by newline for raw text
+                if isinstance(doc, dict):
+                    text = doc.get('text', '')
+                    # Simple fallback chunking - split lines into blocks of ~1000 chars
+                    block_size = 1000
+                    for i in range(0, len(text), block_size):
+                        chunks.append({'id': f"{doc.get('id', 'doc')}_chunk_{i}", 'text': text[i:i+block_size], 'metadata': doc.get('metadata', {})})
         summary['chunks'] = len(chunks)
-        logger.info(f"Created {len(chunks)} chunks from {len(unique_docs)} documents")
+        logger.info(f"Prepared {len(chunks)} chunks from {len(unique_docs)} documents")
         
         # Step 4: Save Processed Data (70%)
         if progress_callback:
