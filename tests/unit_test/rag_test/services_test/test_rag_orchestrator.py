@@ -160,3 +160,58 @@ class TestRAGOrchestrator:
 
         assert len(results) == 1
         orchestrator._query_engine.query.assert_called_once_with("test query")
+
+    def test_initialize_registers_global_token_counter(self, temp_config_file, monkeypatch):
+        """RAG orchestrator should register a global TokenCountingHandler on init"""
+        from src.rag.libs.utils.llamaindex_integration import get_global_token_counter
+        from unittest.mock import patch
+
+        # Ensure llama-index defaults to a MockLLM in tests to avoid OpenAI key dependency
+        monkeypatch.setenv("IS_TESTING", "1")
+
+        # Patch external dependencies to avoid heavy initializations
+        with (
+            patch('src.utils.config_loader.get_embedding_config', return_value={
+                'embedding_model': 'all-MiniLM-L6-v2',
+                'embedding_batch_size': 10,
+                'embedding_trust_remote_code': False
+            }),
+            patch('src.utils.config_loader.get_context_assembler_config', return_value={'model_name': 'gpt-3.5-turbo'}),
+            patch('llama_index.vector_stores.faiss.FaissVectorStore.from_persist_dir', side_effect=ValueError('not found')),
+            patch('llama_index.core.indices.vector_store.base.VectorStoreIndex.from_vector_store', return_value=Mock()),
+            patch('llama_index.core.get_response_synthesizer', return_value=Mock()),
+            patch('llama_index.embeddings.huggingface.HuggingFaceEmbedding', return_value=Mock())
+        ):
+            orchestrator = RAGOrchestrator(config_path=temp_config_file, auto_load=True)
+
+        # Ensure global token counter now exists
+        handler = get_global_token_counter()
+        assert handler is not None
+
+    def test_initialize_does_not_duplicate_handler(self, temp_config_file, monkeypatch):
+        """Ensure orchestrator initialization does not create duplicate TokenCountingHandlers."""
+        from src.rag.libs.utils.llamaindex_integration import ensure_global_token_counter
+        from llama_index.core import Settings
+        # Ensure testing LLM
+        monkeypatch.setenv("IS_TESTING", "1")
+        # Create a global handler first
+        handler_before = ensure_global_token_counter(model_name="gpt-3.5-turbo", verbose=False)
+        initial_count = len(Settings.callback_manager.handlers)
+
+        # Initialize orchestrator (patched dependencies)
+        with (
+            patch('src.utils.config_loader.get_embedding_config', return_value={
+                'embedding_model': 'all-MiniLM-L6-v2',
+                'embedding_batch_size': 10,
+                'embedding_trust_remote_code': False
+            }),
+            patch('src.utils.config_loader.get_context_assembler_config', return_value={'model_name': 'gpt-3.5-turbo'}),
+            patch('llama_index.vector_stores.faiss.FaissVectorStore.from_persist_dir', side_effect=ValueError('not found')),
+            patch('llama_index.core.indices.vector_store.base.VectorStoreIndex.from_vector_store', return_value=Mock()),
+            patch('llama_index.core.get_response_synthesizer', return_value=Mock()),
+            patch('llama_index.embeddings.huggingface.HuggingFaceEmbedding', return_value=Mock())
+        ):
+            orchestrator = RAGOrchestrator(config_path=temp_config_file, auto_load=True)
+
+        # Ensure count hasn't increased
+        assert len(Settings.callback_manager.handlers) == initial_count
