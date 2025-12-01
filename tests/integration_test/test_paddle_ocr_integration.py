@@ -23,8 +23,10 @@ def test_imports():
         return False
     
     try:
-        from src.rag.services.ingest_service import PDFIngestAdapter  # noqa: F401
-        print("[PASS] PDFIngestAdapter imported successfully")
+        from src.rag.services.ingestion_pipeline_service.service import (
+            IngestionPipelineService, DoclingPDFTransformation
+        )  # noqa: F401
+        print("[PASS] DoclingPDFTransformation imported successfully")
     except ImportError as e:
         print(f"[FAIL] Failed to import PDFIngestAdapter: {e}")
         return False
@@ -71,9 +73,10 @@ def test_pdf_adapter_init():
     print("\nTesting PDFIngestAdapter initialization...")
     
     try:
-        from src.rag.services.ingest_service import PDFIngestAdapter
+        from src.rag.services.ingestion_pipeline_service.service import DoclingPDFTransformation
         
-        adapter = PDFIngestAdapter()
+        # Instantiate DoclingPDFTransformation and verify methods exist
+        adapter = DoclingPDFTransformation()
         print("[PASS] PDFIngestAdapter initialized")
         
         # Check if OCR-related methods exist
