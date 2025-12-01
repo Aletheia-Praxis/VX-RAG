@@ -44,7 +44,8 @@ VX-RAG/
 ├── data/
 │   ├── raw/
 │   │   ├── pdf/           # Raw PDF files
-│   │   └── txt/           # Raw text files (TODO: MD support)
+│   │   ├── txt/           # Raw text files (TXT)
+│   │   └── md/            # Raw Markdown files
 │   ├── processed/         # Preprocessed text documents
 │   └── index/             # FAISS vector index storage
 │
