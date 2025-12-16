@@ -333,55 +333,32 @@ class RAGOrchestrator:
                 duration_ms=retrieve_duration * 1000
             )
             
-            # Convert nodes to document format
-            retrieved_docs = []
-            for node in retrieved_nodes:
-                doc = {
-                    'text': node.text,
-                    'score': getattr(node, 'score', 0.0),
-                    'metadata': node.metadata,
-                    'node_id': getattr(node, 'node_id', getattr(node, 'id_', ''))
-                }
-                retrieved_docs.append(doc)
-            
             # Step 2: Results already postprocessed by QueryEngine
             # (metadata boost + cross-encoder reranking via native LlamaIndex postprocessors)
             # Limit to final top_k
-            final_docs = retrieved_docs[:top_k]
+            final_nodes = retrieved_nodes[:top_k]
             
             logger.info(
                 "Postprocessing complete (via QueryEngine)",
                 request_id=request_id,
-                results=len(final_docs)
+                results=len(final_nodes)
             )
             
             # Step 3: Use Response Synthesizer to assemble context
             assemble_start = time.time()
             
             if self._response_synthesizer:
-                # Convert retrieved docs to NodeWithScore objects for Response Synthesizer
-                nodes_with_scores = []
-                for doc in final_docs:
-                    from llama_index.core.schema import TextNode
-                    node = TextNode(
-                        text=doc.get('text', ''),
-                        metadata=doc.get('metadata', {}),
-                        id_=doc.get('node_id', doc.get('id', ''))
-                    )
-                    score = doc.get('score', 0.0)
-                    node_with_score = NodeWithScore(node=node, score=score)
-                    nodes_with_scores.append(node_with_score)
-                
                 # Use Response Synthesizer to generate context
+                # Note: synthesize method expects NodeWithScore objects, which final_nodes are
                 response = self._response_synthesizer.synthesize(
                     query_str=query,
-                    nodes=nodes_with_scores
+                    nodes=final_nodes
                 )
                 
                 # Create MCP-compatible payload from Response Synthesizer output
                 from .libs.schemas.mcp_schemas import MCPContextPayload, ContextItem
                 context_items = []
-                for node_with_score in nodes_with_scores[:top_k]:  # Limit to top_k
+                for node_with_score in final_nodes:
                     item = ContextItem(
                         id=node_with_score.node.node_id or node_with_score.node.id_,
                         text=node_with_score.node.get_content(),
@@ -390,15 +367,19 @@ class RAGOrchestrator:
                     )
                     context_items.append(item)
                 
+                # Estimate tokens (rough approximation: 4 chars per token)
+                total_chars = sum(len(item.text) for item in context_items)
+                estimated_tokens = total_chars // 4
+
                 context_payload = MCPContextPayload(
                     schema_version="1.0",
                     context=context_items,
                     query=query,
                     token_budget=token_budget,
                     provenance={
-                        'total_candidates': len(retrieved_docs),
+                        'total_candidates': len(retrieved_nodes),
                         'selected_count': len(context_items),
-                        'total_tokens': len(str(response)) // 4,  # Rough token estimate
+                        'total_tokens': estimated_tokens,
                         'selection_method': 'response_synthesizer_compact'
                     }
                 )
