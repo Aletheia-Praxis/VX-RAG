@@ -5,10 +5,12 @@ Provides functionality to identify and handle duplicate documents
 based on content similarity and exact matches.
 """
 
-from typing import List, Dict, Any, Set, Optional
+from typing import List, Dict, Any, Set, Optional, Union
 import hashlib
 import logging
 from difflib import SequenceMatcher
+
+from llama_index.core.schema import BaseNode
 
 from src.utils.config_loader import get_duplicate_detection_config
 
@@ -49,54 +51,53 @@ class DuplicateDetector:
         self.similarity_threshold = similarity_threshold
         self.hash_algorithm = hash_algorithm
 
-    def remove_duplicates(self, documents: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    def remove_duplicates(self, nodes: List[BaseNode]) -> List[BaseNode]:
         """
-        Remove duplicate documents from the list.
+        Remove duplicate nodes from the list based on content hash.
 
         Args:
-            documents: List of document dictionaries
+            nodes: List of LlamaIndex BaseNode objects
 
         Returns:
-            List of unique documents
+            List of unique nodes
         """
-        if not documents:
+        if not nodes:
             return []
 
-        logger.info(f"Starting duplicate detection on {len(documents)} documents")
+        logger.info(f"Starting duplicate detection on {len(nodes)} nodes")
 
         # First pass: exact duplicates by content hash
-        unique_by_hash = self._remove_exact_duplicates(documents)
+        unique_by_hash = self._remove_exact_duplicates(nodes)
 
-        # Second pass: near-duplicates by similarity (optional, can be expensive)
-        # For now, we'll skip similarity-based detection as it's computationally expensive
-        # and exact duplicates are more common in document collections
-
-        logger.info(f"Removed duplicates: {len(documents)} -> {len(unique_by_hash)} documents")
+        logger.info(f"Removed duplicates: {len(nodes)} -> {len(unique_by_hash)} nodes")
         return unique_by_hash
 
-    def _remove_exact_duplicates(self, documents: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    def _remove_exact_duplicates(self, nodes: List[BaseNode]) -> List[BaseNode]:
         """
         Remove exact duplicates based on content hashing.
 
         Args:
-            documents: List of document dictionaries
+            nodes: List of LlamaIndex BaseNode objects
 
         Returns:
-            List of unique documents
+            List of unique nodes
         """
         seen_hashes: Set[str] = set()
-        unique_docs = []
+        unique_nodes = []
 
-        for doc in documents:
-            content_hash = self._hash_content(doc.get('text', ''))
+        for node in nodes:
+            content = node.get_content()
+            content_hash = self._hash_content(content)
 
             if content_hash not in seen_hashes:
                 seen_hashes.add(content_hash)
-                unique_docs.append(doc)
+                unique_nodes.append(node)
             else:
-                logger.info(f"Removed exact duplicate: {doc.get('id', 'unknown')}")
+                # Log duplicate found (optional: log ID)
+                # logger.debug(f"Removed exact duplicate node: {node.node_id}")
+                pass
 
-        return unique_docs
+        return unique_nodes
 
     def _hash_content(self, content: str) -> str:
         """
@@ -112,47 +113,47 @@ class DuplicateDetector:
         normalized = ' '.join(content.split())
         return hashlib.new(self.hash_algorithm, normalized.encode('utf-8')).hexdigest()
 
-    def find_similar_documents(self, documents: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    def find_similar_documents(self, nodes: List[BaseNode]) -> List[Dict[str, Any]]:
         """
-        Find near-duplicate documents using text similarity.
+        Find near-duplicate nodes using text similarity.
 
         Note: This is computationally expensive and should be used sparingly.
 
         Args:
-            documents: List of document dictionaries
+            nodes: List of LlamaIndex BaseNode objects
 
         Returns:
-            List of similarity groups (each group contains similar documents)
+            List of similarity groups (each group contains similar nodes)
         """
         similarity_groups: List[Dict[str, Any]] = []
 
         # Simple pairwise comparison (O(n^2) - only suitable for small datasets)
         processed = set()
 
-        for i, doc1 in enumerate(documents):
+        for i, node1 in enumerate(nodes):
             if i in processed:
                 continue
 
-            group = [doc1]
+            group = [node1]
             processed.add(i)
 
-            for j, doc2 in enumerate(documents):
+            for j, node2 in enumerate(nodes):
                 if j in processed or i == j:
                     continue
 
                 similarity = self._calculate_similarity(
-                    doc1.get('text', ''),
-                    doc2.get('text', '')
+                    node1.get_content(),
+                    node2.get_content()
                 )
 
                 if similarity >= self.similarity_threshold:
-                    group.append(doc2)
+                    group.append(node2)
                     processed.add(j)
 
             if len(group) > 1:
                 similarity_groups.append({
                     'group_id': f"group_{len(similarity_groups)}",
-                    'documents': group,
+                    'nodes': group,
                     'similarity_score': similarity
                 })
 
