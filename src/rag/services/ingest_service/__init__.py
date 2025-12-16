@@ -6,17 +6,9 @@ Provides unified interface for loading and preprocessing documents.
 """
 
 from .service import (
-	PDFIngestAdapter,
-	TXTIngestAdapter,
-	MDIngestAdapter,
-	process_and_save_documents,
-	save_processed_text,
+	DoclingReader,
 )
 
 __all__ = [
-	"PDFIngestAdapter",
-	"TXTIngestAdapter",
-	"MDIngestAdapter",
-	"process_and_save_documents",
-	"save_processed_text",
+	"DoclingReader",
 ]
