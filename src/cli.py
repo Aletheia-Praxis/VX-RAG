@@ -212,6 +212,17 @@ def handle_ingest(args: argparse.Namespace) -> None:
     
     print(f"  Total processed nodes: {len(all_nodes)}")
     
+    # Step 2.5: Deduplicate nodes
+    print(f"\n[Step 2.5/4] Removing duplicates...")
+    duplicate_detector = DuplicateDetector(config_path=args.config)
+    unique_nodes = duplicate_detector.remove_duplicates(all_nodes)
+    
+    duplicates_removed = len(all_nodes) - len(unique_nodes)
+    print(f"  Removed {duplicates_removed} duplicate nodes")
+    print(f"  Unique nodes: {len(unique_nodes)}")
+    
+    all_nodes = unique_nodes
+    
     # Step 3: Convert nodes to serializable format and save
     print(f"\n[Step 3/4] Saving processed documents to {processed_dir}...")
     
