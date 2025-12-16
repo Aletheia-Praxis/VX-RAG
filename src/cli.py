@@ -215,51 +215,15 @@ def handle_ingest(args: argparse.Namespace) -> None:
     # Step 3: Convert nodes to serializable format and save
     print(f"\n[Step 3/4] Saving processed documents to {processed_dir}...")
     
-    # Convert nodes to documents for compatibility
-    processed_docs = []
-    for node in all_nodes:
-        doc = {
-            'id': node.id_,
-            'text': node.text,
-            'metadata': node.metadata,
-            'node_type': type(node).__name__
-        }
-        processed_docs.append(doc)
+    # Save nodes as JSON using LlamaIndex serialization
+    nodes_data = [node.to_dict() for node in all_nodes]
     
-    # Save processed documents
     import json
-    processed_file = processed_dir / "processed_documents.json"
+    processed_file = processed_dir / "nodes.json"
     with open(processed_file, 'w', encoding='utf-8') as f:
-        json.dump(processed_docs, f, ensure_ascii=False, indent=2)
+        json.dump(nodes_data, f, ensure_ascii=False, indent=2)
     
-    print(f"  Saved {len(processed_docs)} documents to: {processed_file}")
-    
-    # Step 4: Create chunks for indexing (legacy compatibility)
-    print("\n[Step 4/4] Creating chunks for indexing...")
-    
-    # Convert nodes to chunk format for backward compatibility
-    chunks = []
-    for i, node in enumerate(all_nodes):
-        chunk = {
-            'id': f"chunk_{i}",
-            'text': node.text,
-            'metadata': node.metadata,
-            'node_id': node.id_
-        }
-        chunks.append(chunk)
-    
-    # Save chunks to file for indexing
-    chunks_file = data_path / "processed" / "chunks.json"
-    with open(chunks_file, 'w', encoding='utf-8') as f:
-        json.dump(chunks, f, ensure_ascii=False, indent=2)
-    
-    print(f"  Created {len(chunks)} chunks")
-    print(f"  Saved chunks to: {chunks_file}")
-    
-    # Persist pipeline state
-    if persist_dir:
-        ingestion_service.persist_pipeline()
-        print("  Pipeline state persisted")
+    print(f"  Saved {len(nodes_data)} nodes to: {processed_file}")
     
     # Summary
     duration = time.time() - start_time
@@ -267,55 +231,75 @@ def handle_ingest(args: argparse.Namespace) -> None:
     print(f"\n{'='*50}")
     print("Ingestion Summary:")
     print(f"{'='*50}")
-    print(f"  Documents processed:   {len(processed_docs)}")
-    print(f"  Total chunks created:  {len(chunks)}")
-    print(f"  Processed file:        {processed_file}")
-    print(f"  Chunks file:           {chunks_file}")
+    print(f"  Nodes processed:       {len(all_nodes)}")
+    print(f"  Nodes file:            {processed_file}")
     print(f"  Duration:              {duration:.2f}s")
     print(f"{'='*50}\n")
     
     logger.info("Ingestion pipeline completed", 
-               processed=len(processed_docs), 
-               chunks=len(chunks),
+               nodes=len(all_nodes), 
                duration_ms=duration * 1000)
     
-    metrics.increment("ingestion_documents_processed_total", len(processed_docs))
-    metrics.increment("ingestion_chunks_created_total", len(chunks))
+    metrics.increment("ingestion_nodes_processed_total", len(all_nodes))
     metrics.histogram("ingestion_pipeline_duration_ms", duration * 1000)
 
 
 def handle_index(args: argparse.Namespace) -> None:
     """Handle index command - create embeddings and build FAISS + BM25 indexes."""
     import json
-    from llama_index.core.schema import Document
+    from llama_index.core.schema import TextNode
     from llama_index.vector_stores.faiss import FaissVectorStore
     from llama_index.core import StorageContext, VectorStoreIndex
     from src.rag.services.ingestion_pipeline_service import IngestionPipelineService
-    from src.utils.config_loader import get_embedding_config
     
     start_time = time.time()
     data_dir = Path(args.data_dir)
     persist_dir = Path(args.persist_dir)
-    chunks_file = data_dir / "chunks.json"
+    nodes_file = data_dir / "processed" / "nodes.json"
     
-    if not chunks_file.exists():
-        print(f"Error: Chunks file not found at {chunks_file}")
-        print("Please run 'ingest' command first to create chunks.")
-        logger.error("Indexing failed: chunks file not found", chunks_file=str(chunks_file))
-        sys.exit(1)
+    if not nodes_file.exists():
+        # Fallback to legacy chunks.json if nodes.json doesn't exist
+        chunks_file = data_dir / "chunks.json"
+        if chunks_file.exists():
+            print(f"Warning: nodes.json not found, falling back to legacy chunks.json")
+            nodes_file = chunks_file
+        else:
+            print(f"Error: Nodes file not found at {nodes_file}")
+            print("Please run 'ingest' command first.")
+            logger.error("Indexing failed: nodes file not found", nodes_file=str(nodes_file))
+            sys.exit(1)
     
     persist_dir.mkdir(parents=True, exist_ok=True)
     
     logger.info("Starting indexing pipeline", persist_dir=str(persist_dir))
     
-    # Step 1: Load chunks
-    print(f"\n[Step 1/4] Loading chunks from {chunks_file}...")
+    # Step 1: Load nodes
+    print(f"\n[Step 1/4] Loading nodes from {nodes_file}...")
     
-    with open(chunks_file, 'r', encoding='utf-8') as f:
-        chunks = json.load(f)
+    with open(nodes_file, 'r', encoding='utf-8') as f:
+        nodes_data = json.load(f)
     
-    print(f"  Loaded chunks: {len(chunks)}")
-    logger.info(f"Loaded {len(chunks)} chunks from {chunks_file}")
+    # Reconstruct TextNode objects
+    nodes = []
+    for node_data in nodes_data:
+        try:
+            # Handle both legacy chunk format and new node format
+            if 'node_type' not in node_data and 'text' in node_data:
+                # Legacy format
+                node = TextNode(
+                    text=node_data.get('text', ''),
+                    metadata=node_data.get('metadata', {}),
+                    id_=node_data.get('id', '') or node_data.get('node_id', '')
+                )
+            else:
+                # New format (LlamaIndex dict)
+                node = TextNode.from_dict(node_data)
+            nodes.append(node)
+        except Exception as e:
+            logger.warning(f"Failed to reconstruct node: {e}")
+    
+    print(f"  Loaded nodes: {len(nodes)}")
+    logger.info(f"Loaded {len(nodes)} nodes from {nodes_file}")
     
     # Step 2: Initialize IngestionPipelineService for embedder
     print("\n[Step 2/4] Initializing embedder...")
@@ -330,51 +314,31 @@ def handle_index(args: argparse.Namespace) -> None:
     
     print("  Embedder initialized")
     
-    # Step 3: Generate embeddings
-    print("\n[Step 3/4] Generating embeddings...")
-    
-    # Extract text from chunks
-    chunk_texts = [chunk.get('text', '') for chunk in chunks]
-    
-    print(f"  Embedding {len(chunk_texts)} chunks...")
-    embeddings_list = embed_model.get_text_embedding_batch(chunk_texts)
-    
-    embedding_dim = len(embeddings_list[0]) if embeddings_list else 0
-    print(f"  Generated embeddings: {len(embeddings_list)}")
-    print(f"  Embedding dimension: {embedding_dim}")
-    logger.info(f"Generated {len(embeddings_list)} embeddings with dimension {embedding_dim}")
-    
-    # Step 4: Build FAISS vector index
-    print("\n[Step 4/4] Building FAISS vector index...")
-    
-    # Convert chunks to LlamaIndex Document objects for direct indexing
-    documents = []
-    for chunk in chunks:
-        doc = Document(
-            text=chunk.get('text', ''),
-            metadata=chunk.get('metadata', {}),
-            id_=chunk.get('id', '')
-        )
-        documents.append(doc)
+    # Step 3: Build FAISS vector index (Embeddings generated automatically)
+    print("\n[Step 3/4] Building FAISS vector index (generating embeddings)...")
     
     # Initialize FAISS vector store directly with LlamaIndex
     faiss_index_path = persist_dir / "faiss_index"
     faiss_index_path.mkdir(parents=True, exist_ok=True)
     
-    bm25_index_path = persist_dir / "bm25_index"
-    bm25_index_path.mkdir(parents=True, exist_ok=True)
-    
     # Create FAISS index with proper dimensions
     import faiss
-    d = len(embeddings_list[0]) if embeddings_list else 384  # Default to 384 for all-MiniLM-L6-v2
+    # We don't know the dimension yet, but FaissVectorStore can handle it if we let it create the index?
+    # Actually, FaissVectorStore usually needs an index passed to it.
+    # We can get dimension from embed_model
+    test_embed = embed_model.get_text_embedding("test")
+    d = len(test_embed)
+    print(f"  Embedding dimension: {d}")
+    
     faiss_index = faiss.IndexHNSWFlat(d, 32)  # HNSW with M=32
     
     vector_store = FaissVectorStore(faiss_index=faiss_index)
     storage_context = StorageContext.from_defaults(vector_store=vector_store)
     
     # Build FAISS index directly with LlamaIndex
-    index = VectorStoreIndex.from_documents(
-        documents=documents,
+    # This will calculate embeddings for all nodes that don't have them
+    index = VectorStoreIndex(
+        nodes=nodes,
         storage_context=storage_context,
         embed_model=embed_model,
         show_progress=True
@@ -383,13 +347,12 @@ def handle_index(args: argparse.Namespace) -> None:
     # Save FAISS index directly with LlamaIndex
     index.storage_context.persist(persist_dir=str(faiss_index_path))
     
-    faiss_index_path = persist_dir / "faiss_index"
-    print(f"  FAISS index built: {len(documents)} vectors")
+    print(f"  FAISS index built: {len(nodes)} vectors")
     print(f"  Saved to: {faiss_index_path}")
     logger.info(f"Built and saved FAISS index to {faiss_index_path}")
     
     # Build BM25 index
-    print("\n[Step 5/5] Building BM25 index...")
+    print("\n[Step 4/4] Building BM25 index...")
     
     # Build BM25 retriever directly with LlamaIndex
     from llama_index.retrievers.bm25 import BM25Retriever
@@ -399,7 +362,7 @@ def handle_index(args: argparse.Namespace) -> None:
     similarity_top_k = bm25_config.get('similarity_top_k', 20)
     
     bm25_retriever = BM25Retriever.from_defaults(
-        nodes=chunks,  # Use the same chunks as FAISS
+        nodes=nodes,
         similarity_top_k=similarity_top_k,
         verbose=True
     )
@@ -408,15 +371,14 @@ def handle_index(args: argparse.Namespace) -> None:
     bm25_index_path = persist_dir / "bm25_index"
     bm25_retriever.persist(str(bm25_index_path))
     
-    print(f"  BM25 index built: {len(chunks)} chunks")
+    print(f"  BM25 index built: {len(nodes)} nodes")
     print(f"  Saved to: {bm25_index_path}")
     logger.info(f"Built and saved BM25 index to {bm25_index_path}")
     
     # Save metadata for later use
     metadata = {
-        'num_chunks': len(chunks),
-        'num_embeddings': len(embeddings_list),
-        'embedding_dim': embedding_dim,
+        'num_nodes': len(nodes),
+        'embedding_dim': d,
         'faiss_index_path': str(faiss_index_path),
         'bm25_index_path': str(bm25_index_path),
         'indexed_at': time.strftime('%Y-%m-%d %H:%M:%S')
@@ -434,9 +396,8 @@ def handle_index(args: argparse.Namespace) -> None:
     print(f"\n{'='*50}")
     print("Indexing Summary:")
     print(f"{'='*50}")
-    print(f"  Chunks processed:     {len(chunks)}")
-    print(f"  Embeddings created:   {len(embeddings_list)}")
-    print(f"  Embedding dim:        {embedding_dim}")
+    print(f"  Nodes processed:      {len(nodes)}")
+    print(f"  Embedding dim:        {d}")
     print(f"  FAISS index:          {faiss_index_path}")
     print(f"  BM25 index:           {bm25_index_path}")
     print(f"  Metadata:             {metadata_file}")
@@ -444,14 +405,12 @@ def handle_index(args: argparse.Namespace) -> None:
     print(f"{'='*50}\n")
     
     logger.info("Indexing pipeline completed",
-               chunks=len(chunks),
-               embeddings=len(embeddings_list),
+               nodes=len(nodes),
                faiss_index=str(faiss_index_path),
                bm25_index=str(bm25_index_path),
                duration_ms=duration * 1000)
     
-    metrics.increment("indexing_chunks_processed_total", len(chunks))
-    metrics.increment("indexing_embeddings_created_total", len(embeddings_list))
+    metrics.increment("indexing_nodes_processed_total", len(nodes))
     metrics.histogram("indexing_pipeline_duration_ms", duration * 1000)
 
 
@@ -462,6 +421,7 @@ def handle_query(args: argparse.Namespace) -> None:
     from llama_index.vector_stores.faiss import FaissVectorStore
     from llama_index.core import StorageContext, VectorStoreIndex
     from llama_index.core import get_response_synthesizer
+    from llama_index.core.response_synthesizers import ResponseMode
     from src.utils.config_loader import get_embedding_config
     
     start_time = time.time()
@@ -688,7 +648,10 @@ def handle_query(args: argparse.Namespace) -> None:
     )
     
     print(f"  Response synthesized: {len(context_payload.context)} items")
-    print(f"  Estimated tokens: ~{context_payload.total_tokens_estimate()}")
+    # Estimate tokens (rough approximation: 4 chars per token)
+    total_chars = sum(len(item.text) for item in context_payload.context)
+    estimated_tokens = total_chars // 4
+    print(f"  Estimated tokens: ~{estimated_tokens}")
     logger.info(f"Response synthesized: {len(context_payload.context)} items")
     
     # Display results
