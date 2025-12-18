@@ -24,6 +24,7 @@ from src.utils.config_loader import get_embedding_config, get_ingestion_config
 from src.rag.services.ingest_service.service import DoclingReader
 from src.rag.services.boilerplate_removal_service.transform import BoilerplateCleaner
 from src.rag.services.chunker_service.transform import AdaptiveChunker
+from src.rag.services.duplicate_detection_service.transform import DeduplicationTransform
 
 logger = logging.getLogger(__name__)
 
@@ -122,6 +123,7 @@ class IngestionPipelineService:
             transformations=[
                 BoilerplateCleaner(aggressive_mode=True), # Config could be passed here
                 AdaptiveChunker(), # Config could be passed here
+                DeduplicationTransform(config_path=self.config_path),
                 # Embedder is removed to avoid double computation in handle_index
                 # self.get_embedder(),
             ]
