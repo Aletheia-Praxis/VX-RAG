@@ -95,7 +95,10 @@ async def handle_query_knowledge_base(params: QueryKnowledgeBaseRequest) -> str:
         
         # Log metrics
         duration = time.time() - start_time
-        results_count = rag_result.get('sources_count', 0)
+        if hasattr(rag_result, 'context'):
+             results_count = len(rag_result.context)
+        else:
+             results_count = rag_result.get('sources_count', 0)
         
         log_query_event(
             query=params.query,
