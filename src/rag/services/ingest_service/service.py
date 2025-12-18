@@ -71,3 +71,24 @@ class DoclingReader(BaseReader):
         except Exception as e:
             logger.error(f"Error processing {file}: {e}")
             return []
+
+def process_and_save_documents(documents: List[Dict[str, Any]], output_dir: Path) -> int:
+    """
+    Save processed documents to JSON file.
+    
+    Args:
+        documents: List of document dictionaries
+        output_dir: Directory to save the output file
+        
+    Returns:
+        Number of documents saved
+    """
+    import json
+    
+    output_dir.mkdir(parents=True, exist_ok=True)
+    output_file = output_dir / "nodes.json"
+    
+    with open(output_file, 'w', encoding='utf-8') as f:
+        json.dump(documents, f, ensure_ascii=False, indent=2)
+        
+    return len(documents)
