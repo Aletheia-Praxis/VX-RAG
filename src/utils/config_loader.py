@@ -640,60 +640,6 @@ def get_duplicate_detection_config(config_path: Optional[str] = None) -> Dict[st
     return duplicate_config
 
 
-def get_paddle_ocr_config(config_path: Optional[str] = None) -> Dict[str, Any]:
-    """
-    Get PaddleOCR configuration from settings.yaml.
-    
-    Args:
-        config_path: Path to settings.yaml file
-        
-    Returns:
-        Dictionary with PaddleOCR configuration:
-        - enabled: Enable PaddleOCR for image text extraction
-        - lang: OCR language
-        - use_gpu: Use GPU acceleration
-        - use_angle_cls: Enable text angle classification
-        - show_log: Show PaddleOCR logs
-        - det_model_dir: Path to custom detection model
-        - rec_model_dir: Path to custom recognition model
-        - cls_model_dir: Path to custom classification model
-        - use_space_char: Recognize space characters
-        - enable_mkldnn: Enable MKLDNN acceleration
-        - cpu_threads: Number of CPU threads
-        - min_confidence: Minimum confidence threshold
-        - save_extracted_images: Save extracted images to disk
-        - extracted_images_dir: Directory for extracted images
-        - replace_image_placeholders: Replace <!-- image --> markers with extracted text
-    """
-    config = load_settings(config_path)
-    
-    ocr_section = config.get('paddle_ocr', {})
-    
-    ocr_config = {
-        'enabled': ocr_section.get('enabled', True),
-        'lang': ocr_section.get('lang', 'en'),
-        'use_gpu': ocr_section.get('use_gpu', False),
-        'use_angle_cls': ocr_section.get('use_angle_cls', True),
-        'show_log': ocr_section.get('show_log', False),
-        'det_model_dir': ocr_section.get('det_model_dir'),
-        'rec_model_dir': ocr_section.get('rec_model_dir'),
-        'cls_model_dir': ocr_section.get('cls_model_dir'),
-        'use_space_char': ocr_section.get('use_space_char', True),
-        'enable_mkldnn': ocr_section.get('enable_mkldnn', False),
-        'cpu_threads': ocr_section.get('cpu_threads', 10),
-        'min_confidence': ocr_section.get('min_confidence', 0.5),
-        'save_extracted_images': ocr_section.get('save_extracted_images', True),
-        'extracted_images_dir': ocr_section.get('extracted_images_dir', './data/extracted_images'),
-        'replace_image_placeholders': ocr_section.get('replace_image_placeholders', True)
-    }
-    
-    logger.info(
-        f"Loaded PaddleOCR config: enabled={ocr_config['enabled']}, "
-        f"lang={ocr_config['lang']}, use_gpu={ocr_config['use_gpu']}"
-    )
-    return ocr_config
-
-
 def get_ingestion_config(config_path: Optional[str] = None) -> Dict[str, Any]:
     """
     Get ingestion pipeline configuration from settings.yaml.
