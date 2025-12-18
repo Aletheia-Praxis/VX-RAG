@@ -14,8 +14,10 @@ Key responsibilities:
 
 import re
 import json
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, List, Optional, Union
 from datetime import datetime
+
+from src.rag.libs.schemas.mcp_schemas import MCPContextPayload
 
 from .schemas import (
     QueryKnowledgeBaseResponse,
@@ -93,7 +95,7 @@ def redact_sensitive_data(text: str) -> str:
 
 
 def format_query_response(
-    rag_result: Dict[str, Any],
+    rag_result: Union[Dict[str, Any], MCPContextPayload],
     apply_redaction: bool = True
 ) -> str:
     """
@@ -108,26 +110,46 @@ def format_query_response(
     """
     try:
         # Extract components
-        query = rag_result.get('query', '')
-        context_items = rag_result.get('context', [])
-        tokens_estimate = rag_result.get('total_tokens_estimate', 0)
-        sources_count = rag_result.get('sources_count', 0)
-        stats = rag_result.get('retrieval_stats', {})
+        if isinstance(rag_result, MCPContextPayload):
+            query = rag_result.query
+            # context_items will be List[ContextItem]
+            context_items = rag_result.context
+            tokens_estimate = rag_result.total_tokens_estimate()
+            sources_count = len(context_items)
+            stats = rag_result.provenance
+        else:
+            query = rag_result.get('query', '')
+            # context_items will be List[Dict]
+            context_items = rag_result.get('context', [])
+            tokens_estimate = rag_result.get('total_tokens_estimate', 0)
+            sources_count = rag_result.get('sources_count', 0)
+            stats = rag_result.get('retrieval_stats', {})
         
         # Build source documents
         sources = []
         for item in context_items:
-            text = item.get('text', '')
+            if isinstance(rag_result, MCPContextPayload):
+                # item is ContextItem object
+                text = item.text
+                item_id = item.id
+                score = item.score
+                metadata = item.meta
+            else:
+                # item is dict
+                text = item.get('text', '')
+                item_id = item.get('id', '')
+                score = item.get('score')
+                metadata = item.get('metadata', {})
             
             # Apply redaction if enabled
             if apply_redaction:
                 text = redact_sensitive_data(text)
             
             source_doc = SourceDocument(
-                id=item.get('id', ''),
+                id=item_id,
                 text=text,
-                score=item.get('score'),
-                metadata=item.get('metadata', {})
+                score=score,
+                metadata=metadata
             )
             sources.append(source_doc)
         
