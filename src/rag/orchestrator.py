@@ -274,7 +274,7 @@ class RAGOrchestrator:
         top_k: int = 5,
         search_type: str = "hybrid",
         token_budget: int = 4000
-    ) -> Dict[str, Any]:
+    ) -> Any:
         """
         Execute a complete query pipeline: retrieve, rerank, assemble context.
         
@@ -285,12 +285,7 @@ class RAGOrchestrator:
             token_budget: Maximum token budget for assembled context
             
         Returns:
-            Dictionary containing:
-                - query: Original query string
-                - context: List of context items with text, score, metadata
-                - total_tokens_estimate: Estimated token count
-                - sources_count: Number of source documents
-                - retrieval_stats: Performance statistics
+            MCPContextPayload containing query results
         
         Raises:
             RuntimeError: If services are not initialized or indexes not loaded
@@ -405,30 +400,17 @@ class RAGOrchestrator:
             assemble_duration = time.time() - assemble_start
             total_duration = time.time() - start_time
             
-            # Build response
-            response = {
-                'query': query,
-                'context': [
-                    {
-                        'id': item.id,
-                        'text': item.text,
-                        'score': item.score,
-                        'metadata': item.meta
-                    }
-                    for item in context_payload.context
-                ],
-                'total_tokens_estimate': context_payload.total_tokens_estimate(),
-                'sources_count': len(context_payload.context),
-                'retrieval_stats': {
+            # Update provenance with timing stats
+            if hasattr(context_payload, 'provenance'):
+                context_payload.provenance.update({
                     'retrieve_duration_ms': round(retrieve_duration * 1000, 2),
                     'assemble_duration_ms': round(assemble_duration * 1000, 2),
                     'total_duration_ms': round(total_duration * 1000, 2),
-                    'candidates_retrieved': len(retrieved_docs),
-                    'results_postprocessed': len(final_docs),
+                    'candidates_retrieved': len(retrieved_nodes),
+                    'results_postprocessed': len(final_nodes),
                     'search_type': search_type,
                     'note': 'Query executed via native LlamaIndex QueryEngine'
-                }
-            }
+                })
             
             logger.info(
                 "Query pipeline complete",
@@ -444,7 +426,7 @@ class RAGOrchestrator:
             metrics.histogram("orchestrator_retrieve_duration_ms", retrieve_duration * 1000)
             metrics.gauge("orchestrator_results_count", len(context_payload.context))
             
-            return response
+            return context_payload
             
         except ValueError as e:
             # Query validation or parameter errors
@@ -479,7 +461,7 @@ class RAGOrchestrator:
         top_k: int = 5,
         search_type: str = "hybrid",
         token_budget: int = 4000
-    ) -> Dict[str, Any]:
+    ) -> Any:
         """
         Execute query pipeline using LlamaIndex Workflow (async).
         
@@ -490,7 +472,7 @@ class RAGOrchestrator:
             token_budget: Maximum token budget for assembled context
             
         Returns:
-            Dictionary containing query results
+            MCPContextPayload containing query results
         """
         if not self._workflow:
             raise RuntimeError("RAG Workflow not initialized")
@@ -519,26 +501,13 @@ class RAGOrchestrator:
             
             total_duration = time.time() - start_time
             
-            # Build response
-            response = {
-                'query': query,
-                'context': [
-                    {
-                        'id': item.id,
-                        'text': item.text,
-                        'score': item.score,
-                        'metadata': item.meta
-                    }
-                    for item in context_payload.context
-                ],
-                'total_tokens_estimate': context_payload.total_tokens_estimate(),
-                'sources_count': len(context_payload.context),
-                'retrieval_stats': {
+            # Update provenance with timing stats
+            if hasattr(context_payload, 'provenance'):
+                context_payload.provenance.update({
                     'total_duration_ms': round(total_duration * 1000, 2),
                     'search_type': search_type,
                     'note': 'Query executed via LlamaIndex Workflow'
-                }
-            }
+                })
             
             logger.info(
                 "Async query pipeline complete",
@@ -548,7 +517,7 @@ class RAGOrchestrator:
                 duration_ms=total_duration * 1000
             )
             
-            return response
+            return context_payload
             
         except Exception as e:
             duration = time.time() - start_time
