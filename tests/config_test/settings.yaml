@@ -102,24 +102,6 @@ metrics_enabled: false
 metrics_log_interval: 300
 metrics_file: "test_metrics.log"
 
-# PaddleOCR configuration
-paddle_ocr:
-  enabled: true
-  lang: "en"
-  use_gpu: false
-  use_angle_cls: true
-  show_log: false
-  det_model_dir: null
-  rec_model_dir: null
-  cls_model_dir: null
-  use_space_char: true
-  enable_mkldnn: false
-  cpu_threads: 4
-  min_confidence: 0.5
-  save_extracted_images: false  # Don't save images during tests
-  extracted_images_dir: "./tests/test_data/extracted_images"
-  replace_image_placeholders: true
-
 # Boilerplate removal configuration
 boilerplate_removal:
   enabled: true
