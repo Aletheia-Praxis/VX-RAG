@@ -150,35 +150,9 @@ async def run_ingestion_pipeline(
         summary['parsed'] = len(all_docs)
         logger.info(f"Total documents parsed: {len(all_docs)}")
         
-        # Step 1.5: OCR Processing (if enabled) (35%)
         from src.utils.config_loader import load_settings
         config = load_settings(config_path) if Path(config_path).exists() else {}
-        paddle_ocr_config = config.get('paddle_ocr', {})
-        
-        if paddle_ocr_config.get('enabled', False):
-            if progress_callback:
-                await progress_callback(35, "Processing images with OCR...")
-            
-            try:
-                # Note: OCR service is available but not yet fully implemented
-                # Currently only detecting image placeholders
-                # from src.rag.services.paddle_ocr_service.service import PaddleOCRService
-                
-                # Process documents with image placeholders
-                ocr_count = 0
-                for doc in all_docs:
-                    text = doc.get('text', '')
-                    if '<!-- image -->' in text or '<image>' in text:
-                        logger.info(f"Document {doc.get('id', 'unknown')} contains image placeholders")
-                        ocr_count += 1
-                
-                logger.info(f"OCR processing completed: {ocr_count} documents with image placeholders")
-                
-            except ImportError:
-                logger.warning("PaddleOCR not installed, skipping OCR processing")
-            except Exception as e:
-                logger.error(f"OCR processing error: {e}")
-        
+
         # Step 1.6: Boilerplate Removal (if enabled) (37%) - handled by pipeline transforms
         boilerplate_config = config.get('boilerplate_removal', {})
         
