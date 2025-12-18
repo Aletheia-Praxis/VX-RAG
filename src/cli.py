@@ -156,7 +156,6 @@ def main() -> None:
 def handle_ingest(args: argparse.Namespace) -> None:
     """Handle ingest command."""
     from src.rag.services.ingestion_pipeline_service import IngestionPipelineService
-    from src.rag.services.duplicate_detection_service.service import DuplicateDetector
     from src.utils.config_loader import get_ingestion_config
     
     start_time = time.time()
@@ -211,17 +210,6 @@ def handle_ingest(args: argparse.Namespace) -> None:
         print(f"    MD nodes: {len(md_nodes)}")
     
     print(f"  Total processed nodes: {len(all_nodes)}")
-    
-    # Step 2.5: Deduplicate nodes
-    print(f"\n[Step 2.5/4] Removing duplicates...")
-    duplicate_detector = DuplicateDetector(config_path=args.config)
-    unique_nodes = duplicate_detector.remove_duplicates(all_nodes)
-    
-    duplicates_removed = len(all_nodes) - len(unique_nodes)
-    print(f"  Removed {duplicates_removed} duplicate nodes")
-    print(f"  Unique nodes: {len(unique_nodes)}")
-    
-    all_nodes = unique_nodes
     
     # Step 3: Convert nodes to serializable format and save
     print(f"\n[Step 3/4] Saving processed documents to {processed_dir}...")
