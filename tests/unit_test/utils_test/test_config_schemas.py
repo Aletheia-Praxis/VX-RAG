@@ -18,7 +18,6 @@ from src.utils.config_schemas import (
     MCPConfig,
     RateLimitConfig,
     DuplicateDetectionConfig,
-    PaddleOCRConfig,
 )
 
 
@@ -253,37 +252,6 @@ class TestDuplicateDetectionConfig:
         with pytest.raises(ValidationError) as exc_info:
             DuplicateDetectionConfig(hash_algorithm="invalid")  # type: ignore
         assert "hash_algorithm" in str(exc_info.value)
-
-
-class TestPaddleOCRConfig:
-    """Tests for PaddleOCRConfig validation."""
-    
-    def test_valid_config(self) -> None:
-        """Test valid PaddleOCR configuration."""
-        config = PaddleOCRConfig(
-            enabled=True,
-            lang="en",
-            use_gpu=False
-        )
-        assert config.enabled is True
-        assert config.lang == "en"
-        assert config.use_gpu is False
-    
-    def test_cpu_threads_bounds(self) -> None:
-        """Test CPU threads must be within valid range."""
-        with pytest.raises(ValidationError) as exc_info:
-            PaddleOCRConfig(cpu_threads=0)
-        assert "cpu_threads" in str(exc_info.value)
-        
-        with pytest.raises(ValidationError) as exc_info:
-            PaddleOCRConfig(cpu_threads=100)
-        assert "cpu_threads" in str(exc_info.value)
-    
-    def test_confidence_bounds(self) -> None:
-        """Test min confidence must be between 0 and 1."""
-        with pytest.raises(ValidationError) as exc_info:
-            PaddleOCRConfig(min_confidence=-0.1)
-        assert "min_confidence" in str(exc_info.value)
 
 
 class TestVXRAGSettings:
