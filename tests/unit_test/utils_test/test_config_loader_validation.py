@@ -275,12 +275,6 @@ class TestConfigValidationIntegration:
                 "similarity_threshold": 0.95,
                 "hash_algorithm": "sha256"
             },
-            "paddle_ocr": {
-                "enabled": True,
-                "lang": "en",
-                "use_gpu": False,
-                "cpu_threads": 4
-            },
             "boilerplate_removal": {
                 "enabled": True,
                 "aggressive_mode": True,
