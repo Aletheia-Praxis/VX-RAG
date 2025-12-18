@@ -63,7 +63,6 @@ async def run_ingestion_pipeline(
     """
     from src.rag.services.ingestion_pipeline_service.service import IngestionPipelineService
     from src.rag.services.ingest_service.service import process_and_save_documents
-    from src.rag.services.duplicate_detection_service.service import DuplicateDetector
     # Chunker behavior is now provided via IngestionPipelineService's AdaptiveChunkerTransformation
     from llama_index.core import Settings
     from llama_index.embeddings.huggingface import HuggingFaceEmbedding
