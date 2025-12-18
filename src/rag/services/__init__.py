@@ -14,7 +14,6 @@ from . import (
     duplicate_detection_service,
     ingest_service,
     ingestion_pipeline_service,
-    paddle_ocr_service,
 )
 
 __all__ = [
@@ -23,5 +22,4 @@ __all__ = [
     "duplicate_detection_service",
     "ingest_service",
     "ingestion_pipeline_service",
-    "paddle_ocr_service",
 ]
