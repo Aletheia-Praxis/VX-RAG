@@ -6,7 +6,7 @@ but BEFORE normalization. It handles web artifacts, navigation elements, footers
 and other non-content patterns specific to the Vx Underground collection.
 
 Pipeline position:
-    Docling/OCR → PaddleOCR (needs <!-- image -->) → BoilerplateRemovalService → normalize_text()
+    Docling/OCR → BoilerplateRemovalService → normalize_text()
 """
 
 import re
