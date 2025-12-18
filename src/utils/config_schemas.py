@@ -141,26 +141,6 @@ class DuplicateDetectionConfig(BaseModel):
     hash_algorithm: Literal["sha256", "md5", "sha1"] = Field(default="sha256", description="Hash algorithm")
 
 
-class PaddleOCRConfig(BaseModel):
-    """PaddleOCR configuration."""
-    
-    enabled: bool = Field(default=True, description="Enable PaddleOCR")
-    lang: str = Field(default="en", description="OCR language")
-    use_gpu: bool = Field(default=False, description="Use GPU")
-    use_angle_cls: bool = Field(default=True, description="Use angle classification")
-    show_log: bool = Field(default=False, description="Show logs")
-    det_model_dir: Optional[str] = Field(default=None, description="Detection model directory")
-    rec_model_dir: Optional[str] = Field(default=None, description="Recognition model directory")
-    cls_model_dir: Optional[str] = Field(default=None, description="Classification model directory")
-    use_space_char: bool = Field(default=True, description="Recognize spaces")
-    enable_mkldnn: bool = Field(default=False, description="Enable MKLDNN")
-    cpu_threads: int = Field(default=4, ge=1, le=64, description="CPU threads")
-    min_confidence: float = Field(default=0.5, ge=0.0, le=1.0, description="Min confidence")
-    save_extracted_images: bool = Field(default=True, description="Save extracted images")
-    extracted_images_dir: str = Field(default="./data/extracted_images", description="Extracted images directory")
-    replace_image_placeholders: bool = Field(default=True, description="Replace image placeholders")
-
-
 class BoilerplatePatterns(BaseModel):
     """Boilerplate removal patterns configuration."""
     
@@ -240,7 +220,6 @@ class VXRAGSettings(BaseModel):
     reranker: RerankerConfig = Field(default_factory=RerankerConfig)
     mcp: MCPConfig = Field(default_factory=MCPConfig)
     duplicate_detection: DuplicateDetectionConfig = Field(default_factory=DuplicateDetectionConfig)
-    paddle_ocr: PaddleOCRConfig = Field(default_factory=PaddleOCRConfig)
     boilerplate_removal: BoilerplateRemovalConfig = Field(default_factory=BoilerplateRemovalConfig)
     logging: LoggingConfig = Field(default_factory=LoggingConfig)
     
