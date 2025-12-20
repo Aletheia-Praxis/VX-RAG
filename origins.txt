@@ -1,3 +1,6 @@
+0x0d4y
+https://0x0d4y.blog/
+
 0xW43L @GhnimiWael
 https://0xw43l.com/
 
@@ -7,17 +10,20 @@ https://blog.xpnsec.com/
 Aidan Khoury @aidankhoury && Nick Peterson @nickeverdox && Daax @daaximus
 https://revers.engineering/
 
-Aleksandra Doniec (hasherezade @hasherezade)
+Aleksandra Doniec (Hasherezade @hasherezade)
 https://hshrzd.wordpress.com/
 
 Alexander Popov @a13xp0p0v
 https://a13xp0p0v.github.io/
 
-Andrey Konovalov @andreyknvl
-https://xairy.io/
-
 Andrea P @decoder_it
 https://decoder.cloud/
+
+Andrey Konovalov
+https://xairy.io/articles/
+
+Andrey Konovalov @andreyknvl
+https://xairy.io/
 
 Antonio Cocomazzi @splinter_code
 https://splintercod3.blogspot.com/
@@ -28,6 +34,9 @@ https://malwaremaloney.blogspot.com/
 chompie @chompie1337
 https://chomp.ie/
 
+Connor McGarr @33y0re
+https://connormcgarr.github.io/
+
 Daniel Plohmann @push_pnx
 https://pnx.tf/
 
@@ -36,6 +45,12 @@ https://teamtwiizers.com/
 
 Dr. Fu's Security Blog
 https://fumalwareanalysis.blogspot.com/
+
+Dragon Sector @DragonSectorCTF
+https://blog.dragonsector.pl/
+
+Duasynt
+https://duasynt.com/blog
 
 es3n1n @es3n1n
 https://blog.es3n1n.eu/
@@ -55,6 +70,12 @@ https://bughunters.google.com/
 Google Project Zero
 https://projectzero.google/
 
+grsecurity
+https://grsecurity.net/blog
+
+Gynvael Coldwind @gynvael
+https://gynvael.coldwind.pl/
+
 Hacking Articles @hackinarticles
 https://www.hackingarticles.in/
 
@@ -67,20 +88,29 @@ https://www.huntress.com/
 InfoSect Blog
 https://blog.infosectcbr.com.au/
 
+j00ru//vx @j00ru (Mateusz "j00ru" Jurczyk)
+https://j00ru.vexillium.org/
+
+Jiska Classen @naehrdine
+https://naehrdine.blogspot.com/
+
+Kees Cook
+https://outflux.net/blog/
+
 Kuba Gretzky @mrgretzky
 https://breakdev.org/
 
 Lumma Labs (RussianPanda @RussianPanda9xx)
 https://lumma-labs.com/
 
+mal forsec @malforsec
+https://malforsec.blogspot.com/
+
 MalwareTech @MalwareTechBlog
 https://malwaretech.com/
 
 Marc B. Reynolds @marc_b_reynolds
 https://marc-b-reynolds.github.io/
-
-Mara @m_ou_se
-https://blog.m-ou.se/
 
 Matthew Green @matthew_d_green
 https://blog.cryptographyengineering.com/
@@ -96,6 +126,12 @@ https://malapi.io/
 
 mr.d0x @mrd0x
 https://mrd0x.com/
+
+NCC Group Research
+https://www.nccgroup.com/research-blog/
+
+Ne0ne | Igal @0xToxin
+https://0xtoxin.github.io/
 
 Nextron Systems @nextronsystems (Florian Roth @cyb3rops)
 https://www.nextron-systems.com/
@@ -117,6 +153,9 @@ https://fastcompression.blogspot.com/
 
 research!rsc (Russ Cox @_rsc)
 https://research.swtch.com/
+
+RET2 Systems (Amy Burnett)
+https://blog.ret2.io/
 
 reverseame @reverseame
 https://reversea.me/
@@ -157,14 +196,23 @@ https://www.synthesis.to/
 tmp.0ut @tmpout
 https://tmpout.sh/
 
+Tyranid's Lair (James Forshaw @tiraniddo)
+https://www.tiraniddo.dev/
+
 Two Seven One Three @TwoSevenOneT
 https://www.zerosalarium.com/
+
+Vexillium Team
+http://vexillium.org/
 
 vx-underground @vxunderground (smelly_vx @smelly__vx)
 https://vx-underground.org/
 
 vxdb @vxdb
 https://vxdb.sh/
+
+Ysanatomic
+https://anatomic.rip/
 
 Zenk-Security @ZenkSecurity
 https://repo.zenk-security.com/
