@@ -1,0 +1,170 @@
+0xW43L @GhnimiWael
+https://0xw43l.com/
+
+Adam Chester @_xpn_
+https://blog.xpnsec.com/
+
+Aidan Khoury @aidankhoury && Nick Peterson @nickeverdox && Daax @daaximus
+https://revers.engineering/
+
+Aleksandra Doniec (hasherezade @hasherezade)
+https://hshrzd.wordpress.com/
+
+Alexander Popov @a13xp0p0v
+https://a13xp0p0v.github.io/
+
+Andrey Konovalov @andreyknvl
+https://xairy.io/
+
+Andrea P @decoder_it
+https://decoder.cloud/
+
+Antonio Cocomazzi @splinter_code
+https://splintercod3.blogspot.com/
+
+Brian Maloney @bmmaloney97
+https://malwaremaloney.blogspot.com/
+
+chompie @chompie1337
+https://chomp.ie/
+
+Daniel Plohmann @push_pnx
+https://pnx.tf/
+
+DeadSpecimen @TeamTwiizers
+https://teamtwiizers.com/
+
+Dr. Fu's Security Blog
+https://fumalwareanalysis.blogspot.com/
+
+es3n1n @es3n1n
+https://blog.es3n1n.eu/
+
+Exploit Database @ExploitDB
+https://www.exploit-db.com/
+
+Forrest Orr @_ForrestOrr
+https://www.forrest-orr.net/
+
+GEDZAC VIRUS WRITERS GROUP
+https://www.gedzac.com/rrlf.dr.eof.eZine/sources/
+
+Google Bug Hunters
+https://bughunters.google.com/
+
+Google Project Zero
+https://projectzero.google/
+
+Hacking Articles @hackinarticles
+https://www.hackingarticles.in/
+
+Hexacorn (Adam)
+https://www.hexacorn.com/
+
+Huntress @HuntressLabs
+https://www.huntress.com/
+
+InfoSect Blog
+https://blog.infosectcbr.com.au/
+
+Kuba Gretzky @mrgretzky
+https://breakdev.org/
+
+Lumma Labs (RussianPanda @RussianPanda9xx)
+https://lumma-labs.com/
+
+MalwareTech @MalwareTechBlog
+https://malwaretech.com/
+
+Marc B. Reynolds @marc_b_reynolds
+https://marc-b-reynolds.github.io/
+
+Mara @m_ou_se
+https://blog.m-ou.se/
+
+Matthew Green @matthew_d_green
+https://blog.cryptographyengineering.com/
+
+Michael Maltsev @m417z
+https://m417z.com/
+
+modexp
+https://modexp.wordpress.com/
+
+mr.d0x @mrd0x
+https://malapi.io/
+
+mr.d0x @mrd0x
+https://mrd0x.com/
+
+Nextron Systems @nextronsystems (Florian Roth @cyb3rops)
+https://www.nextron-systems.com/
+
+Nick Peterson @nickeverdox
+https://everdox.blogspot.com/
+
+Olaf Hartong @olafhartong
+https://medium.com/@olafhartong
+
+Ori Damari @0xrepnz
+https://repnz.github.io/
+
+Pavel Yosifovich @zodiacon
+https://scorpiosoftware.net/
+
+RealTime Data Compression
+https://fastcompression.blogspot.com/
+
+research!rsc (Russ Cox @_rsc)
+https://research.swtch.com/
+
+reverseame @reverseame
+https://reversea.me/
+
+Rick de Jager @rdjgr
+https://blog.bricked.tech/
+
+Ryan Castellucci @ryancdotorg
+https://rya.nc/
+
+secret club @the_secret_club (x86matthew @x86matthew && Daax @daaximus)
+https://secret.club/
+
+Sinaei @Intel80x86
+https://rayanfam.com/
+
+smelly_vx @smelly__vx (vx-underground @vxunderground)
+https://malwaresourcecode.com/
+
+teddy_ROxPi @RoxpinTeddy
+https://teddy-roxpin.github.io/
+
+The DFIR Report @TheDFIRReport
+https://thedfirreport.com/
+
+The Hacker's Choice @hackerschoice
+https://www.thc.org/
+
+The ryg blog (Fabian Giesen @rygorous)
+http://fgiesen.wordpress.com/
+
+Thinkbox (Aleks @iiamaleks)
+https://posts.thinkbox.dev/
+
+Tim Blazytko @mr_phrazer
+https://www.synthesis.to/
+
+tmp.0ut @tmpout
+https://tmpout.sh/
+
+Two Seven One Three @TwoSevenOneT
+https://www.zerosalarium.com/
+
+vx-underground @vxunderground (smelly_vx @smelly__vx)
+https://vx-underground.org/
+
+vxdb @vxdb
+https://vxdb.sh/
+
+Zenk-Security @ZenkSecurity
+https://repo.zenk-security.com/
