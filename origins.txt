@@ -31,11 +31,17 @@ https://splintercod3.blogspot.com/
 Brian Maloney @bmmaloney97
 https://malwaremaloney.blogspot.com/
 
+Charles Fol @cfreal_
+https://blog.lexfo.fr/
+
 chompie @chompie1337
 https://chomp.ie/
 
 Connor McGarr @33y0re
 https://connormcgarr.github.io/
+
+Cryptology ePrint Archive
+https://eprint.iacr.org/
 
 Daniel Plohmann @push_pnx
 https://pnx.tf/
@@ -94,6 +100,9 @@ https://j00ru.vexillium.org/
 Jiska Classen @naehrdine
 https://naehrdine.blogspot.com/
 
+JP Aumasson @veorq
+https://www.aumasson.jp/
+
 Kees Cook
 https://outflux.net/blog/
 
@@ -103,6 +112,9 @@ https://breakdev.org/
 Lumma Labs (RussianPanda @RussianPanda9xx)
 https://lumma-labs.com/
 
+mak @maciekkotowicz
+https://lokalhost.pl/
+
 mal forsec @malforsec
 https://malforsec.blogspot.com/
 
@@ -111,6 +123,9 @@ https://malwaretech.com/
 
 Marc B. Reynolds @marc_b_reynolds
 https://marc-b-reynolds.github.io/
+
+Mara @m_ou_se
+https://blog.m-ou.se/
 
 Matthew Green @matthew_d_green
 https://blog.cryptographyengineering.com/
@@ -174,6 +189,9 @@ https://rayanfam.com/
 
 smelly_vx @smelly__vx (vx-underground @vxunderground)
 https://malwaresourcecode.com/
+
+Synacktiv @Synacktiv
+https://www.synacktiv.com/
 
 teddy_ROxPi @RoxpinTeddy
 https://teddy-roxpin.github.io/
