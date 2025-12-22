@@ -13,6 +13,9 @@ https://revers.engineering/
 Aleksandra Doniec (Hasherezade @hasherezade)
 https://hshrzd.wordpress.com/
 
+Alex Ionescu @aionescu
+https://www.alex-ionescu.com/
+
 Alexander Popov @a13xp0p0v
 https://a13xp0p0v.github.io/
 
@@ -157,6 +160,9 @@ https://everdox.blogspot.com/
 Olaf Hartong @olafhartong
 https://medium.com/@olafhartong
 
+OpenAnalysis (Sergei Frankoff (herrcore) @herrcore && Sean Wilson (sean) @seanmw)
+https://research.openanalysis.net/
+
 Ori Damari @0xrepnz
 https://repnz.github.io/
 
@@ -228,6 +234,9 @@ https://vx-underground.org/
 
 vxdb @vxdb
 https://vxdb.sh/
+
+Winsider (Alex Ionescu @aionescu && Yarden Shafir @yarden_shafir)
+http://windows-internals.com/
 
 Ysanatomic
 https://anatomic.rip/
