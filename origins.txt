@@ -88,6 +88,9 @@ https://gynvael.coldwind.pl/
 Hacking Articles @hackinarticles
 https://www.hackingarticles.in/
 
+herm1t @vx_herm1t
+https://herm1tvx.blogspot.com/
+
 Hexacorn (Adam)
 https://www.hexacorn.com/
 
@@ -169,6 +172,12 @@ https://repnz.github.io/
 Pavel Yosifovich @zodiacon
 https://scorpiosoftware.net/
 
+PowerShell Community (Microsoft Dev Blogs)
+https://devblogs.microsoft.com/powershell-community/
+
+PowerShell Team (Microsoft Dev Blogs)
+https://devblogs.microsoft.com/powershell/
+
 RealTime Data Compression
 https://fastcompression.blogspot.com/
 
@@ -186,6 +195,9 @@ https://blog.bricked.tech/
 
 Ryan Castellucci @ryancdotorg
 https://rya.nc/
+
+Scripting Blog (Microsoft Dev Blogs)
+https://devblogs.microsoft.com/scripting/
 
 secret club @the_secret_club (x86matthew @x86matthew && Daax @daaximus)
 https://secret.club/
@@ -207,6 +219,9 @@ https://thedfirreport.com/
 
 The Hacker's Choice @hackerschoice
 https://www.thc.org/
+
+The Old New Thing (Microsoft Dev Blogs)
+https://devblogs.microsoft.com/oldnewthing/
 
 The ryg blog (Fabian Giesen @rygorous)
 http://fgiesen.wordpress.com/
