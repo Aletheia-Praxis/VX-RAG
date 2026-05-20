@@ -6,7 +6,11 @@ Defines Pydantic models for MCP-compatible payloads used in RAG system.
 
 from typing import List, Dict, Any, Optional
 from pydantic import BaseModel, Field, field_validator
-from datetime import datetime
+from datetime import datetime, timezone
+
+# Only this schema version is currently supported.
+# Increment here when the payload contract changes.
+_SUPPORTED_SCHEMA_VERSION: str = "1.0"
 
 
 class ContextItem(BaseModel):
@@ -32,14 +36,20 @@ class MCPContextPayload(BaseModel):
     context: List[ContextItem] = Field(..., description="List of context items")
     query: str = Field(..., description="Original user query")
     token_budget: int = Field(2048, description="Maximum token budget for context")
-    timestamp: Optional[datetime] = Field(default_factory=datetime.utcnow, description="Payload creation timestamp")
+    timestamp: Optional[datetime] = Field(
+        default_factory=lambda: datetime.now(timezone.utc),
+        description="Payload creation timestamp (timezone-aware UTC)",
+    )
     provenance: Dict[str, Any] = Field(default_factory=dict, description="Provenance information")
-    
+
     @field_validator('schema_version')
     @classmethod
     def validate_schema_version(cls, v: str) -> str:
-        if v != "1.0":
-            raise ValueError('Only schema version 1.0 is supported')
+        """Ensure only supported schema versions are accepted."""
+        if v != _SUPPORTED_SCHEMA_VERSION:
+            raise ValueError(
+                f"Only schema version {_SUPPORTED_SCHEMA_VERSION!r} is supported, got {v!r}"
+            )
         return v
     
     @field_validator('token_budget')
