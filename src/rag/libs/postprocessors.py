@@ -6,6 +6,7 @@ LlamaIndex's standard postprocessor functionality with VX-RAG specific logic.
 """
 
 from typing import List, Optional
+from pydantic import PrivateAttr
 from llama_index.core.postprocessor.types import BaseNodePostprocessor
 from llama_index.core.schema import NodeWithScore, QueryBundle
 
@@ -18,42 +19,53 @@ logger = get_logger("postprocessors")
 class MetadataBoostPostprocessor(BaseNodePostprocessor):
     """
     Postprocessor that boosts node scores based on metadata completeness.
-    
+
     This is a VX-RAG-specific feature that prioritizes documents with richer
     metadata (source, language, topic, author, year) by applying a multiplicative
     boost to their retrieval scores.
-    
+
     Args:
         boost_factor: Multiplicative factor per populated priority field (default: 0.1)
         priority_fields: List of metadata fields to check (default: VX-RAG fields)
         config_path: Path to config file for loading boost_factor
-    
+
     Example:
         >>> postprocessor = MetadataBoostPostprocessor(boost_factor=0.15)
         >>> boosted_nodes = postprocessor.postprocess_nodes(nodes, query_bundle)
     """
-    
+
+    # Private attributes avoid Pydantic field restrictions on BaseNodePostprocessor
+    # while allowing super().__init__() to be called normally (B-13).
+    _boost_factor: float = PrivateAttr(default=0.1)
+    _priority_fields: List[str] = PrivateAttr(default_factory=list)
+
     def __init__(
         self,
         boost_factor: Optional[float] = None,
         priority_fields: Optional[List[str]] = None,
         config_path: Optional[str] = None
-    ):
-        """Initialize the metadata boost postprocessor."""
-        # Don't call super().__init__() to avoid field restrictions
-        # super().__init__()
-        
-        # Load config if boost_factor not provided
+    ) -> None:
+        """
+        Initialize the metadata boost postprocessor.
+
+        Args:
+            boost_factor: Multiplicative boost per populated metadata field.
+                Loaded from config if not provided.
+            priority_fields: Metadata keys to inspect for completeness.
+            config_path: Path to settings.yaml; uses default if ``None``.
+        """
+        # Call Pydantic's __init__ first so the model is fully initialized
+        super().__init__()
+
         if boost_factor is None:
             config = get_reranker_config(config_path)
             boost_factor = float(config.get('metadata_boost', 0.1))
-        
-        # Store as private attributes to avoid LlamaIndex field restrictions
-        self._boost_factor: float = boost_factor
+
+        self._boost_factor = boost_factor
         self._priority_fields = priority_fields or [
             'source', 'lang', 'topic', 'author', 'year'
         ]
-        
+
         logger.info(
             f"Initialized MetadataBoostPostprocessor: "
             f"boost_factor={self._boost_factor}, "
