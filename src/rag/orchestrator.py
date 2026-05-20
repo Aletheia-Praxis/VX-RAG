@@ -39,6 +39,18 @@ from src.utils.metrics import get_metrics
 logger = get_logger("rag_orchestrator")
 metrics = get_metrics()
 
+# Embedding output dimensions keyed by model name.
+# Used to create a correctly-sized empty FAISS index when no persisted index exists.
+# Update this map whenever a new embedding model is added to settings.yaml.
+_EMBEDDING_DIMENSION_BY_MODEL: Dict[str, int] = {
+    "all-MiniLM-L6-v2": 384,
+    "all-MiniLM-L12-v2": 384,
+    "all-mpnet-base-v2": 768,
+    "nomic-embed-text-v1": 768,
+    "nomic-embed-text-v1.5": 768,
+}
+_FALLBACK_EMBEDDING_DIMENSION = 384
+
 
 class RAGOrchestrator:
     """
@@ -94,85 +106,62 @@ class RAGOrchestrator:
         if self._initialized:
             logger.debug("Services already initialized")
             return
-        
+
         try:
             logger.info("Initializing RAG services")
             start_time = time.time()
-            
+
             # Configure global embedding model via Settings
             from src.utils.config_loader import get_embedding_config
             embed_config = get_embedding_config(self.config_path)
+            embedding_model_name: str = embed_config['embedding_model']
             Settings.embed_model = HuggingFaceEmbedding(
-                model_name=embed_config['embedding_model'],
+                model_name=embedding_model_name,
                 embed_batch_size=embed_config['embedding_batch_size'],
                 trust_remote_code=embed_config['embedding_trust_remote_code']
             )
             logger.info(
                 "Embedding model configured",
-                model=embed_config['embedding_model'],
+                model=embedding_model_name,
                 batch_size=embed_config['embedding_batch_size']
             )
             log_service_health("embed_model", "initialized")
-            
-            # Initialize vector store and storage context
+
+            # Initialize vector store and index (shared helper keeps reload_indexes DRY)
             faiss_index_path = self.persist_dir / "faiss_index"
-            
-            # Try to load existing vector store, create empty if not exists
-            try:
-                self._vector_store = FaissVectorStore.from_persist_dir(str(faiss_index_path))
-                self._storage_context = StorageContext.from_defaults(
-                    vector_store=self._vector_store,
-                    persist_dir=str(faiss_index_path)
-                )
-                self._index = VectorStoreIndex.from_vector_store(
-                    vector_store=self._vector_store,
-                    storage_context=self._storage_context
-                )
-                self._indexes_loaded = True
-                logger.info("FAISS index loaded successfully")
-                log_service_health("vector_store", "loaded")
-            except (ValueError, FileNotFoundError) as e:
-                logger.warning(f"No existing FAISS index found: {e}, creating empty index")
-                # Create empty FAISS vector store
-                import faiss
-                d = 384  # Dimension for all-MiniLM-L6-v2
-                faiss_index = faiss.IndexFlatIP(d)  # Inner product for cosine similarity
-                self._vector_store = FaissVectorStore(faiss_index=faiss_index)
-                # Create empty storage context
-                self._storage_context = StorageContext.from_defaults(
-                    vector_store=self._vector_store
-                )
-                self._index = VectorStoreIndex.from_vector_store(
-                    vector_store=self._vector_store,
-                    storage_context=self._storage_context
-                )
-                self._indexes_loaded = False
-                log_service_health("vector_store", "created_empty")
-            
-            # Initialize BM25 retriever directly with LlamaIndex
+            self._vector_store, self._storage_context, self._index, self._indexes_loaded = (
+                self._load_vector_store(faiss_index_path, embedding_model_name)
+            )
+
+            # Initialize BM25 retriever (shared helper keeps reload_indexes DRY)
             bm25_index_path = self.persist_dir / "bm25_index"
-            if bm25_index_path.exists():
-                try:
-                    from llama_index.retrievers.bm25 import BM25Retriever
-                    self._bm25_retriever = BM25Retriever.from_persist_dir(str(bm25_index_path))
-                    logger.info("BM25 retriever loaded successfully")
-                    log_service_health("bm25_retriever", "loaded")
-                except Exception as e:
-                    logger.warning(f"Failed to load BM25 retriever: {e}")
-                    self._bm25_retriever = None
-                    log_service_health("bm25_retriever", "load_failed")
-            else:
-                logger.warning(f"BM25 index not found at {bm25_index_path}")
-                self._bm25_retriever = None
-                log_service_health("bm25_retriever", "not_found")
-            
+            self._bm25_retriever = self._load_bm25_retriever(bm25_index_path)
+
+            # Initialize Response Synthesizer BEFORE QueryEngine so the engine
+            # receives a real synthesizer instead of None.
+            from src.utils.config_loader import get_context_assembler_config
+            assembler_config = get_context_assembler_config(self.config_path)
+
+            # Ensure a global TokenCountingHandler is registered (or reuse existing)
+            get_global_token_counter() or ensure_global_token_counter(
+                model_name=assembler_config['model_name'], verbose=False
+            )
+
+            self._response_synthesizer = get_response_synthesizer(
+                response_mode=ResponseMode.COMPACT,
+                use_async=False,
+                streaming=False
+            )
+            logger.info("Response synthesizer initialized with native LlamaIndex components")
+            log_service_health("response_synthesizer", "initialized")
+
             # Initialize query engine directly from index
             # Note: Reranking now integrated as postprocessors in QueryEngine
             if self._indexes_loaded and self._index:
                 from src.utils.config_loader import get_retriever_config
                 retriever_config = get_retriever_config(self.config_path)
                 semantic_top_k = retriever_config.get('semantic_top_k', 20)
-                
+
                 self._query_engine = self._index.as_query_engine(
                     similarity_top_k=semantic_top_k,
                     response_synthesizer=self._response_synthesizer
@@ -184,26 +173,7 @@ class RAGOrchestrator:
             else:
                 logger.error("Cannot initialize query engine: indexes not loaded")
                 log_service_health("query_engine", "error", error="indexes_not_loaded")
-            
-            # Initialize response synthesizer directly with LlamaIndex
-            from src.utils.config_loader import get_context_assembler_config
-            assembler_config = get_context_assembler_config(self.config_path)
-            
-            # Ensure a global TokenCountingHandler is registered (or reuse existing)
-            token_counter = get_global_token_counter() or ensure_global_token_counter(
-                model_name=assembler_config['model_name'], verbose=False
-            )
-            
-            # Initialize Response Synthesizer with token counting
-            self._response_synthesizer = get_response_synthesizer(
-                response_mode=ResponseMode.COMPACT,
-                use_async=False,
-                streaming=False
-            )
-            
-            logger.info("Response synthesizer initialized with native LlamaIndex components")
-            log_service_health("response_synthesizer", "initialized")
-            
+
             # Initialize RAG Workflow with QueryEngine
             if self._indexes_loaded and self._query_engine:
                 self._workflow = RAGWorkflow(
@@ -215,35 +185,126 @@ class RAGOrchestrator:
             else:
                 logger.warning("Cannot initialize Workflow: query engine not available")
                 log_service_health("workflow", "not_initialized")
-            
+
             self._initialized = True
             duration = time.time() - start_time
-            
+
             logger.info(
                 "RAG services initialization complete",
                 duration_ms=duration * 1000,
                 indexes_loaded=self._indexes_loaded
             )
-            
+
             metrics.histogram("orchestrator_init_duration_ms", duration * 1000)
-            
+
         except (ImportError, ModuleNotFoundError) as e:
             error_msg = f"Missing required dependency: {e}"
             logger.error("Failed to initialize RAG services", error=error_msg, exc_info=True)
             log_service_health("orchestrator", "error", error=error_msg)
             raise ServiceInitializationError("orchestrator", error_msg) from e
-        
+
         except (FileNotFoundError, IOError) as e:
             error_msg = f"File system error: {e}"
             logger.error("Failed to initialize RAG services", error=error_msg, exc_info=True)
             log_service_health("orchestrator", "error", error=error_msg)
             raise ServiceInitializationError("orchestrator", error_msg) from e
-        
+
         except Exception as e:
             error_msg = f"Unexpected error during initialization: {e}"
             logger.error("Failed to initialize RAG services", error=error_msg, exc_info=True)
             log_service_health("orchestrator", "error", error=error_msg)
             raise ServiceInitializationError("orchestrator", error_msg) from e
+
+    def _load_vector_store(
+        self,
+        faiss_index_path: Path,
+        embedding_model_name: str,
+    ) -> tuple[Optional[FaissVectorStore], Optional[StorageContext], Optional[VectorStoreIndex], bool]:
+        """Load an existing FAISS vector store or create an empty one.
+
+        Extracts duplicated load logic shared between `_initialize_services`
+        and `reload_indexes` into a single source of truth.
+
+        Args:
+            faiss_index_path: Filesystem path to the persisted FAISS index directory.
+            embedding_model_name: Name of the active embedding model, used to
+                determine the correct vector dimension when creating a new index.
+
+        Returns:
+            A 4-tuple of ``(vector_store, storage_context, index, indexes_loaded)``.
+            ``indexes_loaded`` is ``True`` only when an existing index was found
+            on disk and loaded successfully.
+        """
+        try:
+            vector_store = FaissVectorStore.from_persist_dir(str(faiss_index_path))
+            storage_context = StorageContext.from_defaults(
+                vector_store=vector_store,
+                persist_dir=str(faiss_index_path)
+            )
+            index = VectorStoreIndex.from_vector_store(
+                vector_store=vector_store,
+                storage_context=storage_context
+            )
+            logger.info("FAISS index loaded successfully")
+            log_service_health("vector_store", "loaded")
+            return vector_store, storage_context, index, True
+
+        except (ValueError, FileNotFoundError) as e:
+            logger.warning(f"No existing FAISS index found: {e}, creating empty index")
+            import faiss
+
+            # Resolve dimension from the known model map; fall back to the default
+            # so a wrong model name produces a clear log warning rather than a crash.
+            embedding_dimension = _EMBEDDING_DIMENSION_BY_MODEL.get(
+                embedding_model_name, _FALLBACK_EMBEDDING_DIMENSION
+            )
+            if embedding_model_name not in _EMBEDDING_DIMENSION_BY_MODEL:
+                logger.warning(
+                    "Unknown embedding model — using fallback FAISS dimension."
+                    " Add the model to _EMBEDDING_DIMENSION_BY_MODEL if the dimension is wrong.",
+                    model=embedding_model_name,
+                    fallback_dimension=embedding_dimension,
+                )
+
+            # Inner product for cosine similarity (vectors are L2-normalised by sentence-transformers)
+            faiss_index = faiss.IndexFlatIP(embedding_dimension)
+            vector_store = FaissVectorStore(faiss_index=faiss_index)
+            storage_context = StorageContext.from_defaults(vector_store=vector_store)
+            index = VectorStoreIndex.from_vector_store(
+                vector_store=vector_store,
+                storage_context=storage_context
+            )
+            log_service_health("vector_store", "created_empty")
+            return vector_store, storage_context, index, False
+
+    def _load_bm25_retriever(self, bm25_index_path: Path) -> Optional[Any]:
+        """Load the BM25 retriever from disk if the index exists.
+
+        Extracts duplicated load logic shared between `_initialize_services`
+        and `reload_indexes` into a single source of truth.
+
+        Args:
+            bm25_index_path: Filesystem path to the persisted BM25 index directory.
+
+        Returns:
+            A loaded ``BM25Retriever`` instance, or ``None`` if the index was
+            not found or failed to load.
+        """
+        if not bm25_index_path.exists():
+            logger.warning(f"BM25 index not found at {bm25_index_path}")
+            log_service_health("bm25_retriever", "not_found")
+            return None
+
+        try:
+            from llama_index.retrievers.bm25 import BM25Retriever
+            retriever = BM25Retriever.from_persist_dir(str(bm25_index_path))
+            logger.info("BM25 retriever loaded successfully")
+            log_service_health("bm25_retriever", "loaded")
+            return retriever
+        except Exception as e:
+            logger.warning(f"Failed to load BM25 retriever: {e}")
+            log_service_health("bm25_retriever", "load_failed")
+            return None
 
     def query(
         self,
@@ -356,17 +417,18 @@ class RAGOrchestrator:
                     }
                 )
             else:
-                # Fallback: create simple context
+                # Fallback when response_synthesizer is unavailable: build context
+                # directly from the retrieved nodes (NodeWithScore objects).
                 from .libs.schemas.mcp_schemas import MCPContextPayload, ContextItem
-                context_items = []
-                for doc in final_docs[:top_k]:
-                    item = ContextItem(
-                        id=doc.get('node_id', doc.get('id', '')),
-                        text=doc.get('text', ''),
-                        score=doc.get('score'),
-                        meta=doc.get('metadata', {})
+                context_items = [
+                    ContextItem(
+                        id=node.node.node_id or node.node.id_,
+                        text=node.node.get_content(),
+                        score=node.score,
+                        meta=node.node.metadata
                     )
-                    context_items.append(item)
+                    for node in final_nodes
+                ]
                 context_payload = MCPContextPayload(
                     query=query,
                     context=context_items,
@@ -622,61 +684,49 @@ class RAGOrchestrator:
         return status
 
     def reload_indexes(self) -> bool:
-        """
-        Reload indexes from disk.
-        
+        """Reload indexes from disk.
+
         Returns:
-            True if indexes were successfully reloaded, False otherwise
+            True if indexes were successfully reloaded, False otherwise.
         """
         logger.info("Reloading indexes")
-        
+
         try:
             self._indexes_loaded = False
-            
-            # Reload FAISS index
+
+            # Resolve the active embedding model name for dimension lookup
+            embedding_model_name: str = (
+                Settings.embed_model.model_name
+                if Settings.embed_model and hasattr(Settings.embed_model, "model_name")
+                else next(iter(_EMBEDDING_DIMENSION_BY_MODEL))
+            )
+
+            # Reload FAISS index via shared helper
             faiss_index_path = self.persist_dir / "faiss_index"
-            try:
-                self._vector_store = FaissVectorStore.from_persist_dir(str(faiss_index_path))
-                self._storage_context = StorageContext.from_defaults(
-                    vector_store=self._vector_store,
-                    persist_dir=str(faiss_index_path)
-                )
-                self._index = VectorStoreIndex.from_vector_store(
-                    vector_store=self._vector_store,
-                    storage_context=self._storage_context
-                )
-                self._indexes_loaded = True
-                logger.info("FAISS index reloaded")
-            except Exception as e:
-                logger.error(f"Failed to reload FAISS index: {e}")
+            self._vector_store, self._storage_context, self._index, self._indexes_loaded = (
+                self._load_vector_store(faiss_index_path, embedding_model_name)
+            )
+
+            if not self._indexes_loaded:
+                logger.error("Failed to reload FAISS index from disk")
                 return False
-            
-            # Reload BM25 retriever
+
+            # Reload BM25 retriever via shared helper
             bm25_index_path = self.persist_dir / "bm25_index"
-            if bm25_index_path.exists():
-                try:
-                    from llama_index.retrievers.bm25 import BM25Retriever
-                    self._bm25_retriever = BM25Retriever.from_persist_dir(str(bm25_index_path))
-                    logger.info("BM25 retriever reloaded")
-                except Exception as e:
-                    logger.warning(f"Failed to reload BM25 retriever: {e}")
-                    self._bm25_retriever = None
-            else:
-                logger.warning(f"BM25 index not found at {bm25_index_path}")
-                self._bm25_retriever = None
-            
-            # Reinitialize query engine
+            self._bm25_retriever = self._load_bm25_retriever(bm25_index_path)
+
+            # Reinitialize query engine with the existing response synthesizer
             if self._indexes_loaded and self._index:
                 from src.utils.config_loader import get_retriever_config
                 retriever_config = get_retriever_config(self.config_path)
                 semantic_top_k = retriever_config.get('semantic_top_k', 20)
-                
+
                 self._query_engine = self._index.as_query_engine(
                     similarity_top_k=semantic_top_k,
-                    response_mode="compact"
+                    response_synthesizer=self._response_synthesizer
                 )
                 logger.info("QueryEngine reinitialized")
-            
+
             # Reinitialize workflow
             if self._indexes_loaded and self._query_engine:
                 self._workflow = RAGWorkflow(
@@ -686,18 +736,18 @@ class RAGOrchestrator:
                 logger.info("Workflow reinitialized with QueryEngine and Response Synthesizer")
             else:
                 logger.warning("Cannot reinitialize Workflow: query engine not available")
-            
+
             logger.info("Index reload complete", success=self._indexes_loaded)
             return self._indexes_loaded
-            
+
         except FileNotFoundError as e:
             logger.error("Index reload failed: index files not found", error=str(e))
             return False
-        
+
         except (IOError, OSError) as e:
             logger.error("Index reload failed: file system error", error=str(e), exc_info=True)
             return False
-        
+
         except Exception as e:
             logger.error("Index reload failed: unexpected error", error=str(e), exc_info=True)
             return False
