@@ -16,7 +16,9 @@ class MetricsCollector:
     def __init__(self, config: Optional[Dict[str, Any]] = None):
         self.config = config or {}
         self.metrics: Dict[str, Any] = {}
-        self.lock = threading.Lock()
+        # RLock (re-entrant) allows log_all_metrics() to be called from the same
+        # thread that already holds the lock (e.g. the periodic logging thread).
+        self.lock = threading.RLock()
         self.logger: StructuredLogger = get_logger("metrics")
 
         # Start metrics logging thread if enabled
@@ -92,16 +94,26 @@ class MetricsCollector:
             return stats
 
 
-# Global instance
+# Global instance and its creation lock (B-19)
 _metrics_instance: Optional[MetricsCollector] = None
+_metrics_creation_lock = threading.Lock()
 
 
 def get_metrics() -> MetricsCollector:
-    """Get or create the global metrics collector."""
+    """
+    Return the global ``MetricsCollector`` singleton.
+
+    Uses double-checked locking so concurrent callers from different threads
+    never construct more than one instance.
+
+    Returns:
+        The global ``MetricsCollector`` instance.
+    """
     global _metrics_instance
     if _metrics_instance is None:
-        # Load config - assuming logging_config has the function
-        from .logging_config import load_logging_config
-        config = load_logging_config()
-        _metrics_instance = MetricsCollector(config)
+        with _metrics_creation_lock:
+            if _metrics_instance is None:
+                from .logging_config import load_logging_config
+                config = load_logging_config()
+                _metrics_instance = MetricsCollector(config)
     return _metrics_instance
