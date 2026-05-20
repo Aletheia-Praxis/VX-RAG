@@ -14,9 +14,7 @@ All administrative/utility operations have been moved to CLI.
 
 import time
 import uuid
-from typing import Dict, Any, Optional, Callable
-
-from typing import TYPE_CHECKING
+from typing import Dict, Any, Optional, Callable, TYPE_CHECKING
 
 from .schemas import (
     QueryKnowledgeBaseRequest,
