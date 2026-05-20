@@ -86,7 +86,8 @@ class RAGOrchestrator:
         self._query_engine: Optional[Any] = None
         self._bm25_retriever: Optional[Any] = None
         self._response_synthesizer: Optional[Any] = None
-        
+        self._workflow: Optional[RAGWorkflow] = None
+
         # Status flags
         self._initialized = False
         self._indexes_loaded = False
@@ -753,33 +754,21 @@ class RAGOrchestrator:
             return False
 
 
-# Global orchestrator instance
-_orchestrator_instance: Optional[RAGOrchestrator] = None
+# Global orchestrator instance — created once at import time.
+# CPython's GIL guarantees that module-level assignments are atomic,
+# so no additional locking is needed for this single-user local deployment.
+_orchestrator_instance: RAGOrchestrator = RAGOrchestrator()
 
 
-def get_orchestrator(
-    config_path: str = "config/settings.yaml",
-    persist_dir: str = "data/index",
-    auto_load: bool = True
-) -> RAGOrchestrator:
+def get_orchestrator() -> RAGOrchestrator:
     """
-    Get or create the global RAG orchestrator instance.
-    
-    Args:
-        config_path: Path to configuration file
-        persist_dir: Directory containing persisted indexes
-        auto_load: Whether to automatically load indexes
-        
+    Return the module-level RAG orchestrator singleton.
+
+    The instance is created once at import time, which is thread-safe under
+    CPython. Configuration and index paths are read from ``config/settings.yaml``
+    via the orchestrator's own initialisation logic.
+
     Returns:
-        The global RAG orchestrator instance
+        The global ``RAGOrchestrator`` instance.
     """
-    global _orchestrator_instance
-    
-    if _orchestrator_instance is None:
-        _orchestrator_instance = RAGOrchestrator(
-            config_path=config_path,
-            persist_dir=persist_dir,
-            auto_load=auto_load
-        )
-    
     return _orchestrator_instance
