@@ -59,8 +59,12 @@ def redact_ip_addresses(text: str) -> str:
     Returns:
         Text with IP addresses replaced by [REDACTED_IP]
     """
-    # IPv4 pattern
-    ipv4_pattern = r'\b\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}\b'
+    # IPv4 pattern — octets restricted to 0-255 to avoid false-positive matches
+    # on version strings like 1.2.3.4 that happen to look like IPs but aren't.
+    ipv4_pattern = (
+        r'\b(?:(?:25[0-5]|2[0-4]\d|[01]?\d\d?)\.){3}'
+        r'(?:25[0-5]|2[0-4]\d|[01]?\d\d?)\b'
+    )
     text = re.sub(ipv4_pattern, '[REDACTED_IP]', text)
     
     # IPv6 pattern (basic)
@@ -116,7 +120,8 @@ def format_query_response(
             context_items = rag_result.context
             tokens_estimate = rag_result.total_tokens_estimate()
             sources_count = len(context_items)
-            stats = rag_result.provenance
+            # Guard against None provenance (e.g., default-constructed MCPContextPayload)
+            stats = rag_result.provenance or {}
         else:
             query = rag_result.get('query', '')
             # context_items will be List[Dict]
@@ -354,7 +359,9 @@ def format_system_context() -> str:
                 "Code samples",
                 "Security analyses"
             ],
-            "index_date": datetime.now().strftime("%Y-%m-%d")
+            # Intentionally static: this reflects the corpus index date, not today's date.
+            # Update this value when the corpus is re-indexed.
+            "index_date": "unknown"
         }
         
         response = SystemContextResponse(
