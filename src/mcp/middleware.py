@@ -55,10 +55,14 @@ def with_rate_limit(timeout: Optional[float] = None) -> Callable[[Callable[..., 
             request_id = str(uuid.uuid4())
             
             try:
-                # Execute with rate limiting
+                # Pass the handler and its captured args/kwargs directly.
+                # Wrapping in a lambda was unnecessary and created a fragile
+                # closure (B-12).
                 result = await mcp_rate_limiter.execute(
                     request_id=request_id,
-                    handler=lambda: func(*args, **kwargs),
+                    handler=func,
+                    args=args,
+                    kwargs=kwargs,
                     timeout=timeout or mcp_rate_limiter.default_timeout,
                 )
                 return result
@@ -246,7 +250,7 @@ def with_mcp_middleware(tool_name: str, timeout: Optional[float] = None) -> Call
 def get_rate_limiter_stats() -> Dict[str, Any]:
     """
     Get current rate limiter statistics.
-    
+
     Returns:
         Dictionary with rate limiter stats:
         - current_load: Number of requests currently processing
@@ -257,11 +261,3 @@ def get_rate_limiter_stats() -> Dict[str, Any]:
         - total_queue_full: Total requests rejected due to full queue
     """
     return mcp_rate_limiter.get_stats()
-
-
-def reset_rate_limiter_stats() -> None:
-    """Reset rate limiter statistics."""
-    # Note: This would require adding a reset method to RateLimiter
-    # For now, just log that stats were requested to be reset
-    logger.info("Rate limiter stats reset requested")
-    metrics.increment("mcp_rate_limiter_resets_total")
