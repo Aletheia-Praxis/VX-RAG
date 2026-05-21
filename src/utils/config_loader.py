@@ -19,12 +19,13 @@ logger = get_logger(__name__)
 _validated_settings: Optional[VXRAGSettings] = None
 
 
-def load_settings(config_path: Optional[str] = None) -> Dict[str, Any]:
+def load_settings(config_path: Optional[str] = None, force_reload: bool = False) -> Dict[str, Any]:
     """
     Load and validate complete settings.yaml configuration using Pydantic.
     
     Args:
         config_path: Path to settings.yaml file. If None, uses default location.
+        force_reload: If True, bypasses cache and reloads from disk.
         
     Returns:
         Dictionary with complete validated configuration from settings.yaml
@@ -34,6 +35,10 @@ def load_settings(config_path: Optional[str] = None) -> Dict[str, Any]:
         ValueError: If config is invalid or fails validation
     """
     global _validated_settings
+    
+    if config_path is None and _validated_settings is not None and not force_reload:
+        logger.debug("Returning cached settings")
+        return _validated_settings.model_dump()
     
     config_file_path: Path
     if config_path is None:
