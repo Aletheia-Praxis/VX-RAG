@@ -209,13 +209,31 @@ async def run_ingestion_pipeline(
             if isinstance(doc, dict) and doc.get('metadata', {}).get('chunk_metadata'):
                 chunks.append(doc)
             else:
-                # Fallback: use Simple splitting by newline for raw text
+                # Fallback: sentence-boundary-aware chunking with overlap
                 if isinstance(doc, dict):
                     text = doc.get('text', '')
-                    # Simple fallback chunking - split lines into blocks of ~1000 chars
-                    block_size = 1000
-                    for i in range(0, len(text), block_size):
-                        chunks.append({'id': f"{doc.get('id', 'doc')}_chunk_{i}", 'text': text[i:i+block_size], 'metadata': doc.get('metadata', {})})
+                    FALLBACK_CHUNK_SIZE = 1000
+                    FALLBACK_CHUNK_OVERLAP = 200
+                    doc_id = doc.get('id', 'doc')
+                    doc_metadata = doc.get('metadata', {})
+                    start = 0
+                    chunk_index = 0
+                    while start < len(text):
+                        end = min(start + FALLBACK_CHUNK_SIZE, len(text))
+                        # Try to break at a sentence boundary (period, newline)
+                        if end < len(text):
+                            boundary = text.rfind('.', start + FALLBACK_CHUNK_SIZE // 2, end)
+                            if boundary == -1:
+                                boundary = text.rfind('\n', start + FALLBACK_CHUNK_SIZE // 2, end)
+                            if boundary != -1:
+                                end = boundary + 1
+                        chunks.append({
+                            'id': f"{doc_id}_chunk_{chunk_index}",
+                            'text': text[start:end],
+                            'metadata': doc_metadata,
+                        })
+                        chunk_index += 1
+                        start = max(start + 1, end - FALLBACK_CHUNK_OVERLAP)
         summary['chunks'] = len(chunks)
         logger.info(f"Prepared {len(chunks)} chunks from {len(unique_docs)} documents")
         
@@ -279,6 +297,24 @@ async def run_ingestion_pipeline(
             # Persist to snapshot directory
             await asyncio.to_thread(index.storage_context.persist, persist_dir=str(snapshot_dir))
             
+            # Build file checksums
+            import hashlib
+            from pathlib import Path
+            def get_sha256(filepath: Path) -> str:
+                h = hashlib.sha256()
+                with open(filepath, 'rb') as f:
+                    for chunk in iter(lambda: f.read(4096), b""):
+                        h.update(chunk)
+                return h.hexdigest()
+                
+            files_info = []
+            for filepath in snapshot_dir.glob("*"):
+                if filepath.is_file():
+                    files_info.append({
+                        "name": filepath.name,
+                        "sha256": get_sha256(filepath)
+                    })
+                    
             # Create manifest
             embed_model_info = {"model_name": embed_config['embedding_model']}
             chunking_params = get_chunking_metadata()
@@ -287,7 +323,7 @@ async def run_ingestion_pipeline(
                 "embed_model_name": embed_model_info['model_name'],
                 "embed_dim": embed_config.get('embedding_dim', 384),
                 "chunking_params": chunking_params,
-                "files": list(snapshot_dir.glob("*"))
+                "files": files_info
             }
             
             import json
