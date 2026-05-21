@@ -1,4 +1,4 @@
-import logging
+from src.utils.logging_config import get_logger
 from pathlib import Path
 from typing import List, Dict, Any, Optional
 from llama_index.core.readers.base import BaseReader
@@ -9,7 +9,7 @@ from docling.datamodel.base_models import InputFormat
 
 from src.rag.services.boilerplate_removal_service.service import BoilerplateRemovalService
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 class DoclingReader(BaseReader):
     """

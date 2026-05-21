@@ -8,7 +8,7 @@ from the original ChunkerService.
 
 import re
 from typing import List, Any, Dict, Optional, Sequence
-import logging
+from src.utils.logging_config import get_logger
 
 from llama_index.core.node_parser import (
     NodeParser,
@@ -20,7 +20,7 @@ from llama_index.core.node_parser import (
 from llama_index.core.schema import BaseNode, TextNode, NodeRelationship, Document
 from llama_index.core.callbacks.base import CallbackManager
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 class AdaptiveChunker(NodeParser):
     """

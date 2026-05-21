@@ -5,7 +5,7 @@ Provides classes and functions for text chunking and preprocessing.
 """
 
 from typing import List, Dict, Any, Union, Optional
-import logging
+from src.utils.logging_config import get_logger
 import re
 from dataclasses import dataclass
 
@@ -21,7 +21,7 @@ from llama_index.core.schema import Document as LlamaDocument
 from ...libs.utils.text_utils import normalize_text
 from src.utils.config_loader import load_chunking_config
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 @dataclass

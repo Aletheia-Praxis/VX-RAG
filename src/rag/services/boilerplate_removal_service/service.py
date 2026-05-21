@@ -10,11 +10,11 @@ Pipeline position:
 """
 
 import re
-import logging
+from src.utils.logging_config import get_logger
 from typing import List, Dict
 from dataclasses import dataclass
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 @dataclass

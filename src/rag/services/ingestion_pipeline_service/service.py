@@ -11,7 +11,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import List, Optional, Dict, Any
 import asyncio
-import logging
+from src.utils.logging_config import get_logger
 
 from llama_index.core import SimpleDirectoryReader, Document
 from llama_index.core.ingestion import IngestionPipeline
@@ -26,7 +26,7 @@ from src.rag.services.boilerplate_removal_service.transform import BoilerplateCl
 from src.rag.services.chunker_service.transform import AdaptiveChunker
 from src.rag.services.duplicate_detection_service.transform import DeduplicationTransform
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 class IngestionPipelineService:

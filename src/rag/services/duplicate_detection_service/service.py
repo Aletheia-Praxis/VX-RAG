@@ -7,14 +7,14 @@ based on content similarity and exact matches.
 
 from typing import List, Dict, Any, Set, Optional, Union
 import hashlib
-import logging
+from src.utils.logging_config import get_logger
 from difflib import SequenceMatcher
 
 from llama_index.core.schema import BaseNode
 
 from src.utils.config_loader import get_duplicate_detection_config
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 class DuplicateDetector:
     """

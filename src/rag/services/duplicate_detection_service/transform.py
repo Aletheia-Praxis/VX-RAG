@@ -1,6 +1,6 @@
 from typing import List, Sequence, Optional
 from llama_index.core.schema import BaseNode, TransformComponent
-from src.rag.services.duplicate_detection_service.service import DuplicateDetector
+from .service import DuplicateDetector
 
 class DeduplicationTransform(TransformComponent):
     """
