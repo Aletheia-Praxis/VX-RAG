@@ -15,8 +15,6 @@ from src.utils.logging_config import get_logger
 from src.utils.metrics import get_metrics
 from src.utils.task_queue import get_task_queue
 
-from llama_index.core.response_synthesizers import ResponseMode
-
 logger = get_logger("cli")
 metrics = get_metrics()
 
@@ -120,34 +118,25 @@ def main() -> None:
 
     args = parser.parse_args()
 
-    if args.command == "ingest":
-        handle_ingest(args)
-    elif args.command == "index":
-        handle_index(args)
-    elif args.command == "query":
-        handle_query(args)
-    elif args.command == "update-index":
-        handle_update_index(args)
-    elif args.command == "snapshot":
-        handle_snapshot(args)
-    elif args.command == "verify-snapshot":
-        handle_verify_snapshot(args)
-    elif args.command == "status":
-        handle_status(args)
-    elif args.command == "cancel":
-        handle_cancel(args)
-    elif args.command == "list-tasks":
-        handle_list_tasks(args)
-    elif args.command == "cleanup":
-        handle_cleanup(args)
-    elif args.command == "metrics":
-        handle_metrics(args)
-    elif args.command == "benchmark":
-        handle_benchmark(args)
-    elif args.command == "clean-boilerplate":
-        handle_clean_boilerplate(args)
-    elif args.command == "serve":
-        handle_serve(args)
+    COMMAND_DISPATCH = {
+        "ingest": handle_ingest,
+        "index": handle_index,
+        "query": handle_query,
+        "update-index": handle_update_index,
+        "snapshot": handle_snapshot,
+        "verify-snapshot": handle_verify_snapshot,
+        "status": handle_status,
+        "cancel": handle_cancel,
+        "list-tasks": handle_list_tasks,
+        "cleanup": handle_cleanup,
+        "metrics": handle_metrics,
+        "benchmark": handle_benchmark,
+        "clean-boilerplate": handle_clean_boilerplate,
+        "serve": handle_serve
+    }
+
+    if args.command in COMMAND_DISPATCH:
+        COMMAND_DISPATCH[args.command](args)
     else:
         parser.print_help()
         sys.exit(1)
@@ -187,27 +176,31 @@ def handle_ingest(args: argparse.Namespace) -> None:
     print(f"\n[Step 2/4] Processing documents from {data_path}...")
     
     all_nodes = []
-    
-    # Process PDFs
-    if (data_path / "pdf").exists():
-        print("  Processing PDF files...")
-        pdf_nodes = asyncio.run(ingestion_service.process_pdf_directory(data_path / "pdf"))
-        all_nodes.extend(pdf_nodes)
-        print(f"    PDF nodes: {len(pdf_nodes)}")
-    
-    # Process TXT files
-    if (data_path / "txt").exists():
-        print("  Processing TXT files...")
-        txt_nodes = asyncio.run(ingestion_service.process_text_directory(data_path / "txt", "*.txt"))
-        all_nodes.extend(txt_nodes)
-        print(f"    TXT nodes: {len(txt_nodes)}")
-    
-    # Process MD files
-    if (data_path / "md").exists():
-        print("  Processing MD files...")
-        md_nodes = asyncio.run(ingestion_service.process_text_directory(data_path / "md", "*.md"))
-        all_nodes.extend(md_nodes)
-        print(f"    MD nodes: {len(md_nodes)}")
+
+    async def _process_all_formats() -> None:
+        """Process all document formats in a single event loop."""
+        # Process PDFs
+        if (data_path / "pdf").exists():
+            print("  Processing PDF files...")
+            pdf_nodes = await ingestion_service.process_pdf_directory(data_path / "pdf")
+            all_nodes.extend(pdf_nodes)
+            print(f"    PDF nodes: {len(pdf_nodes)}")
+
+        # Process TXT files
+        if (data_path / "txt").exists():
+            print("  Processing TXT files...")
+            txt_nodes = await ingestion_service.process_text_directory(data_path / "txt", "*.txt")
+            all_nodes.extend(txt_nodes)
+            print(f"    TXT nodes: {len(txt_nodes)}")
+
+        # Process MD files
+        if (data_path / "md").exists():
+            print("  Processing MD files...")
+            md_nodes = await ingestion_service.process_text_directory(data_path / "md", "*.md")
+            all_nodes.extend(md_nodes)
+            print(f"    MD nodes: {len(md_nodes)}")
+
+    asyncio.run(_process_all_formats())
     
     print(f"  Total processed nodes: {len(all_nodes)}")
     
@@ -328,8 +321,7 @@ def handle_index(args: argparse.Namespace) -> None:
     test_embed = embed_model.get_text_embedding("test")
     d = len(test_embed)
     print(f"  Embedding dimension: {d}")
-    
-    faiss_index = faiss.IndexHNSWFlat(d, 32)  # HNSW with M=32
+    faiss_index = faiss.IndexHNSWFlat(d, 32, faiss.METRIC_INNER_PRODUCT)  # HNSW with M=32 and Inner Product metric
     
     vector_store = FaissVectorStore(faiss_index=faiss_index)
     storage_context = StorageContext.from_defaults(vector_store=vector_store)
@@ -416,243 +408,32 @@ def handle_index(args: argparse.Namespace) -> None:
 def handle_query(args: argparse.Namespace) -> None:
     """Handle query command - search documents using hybrid retrieval + reranking."""
     import json
-    from llama_index.embeddings.huggingface import HuggingFaceEmbedding
-    from llama_index.vector_stores.faiss import FaissVectorStore
-    from llama_index.core import StorageContext, VectorStoreIndex
-    from llama_index.core import get_response_synthesizer
-    from llama_index.core.response_synthesizers import ResponseMode
-    from src.utils.config_loader import get_embedding_config
+    from src.rag.orchestrator import get_orchestrator
     
     start_time = time.time()
-    persist_dir = Path(args.persist_dir)
     query = args.query
     top_k = args.top_k if hasattr(args, 'top_k') else 5
+    persist_dir = args.persist_dir
+    config_path = args.config
     
-    # Validate index exists
-    faiss_index_path = persist_dir / "faiss_index"
-    bm25_index_path = persist_dir / "bm25_index"
-    
-    if not faiss_index_path.exists() or not bm25_index_path.exists():
-        print(f"Error: Indexes not found in {persist_dir}")
-        print("Please run 'index' command first to create indexes.")
-        logger.error("Query failed: indexes not found", persist_dir=str(persist_dir))
-        sys.exit(1)
-    
-    logger.info("Starting query pipeline", query=query, top_k=top_k)
+    logger.info("Starting query pipeline via CLI", query=query, top_k=top_k)
     print(f"\n{'='*60}")
     print(f"Query: {query}")
     print(f"{'='*60}\n")
     
-    # Step 1: Load indexes (Module 8 - QueryEngine setup)
-    print("[Step 1/5] Loading indexes...")
-    
-    # Load embedder
-    embed_config = get_embedding_config(args.config)
-    embed_model = HuggingFaceEmbedding(
-        model_name=embed_config['embedding_model'],
-        embed_batch_size=embed_config['embedding_batch_size'],
-        trust_remote_code=embed_config['embedding_trust_remote_code']
-    )
-    
-    # Load FAISS index directly with LlamaIndex
     try:
-        vector_store = FaissVectorStore.from_persist_dir(str(faiss_index_path))
-        storage_context = StorageContext.from_defaults(vector_store=vector_store)
-        faiss_index = VectorStoreIndex.from_vector_store(
-            vector_store=vector_store,
-            storage_context=storage_context,
-            embed_model=embed_model
+        orchestrator = get_orchestrator(config_path=config_path, persist_dir=persist_dir)
+        context_payload = orchestrator.query(
+            query=query,
+            top_k=top_k,
+            search_type="hybrid"
         )
-        print(f"  FAISS index loaded from: {faiss_index_path}")
-        logger.info(f"Loaded FAISS index from {faiss_index_path}")
+        
     except Exception as e:
-        print(f"  ERROR: Failed to load FAISS index - {e}")
-        logger.error(f"Failed to load FAISS index: {e}")
+        print(f"  ERROR: Query failed - {e}")
+        logger.error(f"Query failed: {e}", exc_info=True)
         sys.exit(1)
-    
-    # Load BM25 index directly with LlamaIndex
-    from llama_index.retrievers.bm25 import BM25Retriever
-    
-    try:
-        bm25_retriever = BM25Retriever.from_persist_dir(str(bm25_index_path))
-        print(f"  BM25 index loaded from: {bm25_index_path}")
-        logger.info(f"Loaded BM25 index from {bm25_index_path}")
-    except Exception as e:
-        print(f"  WARNING: Failed to load BM25 index - {e}")
-        print("  Continuing with vector-only search")
-        bm25_retriever = None
-        logger.warning(f"Failed to load BM25 index: {e}")
-    
-    # Step 2: Initialize QueryEngine (Module 8)
-    print("\n[Step 2/5] Initializing query engine...")
-    
-    if faiss_index:
-        # Create QueryEngine with postprocessors for hybrid search + reranking
-        from llama_index.core.postprocessor import SentenceTransformerRerank
-        from llama_index.core.retrievers import QueryFusionRetriever
-        from llama_index.core.query_engine import RetrieverQueryEngine
-        from src.utils.config_loader import get_retriever_config
         
-        retriever_config = get_retriever_config(args.config)
-        semantic_top_k = retriever_config.get('semantic_top_k', 20)
-        
-        # Create base retrievers
-        vector_retriever = faiss_index.as_retriever(similarity_top_k=semantic_top_k)
-        
-        # Create hybrid retriever (fusion of vector and BM25)
-        retrievers = [vector_retriever]
-        if bm25_retriever:
-            retrievers.append(bm25_retriever)
-        
-        # Add reranking postprocessor
-        rerank_postprocessor = SentenceTransformerRerank(
-            model="cross-encoder/ms-marco-MiniLM-L-6-v2",
-            top_n=top_k
-        )
-        
-        if len(retrievers) > 1:
-            # Use QueryFusionRetriever for hybrid search
-            query_fusion_retriever = QueryFusionRetriever(
-                retrievers=retrievers,
-                similarity_top_k=semantic_top_k,
-                num_queries=1,  # Single query
-                use_async=True,
-                verbose=False
-            )
-            query_engine = RetrieverQueryEngine.from_args(
-                retriever=query_fusion_retriever,
-                node_postprocessors=[rerank_postprocessor]
-            )
-        else:
-            # Fallback to vector-only
-            query_engine = RetrieverQueryEngine.from_args(
-                retriever=vector_retriever,
-                node_postprocessors=[rerank_postprocessor]
-            )
-        
-        print("  QueryEngine initialized (hybrid search + reranking)")
-        logger.info("QueryEngine initialized with hybrid search and reranking")
-    else:
-        print("  ERROR: Failed to load FAISS index")
-        logger.error("FAISS index is None after loading")
-        sys.exit(1)
-    
-    # Step 3: Retrieve candidates (Module 8 - hybrid retrieval via QueryEngine)
-    print("\n[Step 3/5] Retrieving candidates...")
-    
-    # Retrieve using QueryEngine (includes postprocessing)
-    initial_k = top_k * 4  # Over-retrieve for better selection
-    
-    try:
-        # Use QueryEngine for retrieval
-        response = query_engine.query(query)
-        retrieved_nodes = response.source_nodes[:initial_k] if response.source_nodes else []
-        
-        print(f"  Retrieved {len(retrieved_nodes)} candidates via QueryEngine")
-        logger.info(f"Retrieved {len(retrieved_nodes)} candidates via QueryEngine")
-    except Exception as e:
-        print(f"  ERROR: Retrieval failed - {e}")
-        logger.error(f"Retrieval failed: {e}")
-        sys.exit(1)
-    
-    # Convert nodes to document format
-    retrieved_docs = []
-    for node in retrieved_nodes:
-        doc = {
-            'text': node.text,
-            'score': getattr(node, 'score', 0.0),
-            'metadata': node.metadata,
-            'node_id': getattr(node, 'node_id', getattr(node, 'id_', ''))
-        }
-        retrieved_docs.append(doc)
-    
-    # Step 4: Results already postprocessed by QueryEngine
-    # Hybrid search + metadata boost + cross-encoder reranking via native LlamaIndex postprocessors
-    print("\n[Step 4/5] Postprocessing complete (hybrid search + reranking)...")
-    
-    # Results are already postprocessed by QueryEngine
-    # Limit to final top_k
-    unique_candidates = retrieved_docs[:top_k]
-    
-    print(f"  Unique candidates: {len(unique_candidates)}")
-    print(f"  Postprocessed (via QueryEngine): {len(unique_candidates)} -> top {top_k}")
-    
-    # Use postprocessed results
-    reranked_results = unique_candidates[:top_k]
-    
-    logger.info(f"Postprocessed {len(unique_candidates)} candidates to top {len(reranked_results)}")
-    logger.info("Note: Postprocessing (hybrid search + reranking) handled by QueryEngine")
-    
-    # Step 5: Synthesize response using native LlamaIndex Response Synthesizer
-    print("\n[Step 5/5] Synthesizing response...")
-    
-    # Initialize Response Synthesizer with token counting
-    from src.utils.config_loader import get_context_assembler_config
-    assembler_config = get_context_assembler_config(args.config)
-    
-    from src.rag.libs.utils.llamaindex_integration import ensure_global_token_counter, get_global_token_counter
-    # Ensure a global TokenCountingHandler, reusing existing if one exists
-    token_counter = get_global_token_counter() or ensure_global_token_counter(
-        model_name=assembler_config['model_name'], verbose=False
-    )
-    
-    response_synthesizer = get_response_synthesizer(
-        response_mode=ResponseMode.COMPACT,
-        use_async=False,
-        streaming=False
-    )
-    
-    # Convert reranked results to NodeWithScore objects
-    from llama_index.core.schema import TextNode, NodeWithScore
-    nodes_with_scores = []
-    for doc in reranked_results:
-        node = TextNode(
-            text=doc.get('text', ''),
-            metadata=doc.get('metadata', {}),
-            id_=doc.get('node_id', doc.get('id', ''))
-        )
-        score = doc.get('score', 0.0)
-        node_with_score = NodeWithScore(node=node, score=score)
-        nodes_with_scores.append(node_with_score)
-    
-    # Synthesize response
-    synthesized_response = response_synthesizer.synthesize(
-        query_str=query,
-        nodes=nodes_with_scores
-    )
-    
-    # Create MCP-compatible context items from synthesized results
-    from src.rag.libs.schemas.mcp_schemas import MCPContextPayload, ContextItem
-    context_items = []
-    for node_with_score in nodes_with_scores:
-        item = ContextItem(
-            id=node_with_score.node.node_id or node_with_score.node.id_,
-            text=node_with_score.node.get_content(),
-            score=node_with_score.score,
-            meta=node_with_score.node.metadata
-        )
-        context_items.append(item)
-    
-    context_payload = MCPContextPayload(
-        schema_version="1.0",
-        context=context_items,
-        query=query,
-        token_budget=4000,  # Default budget
-        provenance={
-            'total_candidates': len(retrieved_docs),
-            'selected_count': len(reranked_results),
-            'total_tokens': len(str(synthesized_response)) // 4,  # Rough token estimate
-            'selection_method': 'response_synthesizer_compact'
-        }
-    )
-    
-    print(f"  Response synthesized: {len(context_payload.context)} items")
-    # Estimate tokens (rough approximation: 4 chars per token)
-    total_chars = sum(len(item.text) for item in context_payload.context)
-    estimated_tokens = total_chars // 4
-    print(f"  Estimated tokens: ~{estimated_tokens}")
-    logger.info(f"Response synthesized: {len(context_payload.context)} items")
-    
     # Display results
     duration = time.time() - start_time
     
@@ -722,33 +503,37 @@ def handle_update_index(args: argparse.Namespace) -> None:
     ingestion_service = IngestionPipelineService(config_path=args.config)
     
     new_nodes = []
-    
-    # Process new PDFs
-    if (data_dir / "pdf").exists():
-        pdf_files = list((data_dir / "pdf").glob("*.pdf"))
-        if pdf_files:
-            print("  Processing new PDF files...")
-            pdf_nodes = asyncio.run(ingestion_service.process_pdf_directory(data_dir / "pdf"))
-            new_nodes.extend(pdf_nodes)
-            print(f"    New PDF nodes: {len(pdf_nodes)}")
-    
-    # Process new TXT files
-    if (data_dir / "txt").exists():
-        txt_files = list((data_dir / "txt").glob("*.txt"))
-        if txt_files:
-            print("  Processing new TXT files...")
-            txt_nodes = asyncio.run(ingestion_service.process_text_directory(data_dir / "txt", "*.txt"))
-            new_nodes.extend(txt_nodes)
-            print(f"    New TXT nodes: {len(txt_nodes)}")
-    
-    # Process new MD files
-    if (data_dir / "md").exists():
-        md_files = list((data_dir / "md").glob("*.md"))
-        if md_files:
-            print("  Processing new MD files...")
-            md_nodes = asyncio.run(ingestion_service.process_text_directory(data_dir / "md", "*.md"))
-            new_nodes.extend(md_nodes)
-            print(f"    New MD nodes: {len(md_nodes)}")
+
+    async def _process_new_formats() -> None:
+        """Process all new document formats in a single event loop."""
+        # Process new PDFs
+        if (data_dir / "pdf").exists():
+            pdf_files = list((data_dir / "pdf").glob("*.pdf"))
+            if pdf_files:
+                print("  Processing new PDF files...")
+                pdf_nodes = await ingestion_service.process_pdf_directory(data_dir / "pdf")
+                new_nodes.extend(pdf_nodes)
+                print(f"    New PDF nodes: {len(pdf_nodes)}")
+
+        # Process new TXT files
+        if (data_dir / "txt").exists():
+            txt_files = list((data_dir / "txt").glob("*.txt"))
+            if txt_files:
+                print("  Processing new TXT files...")
+                txt_nodes = await ingestion_service.process_text_directory(data_dir / "txt", "*.txt")
+                new_nodes.extend(txt_nodes)
+                print(f"    New TXT nodes: {len(txt_nodes)}")
+
+        # Process new MD files
+        if (data_dir / "md").exists():
+            md_files = list((data_dir / "md").glob("*.md"))
+            if md_files:
+                print("  Processing new MD files...")
+                md_nodes = await ingestion_service.process_text_directory(data_dir / "md", "*.md")
+                new_nodes.extend(md_nodes)
+                print(f"    New MD nodes: {len(md_nodes)}")
+
+    asyncio.run(_process_new_formats())
     
     if not new_nodes:
         print("  No new documents to add.")
@@ -886,13 +671,34 @@ def handle_snapshot(args: argparse.Namespace) -> None:
     # Persist index to snapshot directory
     faiss_index.storage_context.persist(persist_dir=str(snapshot_dir))
     
+    # Build file checksums
+    import hashlib
+    def get_sha256(filepath: Path) -> str:
+        h = hashlib.sha256()
+        with open(filepath, 'rb') as f:
+            for chunk in iter(lambda: f.read(4096), b""):
+                h.update(chunk)
+        return h.hexdigest()
+        
+    files_info = []
+    for filepath in snapshot_dir.glob("*"):
+        if filepath.is_file():
+            files_info.append({
+                "name": filepath.name,
+                "sha256": get_sha256(filepath)
+            })
+            
+    # Load chunking config
+    from src.utils.config_loader import get_chunking_metadata
+    chunking_params = get_chunking_metadata(args.config)
+
     # Create manifest
     manifest = {
         "timestamp": timestamp,
         "embed_model_name": embed_model_info['model_name'],
         "embed_dim": embed_model_info['embed_dim'],
-        "chunking_params": {},  # Would need to load from config
-        "files": list(snapshot_dir.glob("*"))
+        "chunking_params": chunking_params,
+        "files": files_info
     }
     
     import json
