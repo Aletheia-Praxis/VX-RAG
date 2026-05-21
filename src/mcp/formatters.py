@@ -154,7 +154,7 @@ def format_query_response(
                 id=item_id,
                 text=text,
                 score=score,
-                metadata=metadata
+                meta=metadata
             )
             sources.append(source_doc)
         
@@ -237,7 +237,7 @@ def format_search_response(
                 id=result.get('node_id', result.get('id', '')),
                 text=text,
                 score=result.get('score'),
-                metadata=result.get('metadata', {})
+                meta=result.get('metadata', {})
             )
             sources.append(source_doc)
         
@@ -344,7 +344,7 @@ def format_system_context() -> str:
                 "for querying technical cybersecurity documentation from the "
                 "VX Underground collection."
             ),
-            supported_formats=["PDF"],
+            supported_formats=["PDF", "TXT", "MD"],
             search_types=["semantic", "keyword", "hybrid"],
             max_results=20,
             max_token_budget=16000
