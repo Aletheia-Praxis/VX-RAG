@@ -5,12 +5,12 @@ Provides a unified interface for token counting and document budgeting
 using LlamaIndex native token counting infrastructure.
 """
 
-import logging
+from src.utils.logging_config import get_logger
 from typing import List, Dict, Any, Tuple, Optional
 
 from .llamaindex_integration import get_global_token_counter, ensure_global_token_counter
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 class LlamaIndexTokenCounter:

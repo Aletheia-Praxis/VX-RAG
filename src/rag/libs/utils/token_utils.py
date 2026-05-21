@@ -5,12 +5,12 @@ Provides functions for estimating token counts and selecting documents within to
 Uses LlamaIndex TokenCountingHandler for native integration.
 """
 
-import logging
+from src.utils.logging_config import get_logger
 from typing import List, Dict, Any, Tuple, Optional
 
 from .token_counter import LlamaIndexTokenCounter
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 class TokenBudgeter:

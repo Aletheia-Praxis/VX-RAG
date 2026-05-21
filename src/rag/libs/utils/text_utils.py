@@ -6,8 +6,10 @@ Provides functions for text normalization, language detection, and other text-re
 
 import re
 import unicodedata
-import logging
+from src.utils.logging_config import get_logger
 from typing import cast
+
+logger = get_logger(__name__)
 
 try:
     from langdetect import detect
@@ -65,7 +67,7 @@ def detect_language(text: str) -> str:
             else:
                 return 'unknown'
         except Exception:
-            logging.warning("Language detection failed, falling back to heuristic")
+            logger.warning("Language detection failed, falling back to heuristic")
 
     # Heuristic detection for Ukrainian, Russian, English
     # Ukrainian specific characters
