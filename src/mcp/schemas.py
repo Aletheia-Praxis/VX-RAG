@@ -78,28 +78,11 @@ class GetDocumentRequest(BaseModel):
     )
 
 
-class SourceDocument(BaseModel):
-    """
-    Represents a single source document in query results.
-    
-    Contains all information needed to understand and reference the source.
-    """
-    id: str = Field(
-        ...,
-        description="Unique document identifier"
-    )
-    text: str = Field(
-        ...,
-        description="Document text content (may be truncated or chunked)"
-    )
-    score: Optional[float] = Field(
-        None,
-        description="Relevance score (0.0-1.0, higher is more relevant)"
-    )
-    metadata: Dict[str, Any] = Field(
-        default_factory=dict,
-        description="Document metadata (file path, page number, etc.)"
-    )
+from src.rag.libs.schemas.mcp_schemas import ContextItem
+
+# Alias SourceDocument to ContextItem for schema unification
+# Both represent a single source document in query results.
+SourceDocument = ContextItem
 
 
 class RetrievalStats(BaseModel):
