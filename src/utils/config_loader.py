@@ -6,14 +6,14 @@ This centralizes all configuration loading to avoid hardcoded values throughout 
 """
 
 import yaml
-import logging
+from .logging_config import get_logger
 from pathlib import Path
 from typing import Dict, Any, Optional
 from pydantic import ValidationError
 
 from .config_schemas import VXRAGSettings
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 # Global validated settings instance
 _validated_settings: Optional[VXRAGSettings] = None
