@@ -181,15 +181,16 @@ async def start_server() -> None:
 
 
 def run_stdio() -> None:
-    """
-    Run MCP server in STDIO mode (for IDE integration).
-    
+    """Run MCP server in STDIO mode (for IDE integration).
+
     This is the default mode for MCP servers integrated into IDEs.
+    Orchestrator is lazy-initialised on first tool call, avoiding
+    a separate ``asyncio.run()`` before ``mcp.run()``.
     """
-    # Initialize orchestrator before serving
-    asyncio.run(start_server())
-    
-    # Run FastMCP server in STDIO mode
+    logger.info("Starting VX-RAG MCP server in STDIO mode")
+    log_service_health("mcp_server", "starting")
+
+    # Run FastMCP server in STDIO mode — single event loop
     mcp.run()
 
 
