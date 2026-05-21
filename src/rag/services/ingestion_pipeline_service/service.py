@@ -44,10 +44,10 @@ class IngestionPipelineService:
         if self._embed_model is None:
             embed_config = get_embedding_config(self.config_path)
             self._embed_model = HuggingFaceEmbedding(
-                model_name=embed_config['model_name'],
-                cache_folder=embed_config['cache_folder'],
-                device=embed_config['device'],
-                embed_batch_size=embed_config['batch_size']
+                model_name=embed_config['embedding_model'],
+                cache_folder=embed_config.get('embedding_cache_folder'),
+                device=embed_config['embedding_device'],
+                embed_batch_size=embed_config['embedding_batch_size']
             )
         return self._embed_model
 
