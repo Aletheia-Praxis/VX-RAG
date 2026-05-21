@@ -29,16 +29,31 @@ class JSONFormatter(logging.Formatter):
         if record.exc_info:
             log_entry["exception"] = self.formatException(record.exc_info)
 
-        # Add extra fields from record
+        # Add extra fields from record — only string-keyed extras not already captured
+        _STANDARD_RECORD_KEYS = {
+            'name', 'msg', 'args', 'levelname', 'levelno', 'pathname',
+            'filename', 'module', 'exc_info', 'exc_text', 'stack_info',
+            'lineno', 'funcName', 'created', 'msecs', 'relativeCreated',
+            'thread', 'threadName', 'processName', 'process', 'message',
+            'taskName',  # added in Python 3.12
+        }
         if hasattr(record, '__dict__'):
             for key, value in record.__dict__.items():
-                if key not in ['name', 'msg', 'args', 'levelname', 'levelno', 'pathname',
-                              'filename', 'module', 'exc_info', 'exc_text', 'stack_info',
-                              'lineno', 'funcName', 'created', 'msecs', 'relativeCreated',
-                              'thread', 'threadName', 'processName', 'process', 'message']:
-                    log_entry[key] = value
+                if key not in _STANDARD_RECORD_KEYS:
+                    # Guard: some extra values may not be JSON-serialisable (B-17)
+                    try:
+                        json.dumps(value)
+                        log_entry[key] = value
+                    except (TypeError, ValueError):
+                        log_entry[key] = str(value)
 
-        return json.dumps(log_entry, ensure_ascii=False)
+        try:
+            return json.dumps(log_entry, ensure_ascii=False)
+        except (TypeError, ValueError) as exc:
+            # Last-resort fallback: emit plain text so the log record is never lost
+            log_entry_safe = {k: str(v) for k, v in log_entry.items()}
+            log_entry_safe['_serialization_error'] = str(exc)
+            return json.dumps(log_entry_safe, ensure_ascii=False)
 
 
 class StructuredLogger:
@@ -130,18 +145,27 @@ class StructuredLogger:
         self.logger.debug(message, exc_info=exc_info, extra=kwargs if kwargs else None)
 
 
-# Global instance
-_logger_instance: Optional[StructuredLogger] = None
+# Logger cache keyed by name — each module gets its own named StructuredLogger (B-16).
+_logger_cache: Dict[str, StructuredLogger] = {}
 
 
 def get_logger(name: str = "vx_rag") -> StructuredLogger:
-    """Get or create the global structured logger."""
-    global _logger_instance
-    if _logger_instance is None:
-        # Load config
+    """
+    Return a ``StructuredLogger`` for the given name.
+
+    A separate instance is cached per name so that log records from different
+    modules carry distinct ``logger`` fields and can be filtered independently.
+
+    Args:
+        name: Logger name (typically ``__name__`` of the calling module).
+
+    Returns:
+        A configured ``StructuredLogger`` instance.
+    """
+    if name not in _logger_cache:
         config = load_logging_config()
-        _logger_instance = StructuredLogger(name, config)
-    return _logger_instance
+        _logger_cache[name] = StructuredLogger(name, config)
+    return _logger_cache[name]
 
 
 def load_logging_config() -> Dict[str, Any]:
