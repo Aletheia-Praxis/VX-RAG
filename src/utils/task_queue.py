@@ -191,9 +191,8 @@ class TaskQueue:
         # Semaphore for rate limiting
         self._concurrency_semaphore = asyncio.Semaphore(max_concurrent_tasks)
         
-        # State persistence
+        # State persistence path — directory is created lazily in start() (B-21)
         self.state_file = state_file or Path("data/task_queue_state.json")
-        self.state_file.parent.mkdir(parents=True, exist_ok=True)
         
         logger.info(
             "TaskQueue initialized",
@@ -208,14 +207,18 @@ class TaskQueue:
             return
         
         self._running = True
-        
+
+        # Create state directory here (not in __init__) to avoid blocking the
+        # event loop before it starts (B-21).
+        self.state_file.parent.mkdir(parents=True, exist_ok=True)
+
         # Load persisted tasks
         if self.enable_persistence:
             await self._load_state()
-        
+
         # Start worker task
         self._worker_task = asyncio.create_task(self._worker_loop())
-        
+
         logger.info("TaskQueue started")
     
     async def stop(self, timeout: float = 30.0) -> None:
@@ -548,22 +551,29 @@ class TaskQueue:
         try:
             with open(self.state_file, 'r') as f:
                 state = json.load(f)
-            
-            # Restore pending tasks only (running tasks are lost on crash)
-            loaded_count = 0
+
+            # Restore pending tasks only (running tasks are lost on crash).
+            # NOTE: The actual callable cannot be restored from disk. These tasks
+            # cannot be re-executed without being manually resubmitted by the caller.
+            lost_count = 0
             for task_data in state.get('tasks', []):
                 if task_data['status'] == TaskStatus.PENDING.value:
-                    # Note: We cannot restore the actual function, so these tasks
-                    # will remain in PENDING state until manually resubmitted
-                    # This is a limitation of not using Celery-style serialization
-                    logger.warning(
-                        f"Found pending task from previous session: {task_data['name']}",
-                        task_id=task_data['task_id'],
-                    )
-                    loaded_count += 1
-            
-            logger.info(f"Loaded {loaded_count} pending tasks from state file")
-            
+                    lost_count += 1
+
+            if lost_count:
+                # ERROR-level so operators notice data loss on restart (B-20)
+                logger.error(
+                    "Pending tasks from previous session cannot be recovered "
+                    "(callables are not serialisable). They must be resubmitted.",
+                    lost_task_count=lost_count,
+                    state_file=str(self.state_file),
+                )
+            else:
+                logger.info(
+                    "Loaded task queue state — no pending tasks to recover",
+                    state_file=str(self.state_file),
+                )
+
         except Exception as e:
             logger.error(f"Failed to load task queue state: {e}")
 
