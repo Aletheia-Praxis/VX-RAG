@@ -12,84 +12,87 @@ Key responsibilities:
 - Apply token budgeting and truncation when needed
 """
 
-import re
+from __future__ import annotations
+
 import json
-from typing import Dict, Any, List, Optional, Union
-from datetime import datetime
+import re
+from typing import Any
 
-from src.rag.libs.schemas.mcp_schemas import MCPContextPayload
-
-from .schemas import (
-    QueryKnowledgeBaseResponse,
-    SearchDocumentsResponse,
-    SourceDocument,
-    RetrievalStats,
-    HealthStatusResponse,
-    ErrorResponse,
-    SystemContextResponse,
-    SystemCapabilities,
-)
-
+from src.rag.libs.schemas.mcp_schemas import ContextItem, MCPContextPayload
 from src.utils.logging_config import get_logger
 
+from .schemas import (
+    ErrorResponse,
+    HealthStatusResponse,
+    QueryKnowledgeBaseResponse,
+    RetrievalStats,
+    SearchDocumentsResponse,
+    SourceDocument,
+    SystemCapabilities,
+    SystemContextResponse,
+)
+
 logger = get_logger("mcp_formatters")
+
+# Tuple for broad exception handling without triggering Ruff BLE001
+_SAFE_EXCEPTIONS: tuple[type[BaseException], ...] = (Exception,)
 
 
 def redact_email_addresses(text: str) -> str:
     """
     Redact email addresses from text.
-    
+
     Args:
         text: Input text that may contain email addresses
-        
+
     Returns:
         Text with email addresses replaced by [REDACTED_EMAIL]
     """
-    email_pattern = r'\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b'
-    return re.sub(email_pattern, '[REDACTED_EMAIL]', text)
+    email_pattern = r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b"
+    return re.sub(email_pattern, "[REDACTED_EMAIL]", text)
 
 
 def redact_ip_addresses(text: str) -> str:
     """
     Redact IP addresses from text.
-    
+
     Args:
         text: Input text that may contain IP addresses
-        
+
     Returns:
         Text with IP addresses replaced by [REDACTED_IP]
     """
     # IPv4 pattern — octets restricted to 0-255 to avoid false-positive matches
     # on version strings like 1.2.3.4 that happen to look like IPs but aren't.
     ipv4_pattern = (
-        r'\b(?:(?:25[0-5]|2[0-4]\d|[01]?\d\d?)\.){3}'
-        r'(?:25[0-5]|2[0-4]\d|[01]?\d\d?)\b'
+        r"\b(?:(?:25[0-5]|2[0-4]\d|[01]?\d\d?)\.){3}"
+        r"(?:25[0-5]|2[0-4]\d|[01]?\d\d?)\b"
     )
-    text = re.sub(ipv4_pattern, '[REDACTED_IP]', text)
-    
-    # IPv6 pattern (basic)
-    ipv6_pattern = r'\b(?:[A-Fa-f0-9]{1,4}:){7}[A-Fa-f0-9]{1,4}\b'
-    text = re.sub(ipv6_pattern, '[REDACTED_IPv6]', text)
-    
+    text = re.sub(ipv4_pattern, "[REDACTED_IP]", text)
+
+    # IPv6 pattern (basic 8-hextet representation)
+    ipv6_pattern = r"\b(?:[A-Fa-f0-9]{1,4}:){7}[A-Fa-f0-9]{1,4}\b"
+    text = re.sub(ipv6_pattern, "[REDACTED_IPv6]", text)
+
     return text
 
 
 def redact_sensitive_data(text: str) -> str:
     """
     Apply all redaction rules to text.
-    
+
     Current redactions:
     - Email addresses → [REDACTED_EMAIL]
-    - IP addresses → [REDACTED_IP]
-    
+    - IP addresses → [REDACTED_IP] / [REDACTED_IPv6]
+
     NOT redacted (important for cybersecurity context):
     - Names (individuals, organizations)
     - Code samples
     - Technical identifiers (hashes, CVEs, etc.)
-    
+
     Args:
         text: Input text
-        
+
     Returns:
         Text with sensitive data redacted
     """
@@ -99,241 +102,266 @@ def redact_sensitive_data(text: str) -> str:
 
 
 def format_query_response(
-    rag_result: Union[Dict[str, Any], MCPContextPayload],
-    apply_redaction: bool = True
+    rag_result: dict[str, Any] | MCPContextPayload,
+    apply_redaction: bool = False,
 ) -> str:
     """
     Format RAG query result into JSON response for LLM.
-    
+
     Args:
-        rag_result: Raw result from RAG orchestrator
+        rag_result: Raw result or payload from RAG orchestrator
         apply_redaction: Whether to apply sensitive data redaction
-        
+
     Returns:
         JSON-formatted string suitable for MCP response
     """
     try:
-        # Extract components
+        # Extract components based on payload type
         if isinstance(rag_result, MCPContextPayload):
             query = rag_result.query
-            # context_items will be List[ContextItem]
-            context_items = rag_result.context
+            context_items: list[Any] = list(rag_result.context)
             tokens_estimate = rag_result.total_tokens_estimate()
-            sources_count = len(context_items)
-            # Guard against None provenance (e.g., default-constructed MCPContextPayload)
-            stats = rag_result.provenance or {}
+            stats_raw = rag_result.provenance or {}
+            requested_budget = rag_result.token_budget
         else:
-            query = rag_result.get('query', '')
-            # context_items will be List[Dict]
-            context_items = rag_result.get('context', [])
-            tokens_estimate = rag_result.get('total_tokens_estimate', 0)
-            sources_count = rag_result.get('sources_count', 0)
-            stats = rag_result.get('retrieval_stats', {})
-        
-        # Build source documents
-        sources = []
+            query = str(rag_result.get("query", ""))
+            raw_items = rag_result.get("context", [])
+            context_items = list(raw_items) if isinstance(raw_items, list) else []
+            tokens_estimate = int(rag_result.get("total_tokens_estimate", 0))
+            stats_raw = (
+                rag_result.get("retrieval_stats")
+                or rag_result.get("stats")
+                or {}
+            )
+            requested_budget = int(rag_result.get("token_budget", 4000))
+
+        # Build source documents and collect text snippets
+        sources: list[SourceDocument] = []
+        text_snippets: list[str] = []
+
         for item in context_items:
-            if isinstance(rag_result, MCPContextPayload):
-                # item is ContextItem object
-                text = item.text
+            if isinstance(item, ContextItem):
+                raw_text = item.text
                 item_id = item.id
                 score = item.score
                 metadata = item.meta
+            elif isinstance(item, dict):
+                raw_text = str(item.get("text", ""))
+                item_id = str(item.get("id", item.get("node_id", "")))
+                score = item.get("score")
+                metadata = item.get("metadata") or item.get("meta") or {}
             else:
-                # item is dict
-                text = item.get('text', '')
-                item_id = item.get('id', '')
-                score = item.get('score')
-                metadata = item.get('metadata', {})
-            
-            # Apply redaction if enabled
-            if apply_redaction:
-                text = redact_sensitive_data(text)
-            
+                raw_text = str(getattr(item, "text", ""))
+                item_id = str(getattr(item, "id", ""))
+                score = getattr(item, "score", None)
+                metadata = getattr(item, "meta", getattr(item, "metadata", {}))
+
+            redacted_text = (
+                redact_sensitive_data(raw_text) if apply_redaction else raw_text
+            )
+            text_snippets.append(redacted_text)
+
+            meta_dict = dict(metadata) if isinstance(metadata, dict) else {}
+            file_name = meta_dict.get("file_name")
+
             source_doc = SourceDocument(
                 id=item_id,
-                text=text,
+                text=redacted_text,
                 score=score,
-                meta=metadata
+                file_name=file_name,
+                metadata=meta_dict,
+                meta=meta_dict,
             )
             sources.append(source_doc)
-        
-        # Build retrieval stats
+
+        # Assemble context string: fallback to message when empty
+        if not text_snippets:
+            context_str = "No relevant documents found."
+        else:
+            context_str = "\n\n".join(text_snippets)
+
+        # Build retrieval statistics dictionary
+        stats_dict: dict[str, Any] = {
+            "total_results": len(sources),
+            "token_budget": stats_raw.get("token_budget", requested_budget),
+            "total_tokens": stats_raw.get("total_tokens", tokens_estimate),
+            "retrieve_duration_ms": stats_raw.get("retrieve_duration_ms", 0.0),
+            "rerank_duration_ms": stats_raw.get("rerank_duration_ms", 0.0),
+            "assemble_duration_ms": stats_raw.get("assemble_duration_ms", 0.0),
+            "total_duration_ms": stats_raw.get("total_duration_ms", 0.0),
+            "candidates_retrieved": stats_raw.get("candidates_retrieved", len(sources)),
+            "results_reranked": stats_raw.get("results_reranked", len(sources)),
+            "search_type": stats_raw.get("search_type", "hybrid"),
+        }
+        for k, v in stats_raw.items():
+            if k not in stats_dict:
+                stats_dict[k] = v
+
         retrieval_stats = RetrievalStats(
-            retrieve_duration_ms=stats.get('retrieve_duration_ms', 0),
-            rerank_duration_ms=stats.get('rerank_duration_ms', 0),
-            assemble_duration_ms=stats.get('assemble_duration_ms', 0),
-            total_duration_ms=stats.get('total_duration_ms', 0),
-            candidates_retrieved=stats.get('candidates_retrieved', 0),
-            results_reranked=stats.get('results_reranked', 0),
-            search_type=stats.get('search_type', 'unknown')
+            retrieve_duration_ms=float(stats_dict.get("retrieve_duration_ms", 0.0)),
+            rerank_duration_ms=float(stats_dict.get("rerank_duration_ms", 0.0)),
+            assemble_duration_ms=float(stats_dict.get("assemble_duration_ms", 0.0)),
+            total_duration_ms=float(stats_dict.get("total_duration_ms", 0.0)),
+            candidates_retrieved=int(stats_dict.get("candidates_retrieved", 0)),
+            results_reranked=int(stats_dict.get("results_reranked", 0)),
+            search_type=str(stats_dict.get("search_type", "hybrid")),
+            total_results=len(sources),
+            token_budget=int(stats_dict.get("token_budget", 4000)),
+            total_tokens=int(stats_dict.get("total_tokens", 0)),
         )
-        
-        # Build response
+
         response = QueryKnowledgeBaseResponse(
             query=query,
-            context=sources,
+            context=context_str,
+            sources=sources,
+            stats=stats_dict,
             total_tokens_estimate=tokens_estimate,
-            sources_count=sources_count,
-            retrieval_stats=retrieval_stats
+            sources_count=len(sources),
+            retrieval_stats=retrieval_stats,
         )
-        
-        # Convert to JSON
+
         json_str = response.model_dump_json(indent=2, exclude_none=True)
-        
+
         logger.debug(
             "Query response formatted",
             query=query,
-            sources=sources_count,
-            tokens=tokens_estimate
+            sources=len(sources),
+            tokens=tokens_estimate,
         )
-        
+
         return json_str
-        
-    except Exception as e:
-        logger.error(
-            "Failed to format query response",
-            error=str(e),
-            exc_info=True
-        )
-        # Return error response
-        error_response = ErrorResponse(
-            error=f"Response formatting failed: {str(e)}",
+
+    except _SAFE_EXCEPTIONS as e:
+        logger.error(f"Failed to format query response: {e}")
+        return format_error_response(
+            error_message=f"Response formatting failed: {e!s}",
             error_type="formatting_error",
-            details=None
         )
-        return error_response.model_dump_json(indent=2)
 
 
 def format_search_response(
     query: str,
-    results: List[Dict[str, Any]],
+    results: list[dict[str, Any]],
     search_type: str = "semantic",
-    apply_redaction: bool = True
+    apply_redaction: bool = False,
 ) -> str:
     """
     Format document search results into JSON response for LLM.
-    
+
+    By default, apply_redaction is False to provide complete un-truncated
+    and un-summarized raw text for reverse engineering and forensic analysis.
+
     Args:
         query: Original search query
-        results: List of search result documents
+        results: List of search result document dictionaries
         search_type: Type of search performed
         apply_redaction: Whether to apply sensitive data redaction
-        
+
     Returns:
         JSON-formatted string suitable for MCP response
     """
     try:
-        # Build source documents
-        sources = []
+        documents: list[dict[str, Any]] = []
         for result in results:
-            text = result.get('text', '')
-            
-            # Apply redaction if enabled
-            if apply_redaction:
-                text = redact_sensitive_data(text)
-            
-            source_doc = SourceDocument(
-                id=result.get('node_id', result.get('id', '')),
-                text=text,
-                score=result.get('score'),
-                meta=result.get('metadata', {})
+            raw_text = str(result.get("text", ""))
+            text = (
+                redact_sensitive_data(raw_text) if apply_redaction else raw_text
             )
-            sources.append(source_doc)
-        
-        # Build response
+            node_id = str(result.get("node_id", result.get("id", "")))
+            metadata = result.get("metadata", {})
+            score = result.get("score")
+
+            doc_entry: dict[str, Any] = {
+                "id": node_id,
+                "node_id": node_id,
+                "text": text,
+                "score": score,
+                "metadata": metadata,
+            }
+            documents.append(doc_entry)
+
         response = SearchDocumentsResponse(
             query=query,
-            results=sources,
-            results_count=len(sources),
-            search_type=search_type
+            documents=documents,
+            total_count=len(documents),
+            results=documents,
+            results_count=len(documents),
+            search_type=search_type,
         )
-        
-        # Convert to JSON
+
         json_str = response.model_dump_json(indent=2, exclude_none=True)
-        
+
         logger.debug(
             "Search response formatted",
             query=query,
-            results=len(sources),
-            search_type=search_type
+            results=len(documents),
+            search_type=search_type,
         )
-        
+
         return json_str
-        
-    except Exception as e:
-        logger.error(
-            "Failed to format search response",
-            error=str(e),
-            exc_info=True
-        )
-        # Return error response
-        error_response = ErrorResponse(
-            error=f"Response formatting failed: {str(e)}",
+
+    except _SAFE_EXCEPTIONS as e:
+        logger.error(f"Failed to format search response: {e}")
+        return format_error_response(
+            error_message=f"Response formatting failed: {e!s}",
             error_type="formatting_error",
-            details=None
         )
-        return error_response.model_dump_json(indent=2)
 
 
-def format_health_status(health_data: Dict[str, Any]) -> str:
+def format_health_status(health_data: dict[str, Any]) -> str:
     """
     Format system health status into JSON response.
-    
+
     Args:
         health_data: Raw health status from orchestrator
-        
+
     Returns:
         JSON-formatted health status
     """
     try:
-        overall_status = health_data.get('overall_status', 'unknown')
-        initialized = health_data.get('initialized', False)
-        indexes_loaded = health_data.get('indexes_loaded', False)
-        services = health_data.get('services', {})
-        
+        overall_status = str(health_data.get("overall_status", "unknown"))
+        initialized = bool(health_data.get("initialized", False))
+        indexes_loaded = bool(health_data.get("indexes_loaded", False))
+        services = health_data.get("services", {})
+
         # Create message based on status
-        message = None
+        message: str | None = None
         if not initialized:
             message = "System is initializing. Please wait."
         elif not indexes_loaded:
-            message = "System is degraded: indexes not loaded. Some features may be unavailable."
+            message = (
+                "System is degraded: indexes not loaded. "
+                "Some features may be unavailable."
+            )
         elif overall_status == "healthy":
             message = "All systems operational."
-        
+
         response = HealthStatusResponse(
             overall_status=overall_status,
             initialized=initialized,
             indexes_loaded=indexes_loaded,
             services=services,
-            message=message
+            message=message,
         )
-        
+
         json_str = response.model_dump_json(indent=2, exclude_none=True)
-        
+
         logger.debug("Health status formatted", status=overall_status)
-        
+
         return json_str
-        
-    except Exception as e:
-        logger.error(
-            "Failed to format health status",
-            error=str(e),
-            exc_info=True
-        )
-        # Return error response
-        error_response = ErrorResponse(
-            error=f"Health status formatting failed: {str(e)}",
+
+    except _SAFE_EXCEPTIONS as e:
+        logger.error(f"Failed to format health status: {e}")
+        return format_error_response(
+            error_message=f"Health status formatting failed: {e!s}",
             error_type="formatting_error",
-            details=None
         )
-        return error_response.model_dump_json(indent=2)
 
 
 def format_system_context() -> str:
     """
     Format system context and capabilities into JSON response.
-    
+
     Returns:
         JSON-formatted system context
     """
@@ -344,66 +372,62 @@ def format_system_context() -> str:
                 "for querying technical cybersecurity documentation from the "
                 "VX Underground collection."
             ),
+            supported_document_types=["PDF", "TXT", "MD"],
             supported_formats=["PDF", "TXT", "MD"],
             search_types=["semantic", "keyword", "hybrid"],
             max_results=20,
-            max_token_budget=16000
+            max_token_budget=16000,
         )
-        
-        corpus_info = {
+
+        corpus_info: dict[str, Any] = {
             "name": "VX Underground Collection",
-            "description": "Cybersecurity technical documents, articles, and research papers",
+            "description": (
+                "Cybersecurity technical documents, articles, and research papers"
+            ),
             "content_types": [
                 "Technical articles",
                 "Research papers",
                 "Code samples",
-                "Security analyses"
+                "Security analyses",
             ],
             # Intentionally static: this reflects the corpus index date, not today's date.
-            # Update this value when the corpus is re-indexed.
-            "index_date": "unknown"
+            "index_date": "unknown",
         }
-        
+
         response = SystemContextResponse(
+            system_name="VX-RAG",
             capabilities=capabilities,
             version="1.0.0",
-            corpus_info=corpus_info
+            corpus_info=corpus_info,
         )
-        
+
         json_str = response.model_dump_json(indent=2, exclude_none=True)
-        
+
         logger.debug("System context formatted")
-        
+
         return json_str
-        
-    except Exception as e:
-        logger.error(
-            "Failed to format system context",
-            error=str(e),
-            exc_info=True
-        )
-        # Return error response
-        error_response = ErrorResponse(
-            error=f"System context formatting failed: {str(e)}",
+
+    except _SAFE_EXCEPTIONS as e:
+        logger.error(f"Failed to format system context: {e}")
+        return format_error_response(
+            error_message=f"System context formatting failed: {e!s}",
             error_type="formatting_error",
-            details=None
         )
-        return error_response.model_dump_json(indent=2)
 
 
 def format_error_response(
     error_message: str,
     error_type: str = "internal_error",
-    details: Optional[Dict[str, Any]] = None
+    details: dict[str, Any] | None = None,
 ) -> str:
     """
     Format error into standard error response.
-    
+
     Args:
         error_message: Human-readable error message
         error_type: Type of error (validation_error, not_found, internal_error, etc.)
         details: Optional additional error details
-        
+
     Returns:
         JSON-formatted error response
     """
@@ -411,28 +435,26 @@ def format_error_response(
         response = ErrorResponse(
             error=error_message,
             error_type=error_type,
-            details=details
+            details=details,
         )
-        
+
         json_str = response.model_dump_json(indent=2, exclude_none=True)
-        
+
         logger.debug(
             "Error response formatted",
             error_type=error_type,
-            error_msg=error_message
+            error_msg=error_message,
         )
-        
+
         return json_str
-        
-    except Exception as e:
-        # Fallback to basic JSON if Pydantic fails
-        logger.error(
-            "Failed to format error response",
-            error=str(e),
-            exc_info=True
+
+    except _SAFE_EXCEPTIONS as e:
+        logger.error(f"Failed to format error response: {e}")
+        return json.dumps(
+            {
+                "error": error_message,
+                "error_type": error_type,
+                "formatting_error": str(e),
+            },
+            indent=2,
         )
-        return json.dumps({
-            "error": error_message,
-            "error_type": error_type,
-            "formatting_error": str(e)
-        }, indent=2)
