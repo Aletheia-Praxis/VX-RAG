@@ -5,21 +5,22 @@ Provides utilities to load configuration from settings.yaml with Pydantic valida
 This centralizes all configuration loading to avoid hardcoded values throughout the codebase.
 """
 
-import yaml
-from .logging_config import get_logger
 from pathlib import Path
-from typing import Dict, Any, Optional
+from typing import Any
+
+import yaml
 from pydantic import ValidationError
 
 from .config_schemas import VXRAGSettings
+from .logging_config import get_logger
 
 logger = get_logger(__name__)
 
 # Global validated settings instance
-_validated_settings: Optional[VXRAGSettings] = None
+_validated_settings: VXRAGSettings | None = None
 
 
-def load_settings(config_path: Optional[str] = None, force_reload: bool = False) -> Dict[str, Any]:
+def load_settings(config_path: str | None = None, force_reload: bool = False) -> dict[str, Any]:
     """
     Load and validate complete settings.yaml configuration using Pydantic.
     
@@ -61,7 +62,7 @@ def load_settings(config_path: Optional[str] = None, force_reload: bool = False)
     
     if not isinstance(config, dict):
         logger.error("Config root must be a dictionary")
-        raise ValueError("Invalid configuration: root must be a dictionary")
+        raise TypeError("Invalid configuration: root must be a dictionary")
     
     # Validate configuration using Pydantic
     try:
@@ -83,8 +84,6 @@ def get_validated_settings() -> VXRAGSettings:
     Raises:
         RuntimeError: If settings have not been loaded yet
     """
-    global _validated_settings
-    
     if _validated_settings is None:
         # Auto-load settings on first access
         load_settings()
@@ -95,7 +94,7 @@ def get_validated_settings() -> VXRAGSettings:
     return _validated_settings
 
 
-def load_chunking_config(config_path: Optional[str] = None) -> Dict[str, Any]:
+def load_chunking_config(config_path: str | None = None) -> dict[str, Any]:
     """
     Load chunking configuration from settings.yaml.
     
@@ -147,7 +146,11 @@ def load_chunking_config(config_path: Optional[str] = None) -> Dict[str, Any]:
     return chunking_config
 
 
-def get_default_chunker_params(config_path: Optional[str] = None) -> Dict[str, Any]:
+# Alias for backwards compatibility
+get_chunking_config = load_chunking_config
+
+
+def get_default_chunker_params(config_path: str | None = None) -> dict[str, Any]:
     """
     Get default parameters for Chunker initialization from config.
     
@@ -173,7 +176,7 @@ def get_default_chunker_params(config_path: Optional[str] = None) -> Dict[str, A
     }
 
 
-def get_chunking_metadata(config_path: Optional[str] = None) -> Dict[str, Any]:
+def get_chunking_metadata(config_path: str | None = None) -> dict[str, Any]:
     """
     Get chunking metadata for index snapshots and storage.
     
@@ -199,7 +202,7 @@ def get_chunking_metadata(config_path: Optional[str] = None) -> Dict[str, Any]:
     # Add profile names if adaptive chunking is enabled
     if metadata['adaptive_chunking']:
         profiles = []
-        for key in adaptive_config.keys():
+        for key in adaptive_config:
             if key != 'enabled' and isinstance(adaptive_config[key], dict):
                 profiles.append(key)
         if profiles:
@@ -208,7 +211,7 @@ def get_chunking_metadata(config_path: Optional[str] = None) -> Dict[str, Any]:
     return metadata
 
 
-def get_embedding_config(config_path: Optional[str] = None) -> Dict[str, Any]:
+def get_embedding_config(config_path: str | None = None) -> dict[str, Any]:
     """
     Get embedding model configuration from settings.yaml.
     
@@ -224,21 +227,33 @@ def get_embedding_config(config_path: Optional[str] = None) -> Dict[str, Any]:
         - embedding_trust_remote_code: Whether to trust remote code
     """
     config = load_settings(config_path)
-    
-    embedding_model = config.get('embedding_model', 'all-MiniLM-L6-v2')
-    embedding_device = config.get('embedding_device', 'cpu')
-    embedding_batch_size = config.get('embedding_batch_size', 10)
-    embedding_cache_size = config.get('embedding_cache_size', 1000)
-    embedding_trust_remote_code = config.get('embedding_trust_remote_code', False)
-    
+    raw_embedder = config.get("embedder")
+    embedder_cfg: dict[str, Any] = raw_embedder if isinstance(raw_embedder, dict) else {}
+
+    embedding_model = embedder_cfg.get("embedding_model") or config.get("embedding_model") or "BAAI/bge-small-en-v1.5"
+    embedding_device = embedder_cfg.get("embedding_device") or config.get("embedding_device") or "cpu"
+    embedding_batch_size: int = int(
+        embedder_cfg.get("embedding_batch_size")
+        or config.get("embedding_batch_size", 10)
+    )
+    embedding_cache_size: int = int(
+        embedder_cfg.get("embedding_cache_size")
+        or config.get("embedding_cache_size", 1000)
+    )
+    embedding_trust_remote_code: bool = bool(
+        embedder_cfg.get("embedding_trust_remote_code")
+        if embedder_cfg.get("embedding_trust_remote_code") is not None
+        else config.get("embedding_trust_remote_code", False)
+    )
+
     embedding_config = {
-        'embedding_model': embedding_model,
-        'embedding_device': embedding_device,
-        'embedding_batch_size': embedding_batch_size,
-        'embedding_cache_size': embedding_cache_size,
-        'embedding_trust_remote_code': embedding_trust_remote_code
+        "embedding_model": embedding_model,
+        "embedding_device": embedding_device,
+        "embedding_batch_size": embedding_batch_size,
+        "embedding_cache_size": embedding_cache_size,
+        "embedding_trust_remote_code": embedding_trust_remote_code,
     }
-    
+
     logger.info(
         f"Loaded embedding config: model={embedding_model}, "
         f"device={embedding_device}, batch_size={embedding_batch_size}"
@@ -246,27 +261,29 @@ def get_embedding_config(config_path: Optional[str] = None) -> Dict[str, Any]:
     return embedding_config
 
 
-def get_embedding_model_name(config_path: Optional[str] = None) -> str:
+def get_embedding_model_name(config_path: str | None = None) -> str:
     """
     Get embedding model name from settings.yaml.
-    
+
     Simple helper to get just the model name string.
-    
+
     Args:
         config_path: Path to settings.yaml file
-        
+
     Returns:
         Embedding model name string
     """
     try:
         config = load_settings(config_path)
-        return str(config.get('embedding_model', 'all-MiniLM-L6-v2'))
+        raw_embedder = config.get("embedder")
+        embedder_cfg: dict[str, Any] = raw_embedder if isinstance(raw_embedder, dict) else {}
+        return str(embedder_cfg.get("embedding_model") or config.get("embedding_model") or "BAAI/bge-small-en-v1.5")
     except (FileNotFoundError, ValueError) as e:
         logger.warning(f"Failed to load config, using default: {e}")
-        return 'all-MiniLM-L6-v2'
+        return "BAAI/bge-small-en-v1.5"
 
 
-def get_vector_store_config(config_path: Optional[str] = None) -> Dict[str, Any]:
+def get_vector_store_config(config_path: str | None = None) -> dict[str, Any]:
     """
     Get vector store configuration from settings.yaml.
     
@@ -290,7 +307,7 @@ def get_vector_store_config(config_path: Optional[str] = None) -> Dict[str, Any]
     return vector_config
 
 
-def get_vector_store_type(config_path: Optional[str] = None) -> str:
+def get_vector_store_type(config_path: str | None = None) -> str:
     """
     Get vector store type from settings.yaml.
     
@@ -310,7 +327,8 @@ def get_vector_store_type(config_path: Optional[str] = None) -> str:
         return 'faiss'
 
 
-def get_reranker_config(config_path: Optional[str] = None) -> Dict[str, Any]:
+
+def get_reranker_config(config_path: str | None = None) -> dict[str, Any]:
     """
     Get reranker configuration from settings.yaml.
     
@@ -330,7 +348,7 @@ def get_reranker_config(config_path: Optional[str] = None) -> Dict[str, Any]:
     reranker_section = config.get('reranker', {})
     
     reranker_config = {
-        'model_name': reranker_section.get('model_name', 'cross-encoder/ms-marco-MiniLM-L-6-v2'),
+        'model_name': reranker_section.get('model_name', 'BAAI/bge-reranker-base'),
         'top_k': reranker_section.get('top_k', 5),
         'device': reranker_section.get('device', 'cpu'),
         'metadata_boost': reranker_section.get('metadata_boost', 0.1),
@@ -341,7 +359,7 @@ def get_reranker_config(config_path: Optional[str] = None) -> Dict[str, Any]:
     return reranker_config
 
 
-def get_context_assembler_config(config_path: Optional[str] = None) -> Dict[str, Any]:
+def get_context_assembler_config(config_path: str | None = None) -> dict[str, Any]:
     """
     Get context assembler configuration from settings.yaml.
     
@@ -373,7 +391,7 @@ def get_context_assembler_config(config_path: Optional[str] = None) -> Dict[str,
     return assembler_config
 
 
-def get_retriever_config(config_path: Optional[str] = None) -> Dict[str, Any]:
+def get_retriever_config(config_path: str | None = None) -> dict[str, Any]:
     """
     Get retriever configuration from settings.yaml.
     
@@ -405,7 +423,7 @@ def get_retriever_config(config_path: Optional[str] = None) -> Dict[str, Any]:
     return retriever_config
 
 
-def get_bm25_config(config_path: Optional[str] = None) -> Dict[str, Any]:
+def get_bm25_config(config_path: str | None = None) -> dict[str, Any]:
     """
     Get BM25 configuration from settings.yaml.
     
@@ -432,7 +450,7 @@ def get_bm25_config(config_path: Optional[str] = None) -> Dict[str, Any]:
     return bm25_config
 
 
-def get_data_directories(config_path: Optional[str] = None) -> Dict[str, str]:
+def get_data_directories(config_path: str | None = None) -> dict[str, str]:
     """
     Get data directory paths from settings.yaml.
     
@@ -461,7 +479,7 @@ def get_data_directories(config_path: Optional[str] = None) -> Dict[str, str]:
     return data_dirs
 
 
-def get_mcp_config(config_path: Optional[str] = None) -> Dict[str, Any]:
+def get_mcp_config(config_path: str | None = None) -> dict[str, Any]:
     """
     Get complete MCP server configuration from settings.yaml.
     
@@ -512,7 +530,7 @@ def get_mcp_config(config_path: Optional[str] = None) -> Dict[str, Any]:
     return mcp_config
 
 
-def get_mcp_rate_limit_config(config_path: Optional[str] = None) -> Dict[str, Any]:
+def get_mcp_rate_limit_config(config_path: str | None = None) -> dict[str, Any]:
     """
     Get MCP rate limiting configuration from settings.yaml.
     
@@ -526,11 +544,11 @@ def get_mcp_rate_limit_config(config_path: Optional[str] = None) -> Dict[str, An
         - default_timeout: Default timeout in seconds
     """
     mcp_config = get_mcp_config(config_path)
-    rate_limit: Dict[str, Any] = mcp_config['rate_limit']
+    rate_limit: dict[str, Any] = mcp_config['rate_limit']
     return rate_limit
 
 
-def get_mcp_timeouts(config_path: Optional[str] = None) -> Dict[str, float]:
+def get_mcp_timeouts(config_path: str | None = None) -> dict[str, float]:
     """
     Get MCP tool-specific timeouts from settings.yaml.
     
@@ -545,11 +563,11 @@ def get_mcp_timeouts(config_path: Optional[str] = None) -> Dict[str, float]:
         - system_context: Timeout for system context requests
     """
     mcp_config = get_mcp_config(config_path)
-    timeouts: Dict[str, float] = mcp_config['timeouts']
+    timeouts: dict[str, float] = mcp_config['timeouts']
     return timeouts
 
 
-def get_mcp_defaults(config_path: Optional[str] = None) -> Dict[str, Any]:
+def get_mcp_defaults(config_path: str | None = None) -> dict[str, Any]:
     """
     Get MCP tool default parameters from settings.yaml.
     
@@ -564,11 +582,11 @@ def get_mcp_defaults(config_path: Optional[str] = None) -> Dict[str, Any]:
         - apply_redaction: Enable sensitive data redaction in responses
     """
     mcp_config = get_mcp_config(config_path)
-    defaults: Dict[str, Any] = mcp_config['defaults']
+    defaults: dict[str, Any] = mcp_config['defaults']
     return defaults
 
 
-def get_faiss_config(config_path: Optional[str] = None) -> Dict[str, Any]:
+def get_faiss_config(config_path: str | None = None) -> dict[str, Any]:
     """
     Get FAISS index configuration from settings.yaml.
     
@@ -593,7 +611,7 @@ def get_faiss_config(config_path: Optional[str] = None) -> Dict[str, Any]:
     return faiss_config
 
 
-def get_hierarchical_chunker_config(config_path: Optional[str] = None) -> Dict[str, Any]:
+def get_hierarchical_chunker_config(config_path: str | None = None) -> dict[str, Any]:
     """
     Get hierarchical chunker configuration from settings.yaml.
     
@@ -620,7 +638,7 @@ def get_hierarchical_chunker_config(config_path: Optional[str] = None) -> Dict[s
     return chunker_config
 
 
-def get_duplicate_detection_config(config_path: Optional[str] = None) -> Dict[str, Any]:
+def get_duplicate_detection_config(config_path: str | None = None) -> dict[str, Any]:
     """
     Get duplicate detection configuration from settings.yaml.
     
@@ -645,7 +663,7 @@ def get_duplicate_detection_config(config_path: Optional[str] = None) -> Dict[st
     return duplicate_config
 
 
-def get_ingestion_config(config_path: Optional[str] = None) -> Dict[str, Any]:
+def get_ingestion_config(config_path: str | None = None) -> dict[str, Any]:
     """
     Get ingestion pipeline configuration from settings.yaml.
     
@@ -672,7 +690,7 @@ def get_ingestion_config(config_path: Optional[str] = None) -> Dict[str, Any]:
         'enable_persistence': ingestion_section.get('enable_persistence', True),
         'enable_embedding': ingestion_section.get('enable_embedding', False),
         'enable_vector_store': ingestion_section.get('enable_vector_store', False),
-        'embedding_model': config.get('embedding_model', 'all-MiniLM-L6-v2'),
+        'embedding_model': config.get('embedding_model', 'BAAI/bge-small-en-v1.5'),
         'faiss_index': ingestion_section.get('faiss_index'),
         'vector_store_kwargs': ingestion_section.get('vector_store_kwargs', {})
     }
@@ -681,7 +699,7 @@ def get_ingestion_config(config_path: Optional[str] = None) -> Dict[str, Any]:
     return ingestion_config
 
 
-def get_router_config(config_path: Optional[str] = None) -> Dict[str, Any]:
+def get_router_config(config_path: str | None = None) -> dict[str, Any]:
     """
     Get router query engine configuration from settings.yaml.
     
@@ -708,7 +726,7 @@ def get_router_config(config_path: Optional[str] = None) -> Dict[str, Any]:
     return router_config
 
 
-def get_boilerplate_removal_config(config_path: Optional[str] = None) -> Dict[str, Any]:
+def get_boilerplate_removal_config(config_path: str | None = None) -> dict[str, Any]:
     """
     Get boilerplate removal configuration from settings.yaml.
     

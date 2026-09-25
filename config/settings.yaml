@@ -8,7 +8,7 @@ index_dir: "./data/index"
 snapshots_dir: "./data/snapshots"
 
 # Embedding configuration
-embedding_model: "all-MiniLM-L6-v2"
+embedding_model: "BAAI/bge-small-en-v1.5"
 embedding_device: "cpu"     # Force CPU usage
 embedding_batch_size: 10    # Batch size for embedding generation
 embedding_cache_size: 1000  # Maximum number of cached embeddings
@@ -73,7 +73,7 @@ bm25:
 
 # Reranker configuration
 reranker:
-  model_name: "cross-encoder/ms-marco-MiniLM-L-6-v2"  # Cross-encoder model for reranking
+  model_name: "BAAI/bge-reranker-base"  # Cross-encoder model for reranking
   top_k: 5             # Final number of documents after reranking
   device: "cpu"        # Device for reranking model
   metadata_boost: 0.1  # Boost factor for documents with matching metadata
@@ -126,7 +126,9 @@ duplicate_detection:
 # Logging configuration
 logging:
   log_level: "INFO"
-  log_file: "logs/vx_rag.log"
+  log_file: "logs/vx_rag.jsonl"
+  max_bytes: 10485760  # 10 MB (10 * 1024 * 1024)
+  backup_count: 5
   log_format: "json"           # Options: json, text
   log_structured_events: true  # Enable structured logging for key events
   log_metrics: true            # Enable metrics logging

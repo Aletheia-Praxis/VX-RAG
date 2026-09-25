@@ -5,14 +5,15 @@ This module defines Pydantic models for validating configuration loaded from set
 All configuration must pass validation before being used by the application.
 """
 
-from typing import Optional, List, Literal
+from typing import Literal
+
 from pydantic import BaseModel, Field, model_validator
 
 
 class EmbeddingConfig(BaseModel):
     """Embedding model configuration."""
     
-    embedding_model: str = Field(default="all-MiniLM-L6-v2", description="Embedding model name")
+    embedding_model: str = Field(default="BAAI/bge-small-en-v1.5", description="Embedding model name")
     embedding_device: Literal["cpu", "cuda"] = Field(default="cpu", description="Device for embedding")
     embedding_batch_size: int = Field(default=10, ge=1, le=1000, description="Batch size for embeddings")
     embedding_cache_size: int = Field(default=1000, ge=0, description="Cache size for embeddings")
@@ -24,10 +25,10 @@ class AdaptiveChunkingProfile(BaseModel):
     
     chunk_size: int = Field(ge=128, le=4096, description="Chunk size in tokens")
     chunk_overlap: int = Field(ge=0, description="Overlap size in tokens")
-    min_lines: Optional[int] = Field(default=None, ge=1, description="Minimum lines threshold")
-    max_lines: Optional[int] = Field(default=None, ge=1, description="Maximum lines threshold")
-    preserve_integrity: Optional[bool] = Field(default=None, description="Preserve content integrity")
-    preserve_structure: Optional[bool] = Field(default=None, description="Preserve content structure")
+    min_lines: int | None = Field(default=None, ge=1, description="Minimum lines threshold")
+    max_lines: int | None = Field(default=None, ge=1, description="Maximum lines threshold")
+    preserve_integrity: bool | None = Field(default=None, description="Preserve content integrity")
+    preserve_structure: bool | None = Field(default=None, description="Preserve content structure")
     
     @model_validator(mode='after')
     def validate_overlap_size(self) -> 'AdaptiveChunkingProfile':
@@ -42,10 +43,10 @@ class AdaptiveChunkingConfig(BaseModel):
     
     enabled: bool = Field(default=True, description="Enable adaptive chunking")
     max_chunk_size: int = Field(default=2000, ge=512, le=8192, description="Maximum chunk size")
-    large_code_blocks: Optional[AdaptiveChunkingProfile] = None
-    tables: Optional[AdaptiveChunkingProfile] = None
-    short_snippets: Optional[AdaptiveChunkingProfile] = None
-    hex_dumps: Optional[AdaptiveChunkingProfile] = None
+    large_code_blocks: AdaptiveChunkingProfile | None = None
+    tables: AdaptiveChunkingProfile | None = None
+    short_snippets: AdaptiveChunkingProfile | None = None
+    hex_dumps: AdaptiveChunkingProfile | None = None
 
 
 class ChunkingConfig(BaseModel):
@@ -83,14 +84,14 @@ class RetrieverConfig(BaseModel):
     
     semantic_top_k: int = Field(default=20, ge=1, le=100, description="Semantic search top K")
     hybrid_alpha: float = Field(default=0.5, ge=0.0, le=1.0, description="Hybrid search alpha")
-    metadata_filters: List[str] = Field(default_factory=list, description="Metadata filters")
+    metadata_filters: list[str] = Field(default_factory=list, description="Metadata filters")
     enable_hybrid: bool = Field(default=True, description="Enable hybrid search")
 
 
 class RerankerConfig(BaseModel):
     """Reranker configuration."""
     
-    model_name: str = Field(default="cross-encoder/ms-marco-MiniLM-L-6-v2", description="Reranker model")
+    model_name: str = Field(default="BAAI/bge-reranker-base", description="Reranker model")
     top_k: int = Field(default=5, ge=1, le=50, description="Top K after reranking")
     device: Literal["cpu", "cuda"] = Field(default="cpu", description="Device for reranking")
     metadata_boost: float = Field(default=0.1, ge=0.0, le=1.0, description="Metadata boost factor")
@@ -176,7 +177,9 @@ class LoggingConfig(BaseModel):
     """Logging configuration."""
     
     log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"] = Field(default="INFO", description="Log level")
-    log_file: str = Field(default="logs/vx_rag.log", description="Log file path")
+    log_file: str = Field(default="logs/vx_rag.jsonl", description="Log file path")
+    max_bytes: int = Field(default=10 * 1024 * 1024, description="Maximum log file size in bytes before rotation")
+    backup_count: int = Field(default=5, description="Number of rotated backup log files to retain")
     log_format: Literal["json", "text"] = Field(default="json", description="Log format")
     log_structured_events: bool = Field(default=True, description="Log structured events")
     log_metrics: bool = Field(default=True, description="Log metrics")
@@ -201,7 +204,7 @@ class VXRAGSettings(BaseModel):
     snapshots_dir: str = Field(default="./data/snapshots")
     
     # Embedding
-    embedding_model: str = Field(default="all-MiniLM-L6-v2")
+    embedding_model: str = Field(default="BAAI/bge-small-en-v1.5")
     embedding_device: Literal["cpu", "cuda"] = Field(default="cpu")
     embedding_batch_size: int = Field(default=10, ge=1, le=1000)
     embedding_cache_size: int = Field(default=1000, ge=0)
