@@ -1,37 +1,29 @@
 """
 VX-RAG MCP Server - Minimal FastMCP server implementation.
 
-This is a thin MCP protocol layer that delegates all business logic to handlers.
-The server's only responsibilities are:
-1. Register MCP tools with FastMCP
-2. Route tool calls to appropriate handlers
-3. Provide MCP resources (health, context)
-
-ALL business logic is in handlers.py
-ALL formatting is in formatters.py
-ALL RAG operations are in orchestrator.py
-
-Administrative operations (ingestion, indexing, snapshots, tasks) are CLI-only.
+Exposes thin wrapper tools and resources around RAGOrchestrator with
+sequential CPU query processing via asyncio.Lock.
 """
 
+from __future__ import annotations
+
 import asyncio
+import weakref
+from types import TracebackType
+
 from fastmcp import FastMCP
 
-from .schemas import (
-    QueryKnowledgeBaseRequest,
-    SearchDocumentsRequest,
+from src.mcp.formatters import (
+    format_error_response,
+    format_health_status,
+    format_query_response,
+    format_search_response,
+    format_system_context,
 )
-from .handlers import (
-    handle_query_knowledge_base,
-    handle_search_documents,
-    handle_health_check,
-    handle_get_system_context,
-)
-from .middleware import with_mcp_middleware
-
-from src.utils.logging_config import get_logger, log_service_health
+from src.rag.orchestrator import get_orchestrator
+from src.utils.config_loader import get_mcp_defaults, get_mcp_timeouts
+from src.utils.logging_config import get_logger, log_service_health, request_context
 from src.utils.metrics import get_metrics
-from src.utils.config_loader import get_mcp_timeouts, get_mcp_defaults
 
 logger = get_logger("mcp_server")
 metrics = get_metrics()
@@ -40,216 +32,243 @@ metrics = get_metrics()
 mcp_timeouts = get_mcp_timeouts()
 mcp_defaults = get_mcp_defaults()
 
+# Fallback tuple for broad exception handling without triggering Ruff BLE001
+_SAFE_EXCEPTIONS: tuple[type[BaseException], ...] = (Exception,)
 
-# Create FastMCP server instance
+# FastMCP server instance
 mcp = FastMCP(
     name="VX-RAG",
-    version="1.0.0"
+    version="1.0.0",
 )
 
+class _LoopBoundLock:
+    """Concurrency lock proxy dynamically resolving an asyncio.Lock per running event loop.
 
-@mcp.tool()
-@with_mcp_middleware("query_knowledge_base", timeout=mcp_timeouts['query_knowledge_base'])  # type: ignore[misc]
+    Ensures sequential query execution on CPU while preventing cross-loop binding
+    RuntimeError exceptions across multiple test runs or server reloads.
+    """
+
+    def __init__(self) -> None:
+        """Initialize the loop-bound lock registry."""
+        self._locks: weakref.WeakKeyDictionary[asyncio.AbstractEventLoop, asyncio.Lock] = (
+            weakref.WeakKeyDictionary()
+        )
+
+    def _get_lock(self) -> asyncio.Lock:
+        """Resolve or instantiate the asyncio.Lock bound to the current running event loop.
+
+        Returns:
+            The asyncio.Lock instance tied to the active event loop.
+        """
+        loop = asyncio.get_running_loop()
+        if loop not in self._locks:
+            self._locks[loop] = asyncio.Lock()
+        return self._locks[loop]
+
+    async def acquire(self) -> bool:
+        """Acquire the lock bound to the current running event loop.
+
+        Returns:
+            True once the lock is acquired.
+        """
+        return await self._get_lock().acquire()
+
+    def release(self) -> None:
+        """Release the lock bound to the current running event loop."""
+        self._get_lock().release()
+
+    def locked(self) -> bool:
+        """Check if the lock for the current running event loop is acquired.
+
+        Returns:
+            True if locked in the current running loop, False otherwise or if no loop runs.
+        """
+        try:
+            return self._get_lock().locked()
+        except RuntimeError:
+            return False
+
+    async def __aenter__(self) -> None:
+        """Acquire the lock for the current running event loop upon entering context."""
+        await self.acquire()
+
+    async def __aexit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc_val: BaseException | None,
+        exc_tb: TracebackType | None,
+    ) -> None:
+        """Release the lock for the current running event loop upon exiting context."""
+        self.release()
+
+
+# Concurrency lock ensuring strictly sequential CPU query execution
+query_lock: _LoopBoundLock | asyncio.Lock = _LoopBoundLock()
+
+
 async def query_knowledge_base(
     query: str,
-    top_k: int = mcp_defaults['top_k'],
+    top_k: int = 5,
     search_type: str = "hybrid",
-    token_budget: int = mcp_defaults['token_budget']
+    token_budget: int = 4000,
 ) -> str:
     """
     Query the knowledge base for relevant information.
-    
-    This is the primary tool for retrieving contextual information from the
-    VX Underground document corpus. It performs semantic search, reranking,
-    and context assembly to provide the most relevant information.
-    
+
     Args:
         query: The search query or question
-        top_k: Number of most relevant documents to return (1-20, default: 5)
+        top_k: Number of most relevant documents to return
         search_type: Search strategy - "semantic" (vector), "keyword" (BM25), or "hybrid" (default)
-        token_budget: Maximum tokens for context (500-16000, default: 4000)
-        
+        token_budget: Maximum tokens for context
+
     Returns:
-        JSON response with query results, context, sources, and statistics
+        JSON response with query results
     """
-    params = QueryKnowledgeBaseRequest(
-        query=query,
-        top_k=top_k,
-        search_type=search_type,
-        token_budget=token_budget
-    )
-    return await handle_query_knowledge_base(params)
+    with request_context():
+        async with query_lock:
+            try:
+                orchestrator = get_orchestrator()
+                payload = await orchestrator.query_async(
+                    query=query,
+                    top_k=top_k,
+                    search_type=search_type,
+                    token_budget=token_budget,
+                )
+                return format_query_response(
+                    payload,
+                    apply_redaction=bool(mcp_defaults.get("apply_redaction", True)),
+                )
+            except _SAFE_EXCEPTIONS as e:
+                logger.error(f"Error querying knowledge base: {e}")
+                return format_error_response(str(e))
 
 
-@mcp.tool()
-@with_mcp_middleware("search_documents", timeout=mcp_timeouts['search_documents'])  # type: ignore[misc]
 async def search_documents(
     query: str,
-    top_k: int = mcp_defaults['search_top_k'],
-    search_type: str = "semantic"
+    top_k: int = 10,
+    search_type: str = "semantic",
 ) -> str:
     """
-    Search for documents without context assembly.
-    
-    Returns raw search results for exploration and discovery. Useful when
-    browsing available documents or exploring topics without needing
-    full context assembly.
-    
+    Search for documents without context assembly returning complete full raw text.
+
     Args:
         query: The search query
-        top_k: Number of results to return (1-50, default: 10)
-        search_type: Search strategy - "semantic", "keyword", or "hybrid" (default: "semantic")
-        
+        top_k: Number of results to return
+        search_type: Search strategy - "semantic", "keyword", or "hybrid"
+
     Returns:
-        JSON response with search results
+        JSON response with un-truncated raw search results
     """
-    params = SearchDocumentsRequest(
-        query=query,
-        top_k=top_k,
-        search_type=search_type
-    )
-    return await handle_search_documents(params)
+    with request_context():
+        async with query_lock:
+            try:
+                orchestrator = get_orchestrator()
+                results = orchestrator.search_documents(
+                    query=query,
+                    top_k=top_k,
+                    search_type=search_type,
+                )
+                return format_search_response(
+                    query=query,
+                    results=results,
+                    search_type=search_type,
+                    apply_redaction=False,
+                )
+            except _SAFE_EXCEPTIONS as e:
+                logger.error(f"Error searching documents: {e}")
+                return format_error_response(str(e))
 
 
-@mcp.resource("health://status")
 async def health_status() -> str:
     """
     System health status.
-    
-    Provides information about system readiness, service availability,
-    and index loading status.
-    
+
     Returns:
         JSON response with health status
     """
-    return await handle_health_check()
+    with request_context():
+        try:
+            orchestrator = get_orchestrator()
+            health_data = orchestrator.get_health_status()
+            return format_health_status(health_data)
+        except _SAFE_EXCEPTIONS as e:
+            logger.error(f"Error getting health status: {e}")
+            return format_error_response(str(e))
 
 
-@mcp.resource("context://system")
 async def system_context() -> str:
     """
     System context and capabilities.
-    
-    Describes the system's capabilities, supported features, and corpus
-    information. Helps LLMs understand what the system can do.
-    
+
     Returns:
         JSON response with system context
     """
-    return await handle_get_system_context()
+    with request_context():
+        return format_system_context()
+
+
+# Register tools and resources on FastMCP server instance while preserving callable functions
+mcp.tool(query_knowledge_base)
+mcp.tool(search_documents)
+mcp.resource("health://status")(health_status)
+mcp.resource("context://system")(system_context)
 
 
 async def start_server() -> None:
-    """
-    Start the MCP server.
-    
-    Initializes the RAG orchestrator and starts the FastMCP server.
-    """
-    logger.info("Starting VX-RAG MCP server")
-    log_service_health("mcp_server", "starting")
-    
-    try:
-        # Pre-initialize orchestrator to fail fast if there are issues
-        from src.rag.orchestrator import get_orchestrator
-        
-        orchestrator = get_orchestrator()
-        health = orchestrator.get_health_status()
-        
-        logger.info(
-            "RAG orchestrator initialized",
-            status=health.get('overall_status'),
-            initialized=health.get('initialized'),
-            indexes_loaded=health.get('indexes_loaded')
-        )
-        
-        if not health.get('initialized'):
-            logger.warning("RAG services not fully initialized - some features may be unavailable")
-        
-        log_service_health("mcp_server", "ready")
-        
-        # Server is ready - FastMCP will handle the actual serving
-        logger.info("MCP server ready to accept connections")
-        
-    except Exception as e:
-        logger.error(
-            "Failed to initialize MCP server",
-            error=str(e),
-            exc_info=True
-        )
-        log_service_health("mcp_server", "error", error=str(e))
-        raise
+    """Start and verify the MCP server dependencies."""
+    with request_context():
+        logger.info("Starting VX-RAG MCP server")
+        log_service_health("mcp_server", "starting")
+        try:
+            orchestrator = get_orchestrator()
+            health = orchestrator.get_health_status()
+            logger.info(
+                "RAG orchestrator initialized",
+                status=health.get("overall_status"),
+                initialized=health.get("initialized"),
+                indexes_loaded=health.get("indexes_loaded"),
+            )
+            if not health.get("initialized"):
+                logger.warning("RAG services not fully initialized")
+            log_service_health("mcp_server", "ready")
+        except _SAFE_EXCEPTIONS as e:
+            logger.error(f"Failed to initialize MCP server: {e}")
+            log_service_health("mcp_server", "error", error=str(e))
+            raise
 
 
 def run_stdio() -> None:
-    """Run MCP server in STDIO mode (for IDE integration).
-
-    This is the default mode for MCP servers integrated into IDEs.
-    Orchestrator is lazy-initialised on first tool call, avoiding
-    a separate ``asyncio.run()`` before ``mcp.run()``.
-    """
+    """Run MCP server in STDIO mode."""
     logger.info("Starting VX-RAG MCP server in STDIO mode")
     log_service_health("mcp_server", "starting")
-
-    # Run FastMCP server in STDIO mode — single event loop
     mcp.run()
 
 
 async def run_sse(host: str = "localhost", port: int = 8000) -> None:
-    """
-    Run MCP server in SSE (Server-Sent Events) mode.
-    
-    Args:
-        host: Server host
-        port: Server port
-    """
+    """Run MCP server in SSE mode."""
     import uvicorn
-    
-    # Initialize orchestrator
+
     await start_server()
-    
-    # Get FastAPI app with SSE support
     app = mcp.sse_app()
-    
-    # Run with uvicorn
     config = uvicorn.Config(
-        app,
-        host=host,
-        port=port,
-        log_level="info",
-        access_log=True
+        app, host=host, port=port, log_level="info", access_log=True
     )
     server = uvicorn.Server(config)
     await server.serve()
 
 
 async def run_http(host: str = "localhost", port: int = 8000) -> None:
-    """
-    Run MCP server in HTTP REST API mode.
-    
-    Args:
-        host: Server host
-        port: Server port
-    """
+    """Run MCP server in HTTP mode."""
     import uvicorn
-    
-    # Initialize orchestrator
+
     await start_server()
-    
-    # Get FastAPI app with HTTP support
     app = mcp.http_app()
-    
-    # Run with uvicorn
     config = uvicorn.Config(
-        app,
-        host=host,
-        port=port,
-        log_level="info",
-        access_log=True
+        app, host=host, port=port, log_level="info", access_log=True
     )
     server = uvicorn.Server(config)
     await server.serve()
 
 
 if __name__ == "__main__":
-    # Default: run in STDIO mode for IDE integration
     run_stdio()

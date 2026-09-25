@@ -5,9 +5,7 @@ This module provides MCP server functionality for integrating with external LLMs
 
 Architecture:
 - server.py: Minimal FastMCP protocol layer
-- handlers.py: Business logic for MCP tools
 - formatters.py: Response formatting and redaction
-- middleware.py: Rate limiting, logging, metrics
 - schemas.py: Pydantic models for type safety
 """
 
