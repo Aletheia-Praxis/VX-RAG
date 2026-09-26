@@ -260,7 +260,7 @@ class TestVXRAGSettings:
     def test_valid_minimal_config(self) -> None:
         """Test valid minimal configuration with defaults."""
         config = VXRAGSettings()
-        assert config.embedding_model == "all-MiniLM-L6-v2"
+        assert config.embedding_model == "BAAI/bge-small-en-v1.5"
         assert config.chunk_size == 1024
         assert config.chunk_overlap == 200
     

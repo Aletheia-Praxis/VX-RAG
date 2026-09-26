@@ -320,5 +320,5 @@ class TestConfigValidationIntegration:
         assert config["mcp"]["port"] == 30000
         
         # Verify defaults
-        assert config["embedding_model"] == "all-MiniLM-L6-v2"
+        assert config["embedding_model"] == "BAAI/bge-small-en-v1.5"
         assert config["mcp"]["host"] == "127.0.0.1"
