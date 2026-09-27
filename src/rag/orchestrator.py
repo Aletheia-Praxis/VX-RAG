@@ -2,47 +2,67 @@
 RAG Orchestrator - High-level coordinator for RAG pipeline operations.
 
 This module provides a clean, high-level interface for coordinating all RAG services.
-It acts as the central orchestration layer between the MCP interface and individual
-RAG services, managing the complete document retrieval and query pipeline.
-
-Key responsibilities:
-- Coordinate retrieval pipeline (embedder -> retriever -> postprocessors -> assembler)
-- Manage service lifecycle and initialization
-- Provide health checks and system status
-- Handle errors and logging at the orchestration level
-
-Note: Reranking is now handled by native LlamaIndex postprocessors within QueryEngine.
+It uses native LlamaIndex abstractions: RetrieverQueryEngine, QueryFusionRetriever,
+BM25Retriever, FAISS HNSW vector store, and node post-processors.
 """
 
-from typing import Dict, Any, List, Optional
+from __future__ import annotations
+
+import asyncio
+import datetime
+import hashlib
+import json
+import shutil
 from pathlib import Path
-import time
+from typing import Any, cast
 
-from llama_index.core import Settings
-from llama_index.embeddings.huggingface import HuggingFaceEmbedding
-from llama_index.vector_stores.faiss import FaissVectorStore
-from llama_index.core import StorageContext, VectorStoreIndex
-from llama_index.core import get_response_synthesizer
-from .libs.utils.llamaindex_integration import ensure_global_token_counter, get_global_token_counter
-from llama_index.core.schema import NodeWithScore
-from llama_index.core.response_synthesizers import ResponseMode
-from .exceptions import (
-    ServiceInitializationError,
-    RetrievalError,
+import faiss
+from llama_index.core import (
+    QueryBundle,
+    Settings,
+    StorageContext,
+    VectorStoreIndex,
+    get_response_synthesizer,
 )
-from .workflow import RAGWorkflow
+from llama_index.core.base.base_retriever import BaseRetriever
+from llama_index.core.postprocessor import SimilarityPostprocessor
+from llama_index.core.postprocessor.types import BaseNodePostprocessor
+from llama_index.core.query_engine import RetrieverQueryEngine
+from llama_index.core.response_synthesizers import ResponseMode
+from llama_index.core.retrievers.fusion_retriever import (
+    FUSION_MODES,
+    QueryFusionRetriever,
+)
+from llama_index.core.schema import BaseNode, TextNode
+from llama_index.embeddings.huggingface import HuggingFaceEmbedding
+from llama_index.retrievers.bm25 import BM25Retriever
+from llama_index.vector_stores.faiss import FaissVectorStore
 
-from src.utils.logging_config import get_logger, log_service_health
-from src.utils.metrics import get_metrics
-
+from src.rag.exceptions import ServiceInitializationError
+from src.rag.ingestion import DoclingPipeline
+from src.rag.libs.postprocessors import (
+    BGECrossEncoderReranker,
+    MetadataBoostPostprocessor,
+)
+from src.rag.libs.schemas.mcp_schemas import ContextItem, MCPContextPayload
+from src.rag.metadata import (
+    compute_file_hash,
+    is_duplicate_hash,
+    sanitize_node_metadata,
+)
+from src.utils.config_loader import (
+    get_bm25_config,
+    get_embedding_config,
+    get_faiss_config,
+    get_reranker_config,
+)
+from src.utils.logging_config import get_logger
 
 logger = get_logger("rag_orchestrator")
-metrics = get_metrics()
 
-# Embedding output dimensions keyed by model name.
-# Used to create a correctly-sized empty FAISS index when no persisted index exists.
-# Update this map whenever a new embedding model is added to settings.yaml.
-_EMBEDDING_DIMENSION_BY_MODEL: Dict[str, int] = {
+_EMBEDDING_DIMENSION_BY_MODEL: dict[str, int] = {
+    "BAAI/bge-small-en-v1.5": 384,
+    "BAAI/bge-small-en": 384,
     "all-MiniLM-L6-v2": 384,
     "all-MiniLM-L12-v2": 384,
     "all-mpnet-base-v2": 768,
@@ -52,723 +72,641 @@ _EMBEDDING_DIMENSION_BY_MODEL: Dict[str, int] = {
 _FALLBACK_EMBEDDING_DIMENSION = 384
 
 
+
 class RAGOrchestrator:
     """
-    High-level orchestrator for RAG pipeline operations.
-    
-    Coordinates all RAG services and provides a unified interface for:
-    - Document querying with hybrid retrieval
-    - Health checks and system status
-    - Service initialization and management
+    High-level orchestrator for RAG pipeline operations using LlamaIndex native components.
+
+    Coordinates document ingestion via Docling, embedding generation with BAAI/bge-small-en-v1.5,
+    incremental FAISS HNSW vector indexing, BM25 indexing, cross-encoder reranking
+    with BAAI/bge-reranker-base, snapshot persistence, and query execution.
     """
 
     def __init__(
         self,
         config_path: str = "config/settings.yaml",
         persist_dir: str = "data/index",
-        auto_load: bool = True
+        auto_load: bool = True,
     ) -> None:
         """
         Initialize the RAG orchestrator.
-        
+
         Args:
-            config_path: Path to configuration file
-            persist_dir: Directory containing persisted indexes
-            auto_load: Whether to automatically load indexes on initialization
+            config_path: Path to configuration YAML file.
+            persist_dir: Directory path for persisting FAISS and BM25 indexes.
+            auto_load: Whether to automatically initialize services on instantiation.
         """
         self.config_path = config_path
         self.persist_dir = Path(persist_dir)
-        
-        # Initialize native LlamaIndex components
-        self._vector_store: Optional[FaissVectorStore] = None
-        self._storage_context: Optional[StorageContext] = None
-        self._index: Optional[VectorStoreIndex] = None
-        self._query_engine: Optional[Any] = None
-        self._bm25_retriever: Optional[Any] = None
-        self._response_synthesizer: Optional[Any] = None
-        self._workflow: Optional[RAGWorkflow] = None
 
-        # Status flags
+        self._vector_store: FaissVectorStore | None = None
+        self._storage_context: StorageContext | None = None
+        self._index: VectorStoreIndex | None = None
+        self._bm25_retriever: BM25Retriever | None = None
+        self._reranker: BGECrossEncoderReranker | None = None
+
         self._initialized = False
         self._indexes_loaded = False
-        
-        logger.info(
-            "RAG Orchestrator created",
-            config_path=config_path,
-            persist_dir=str(persist_dir),
-            auto_load=auto_load
-        )
-        
+
         if auto_load:
             self._initialize_services()
 
     def _initialize_services(self) -> None:
-        """Initialize all RAG services and load indexes."""
+        """Initialize all RAG services, models, and load indexes."""
         if self._initialized:
-            logger.debug("Services already initialized")
             return
 
         try:
-            logger.info("Initializing RAG services")
-            start_time = time.time()
-
-            # Configure global embedding model via Settings
-            from src.utils.config_loader import get_embedding_config
             embed_config = get_embedding_config(self.config_path)
-            embedding_model_name: str = embed_config['embedding_model']
+            embedding_model_name: str = embed_config.get("embedding_model", "BAAI/bge-small-en-v1.5")
+            embedding_device: str = embed_config.get("embedding_device", "cpu")
             Settings.embed_model = HuggingFaceEmbedding(
                 model_name=embedding_model_name,
-                embed_batch_size=embed_config['embedding_batch_size'],
-                trust_remote_code=embed_config['embedding_trust_remote_code']
+                device=embedding_device,
+                normalize=True,
+                embed_batch_size=embed_config.get("embedding_batch_size", 10),
+                trust_remote_code=embed_config.get("embedding_trust_remote_code", False),
             )
-            logger.info(
-                "Embedding model configured",
-                model=embedding_model_name,
-                batch_size=embed_config['embedding_batch_size']
-            )
-            log_service_health("embed_model", "initialized")
 
-            # Initialize vector store and index (shared helper keeps reload_indexes DRY)
+            reranker_config = get_reranker_config(self.config_path)
+            reranker_model = reranker_config.get("model_name", "BAAI/bge-reranker-base")
+            reranker_device = reranker_config.get("device", "cpu")
+            reranker_top_k = int(reranker_config.get("top_k", 5))
+            self._reranker = BGECrossEncoderReranker(
+                model_name=reranker_model,
+                top_n=reranker_top_k,
+                device=reranker_device,
+            )
+
             faiss_index_path = self.persist_dir / "faiss_index"
             self._vector_store, self._storage_context, self._index, self._indexes_loaded = (
                 self._load_vector_store(faiss_index_path, embedding_model_name)
             )
 
-            # Initialize BM25 retriever (shared helper keeps reload_indexes DRY)
             bm25_index_path = self.persist_dir / "bm25_index"
             self._bm25_retriever = self._load_bm25_retriever(bm25_index_path)
 
-            # Initialize Response Synthesizer BEFORE QueryEngine so the engine
-            # receives a real synthesizer instead of None.
-            from src.utils.config_loader import get_context_assembler_config
-            assembler_config = get_context_assembler_config(self.config_path)
-
-            # Ensure a global TokenCountingHandler is registered (or reuse existing)
-            get_global_token_counter() or ensure_global_token_counter(
-                model_name=assembler_config['model_name'], verbose=False
-            )
-
-            self._response_synthesizer = get_response_synthesizer(
-                response_mode=ResponseMode.COMPACT,
-                use_async=False,
-                streaming=False
-            )
-            logger.info("Response synthesizer initialized with native LlamaIndex components")
-            log_service_health("response_synthesizer", "initialized")
-
-            # Initialize query engine directly from index
-            # Note: Reranking now integrated as postprocessors in QueryEngine
-            if self._indexes_loaded and self._index:
-                from src.utils.config_loader import get_retriever_config
-                retriever_config = get_retriever_config(self.config_path)
-                semantic_top_k = retriever_config.get('semantic_top_k', 20)
-
-                self._query_engine = self._index.as_query_engine(
-                    similarity_top_k=semantic_top_k,
-                    response_synthesizer=self._response_synthesizer
-                )
-                logger.info(
-                    "QueryEngine initialized with native LlamaIndex components and Response Synthesizer"
-                )
-                log_service_health("query_engine", "initialized")
-            else:
-                logger.error("Cannot initialize query engine: indexes not loaded")
-                log_service_health("query_engine", "error", error="indexes_not_loaded")
-
-            # Initialize RAG Workflow with QueryEngine
-            if self._indexes_loaded and self._query_engine:
-                self._workflow = RAGWorkflow(
-                    query_engine=self._query_engine,
-                    response_synthesizer=self._response_synthesizer
-                )
-                logger.info("RAG Workflow initialized with QueryEngine and Response Synthesizer")
-                log_service_health("workflow", "initialized")
-            else:
-                logger.warning("Cannot initialize Workflow: query engine not available")
-                log_service_health("workflow", "not_initialized")
-
             self._initialized = True
-            duration = time.time() - start_time
-
-            logger.info(
-                "RAG services initialization complete",
-                duration_ms=duration * 1000,
-                indexes_loaded=self._indexes_loaded
-            )
-
-            metrics.histogram("orchestrator_init_duration_ms", duration * 1000)
-
-        except (ImportError, ModuleNotFoundError) as e:
-            error_msg = f"Missing required dependency: {e}"
-            logger.error("Failed to initialize RAG services", error=error_msg, exc_info=True)
-            log_service_health("orchestrator", "error", error=error_msg)
-            raise ServiceInitializationError("orchestrator", error_msg) from e
-
-        except (FileNotFoundError, IOError) as e:
-            error_msg = f"File system error: {e}"
-            logger.error("Failed to initialize RAG services", error=error_msg, exc_info=True)
-            log_service_health("orchestrator", "error", error=error_msg)
-            raise ServiceInitializationError("orchestrator", error_msg) from e
 
         except Exception as e:
-            error_msg = f"Unexpected error during initialization: {e}"
-            logger.error("Failed to initialize RAG services", error=error_msg, exc_info=True)
-            log_service_health("orchestrator", "error", error=error_msg)
-            raise ServiceInitializationError("orchestrator", error_msg) from e
+            raise ServiceInitializationError("orchestrator", str(e)) from e
 
     def _load_vector_store(
         self,
         faiss_index_path: Path,
         embedding_model_name: str,
-    ) -> tuple[Optional[FaissVectorStore], Optional[StorageContext], Optional[VectorStoreIndex], bool]:
-        """Load an existing FAISS vector store or create an empty one.
-
-        Extracts duplicated load logic shared between `_initialize_services`
-        and `reload_indexes` into a single source of truth.
+    ) -> tuple[FaissVectorStore | None, StorageContext | None, VectorStoreIndex | None, bool]:
+        """
+        Load an existing FAISS vector store or initialize an empty HNSW index.
 
         Args:
-            faiss_index_path: Filesystem path to the persisted FAISS index directory.
-            embedding_model_name: Name of the active embedding model, used to
-                determine the correct vector dimension when creating a new index.
+            faiss_index_path: Path to directory containing persisted FAISS index files.
+            embedding_model_name: Name of the embedding model to resolve vector dimension.
 
         Returns:
-            A 4-tuple of ``(vector_store, storage_context, index, indexes_loaded)``.
-            ``indexes_loaded`` is ``True`` only when an existing index was found
-            on disk and loaded successfully.
+            Tuple of (vector_store, storage_context, index, indexes_loaded).
         """
+        faiss_config = get_faiss_config(self.config_path)
+        hnsw_m = int(faiss_config.get("hnsw_m", 32))
+
         try:
+            from llama_index.core import load_index_from_storage
+
+            if not (faiss_index_path / "default__vector_store.json").exists():
+                raise FileNotFoundError(f"FAISS index not found at {faiss_index_path}")
+
             vector_store = FaissVectorStore.from_persist_dir(str(faiss_index_path))
             storage_context = StorageContext.from_defaults(
                 vector_store=vector_store,
-                persist_dir=str(faiss_index_path)
+                persist_dir=str(faiss_index_path),
             )
-            index = VectorStoreIndex.from_vector_store(
-                vector_store=vector_store,
-                storage_context=storage_context
-            )
-            logger.info("FAISS index loaded successfully")
-            log_service_health("vector_store", "loaded")
+            index = cast(VectorStoreIndex, load_index_from_storage(storage_context=storage_context))
+            logger.info(f"Loaded existing FAISS vector store from {faiss_index_path}")
             return vector_store, storage_context, index, True
 
-        except (ValueError, FileNotFoundError) as e:
-            logger.warning(f"No existing FAISS index found: {e}, creating empty index")
-            import faiss
-
-            # Resolve dimension from the known model map; fall back to the default
-            # so a wrong model name produces a clear log warning rather than a crash.
+        except (ValueError, FileNotFoundError, OSError, RuntimeError) as e:
+            logger.info(f"Initializing new empty FAISS HNSW vector store ({e})")
             embedding_dimension = _EMBEDDING_DIMENSION_BY_MODEL.get(
                 embedding_model_name, _FALLBACK_EMBEDDING_DIMENSION
             )
-            if embedding_model_name not in _EMBEDDING_DIMENSION_BY_MODEL:
-                logger.warning(
-                    "Unknown embedding model — using fallback FAISS dimension."
-                    " Add the model to _EMBEDDING_DIMENSION_BY_MODEL if the dimension is wrong.",
-                    model=embedding_model_name,
-                    fallback_dimension=embedding_dimension,
-                )
-
-            # Inner product for cosine similarity (vectors are L2-normalised by sentence-transformers)
-            faiss_index = faiss.IndexFlatIP(embedding_dimension)
+            faiss_index = faiss.IndexHNSWFlat(
+                embedding_dimension, hnsw_m, faiss.METRIC_INNER_PRODUCT
+            )
             vector_store = FaissVectorStore(faiss_index=faiss_index)
             storage_context = StorageContext.from_defaults(vector_store=vector_store)
-            index = VectorStoreIndex.from_vector_store(
-                vector_store=vector_store,
-                storage_context=storage_context
+            index = VectorStoreIndex(
+                nodes=[],
+                storage_context=storage_context,
             )
-            log_service_health("vector_store", "created_empty")
             return vector_store, storage_context, index, False
 
-    def _load_bm25_retriever(self, bm25_index_path: Path) -> Optional[Any]:
-        """Load the BM25 retriever from disk if the index exists.
-
-        Extracts duplicated load logic shared between `_initialize_services`
-        and `reload_indexes` into a single source of truth.
+    def _load_bm25_retriever(self, bm25_index_path: Path) -> BM25Retriever | None:
+        """
+        Load persisted BM25 retriever from disk.
 
         Args:
-            bm25_index_path: Filesystem path to the persisted BM25 index directory.
+            bm25_index_path: Path to persisted BM25 directory.
 
         Returns:
-            A loaded ``BM25Retriever`` instance, or ``None`` if the index was
-            not found or failed to load.
+            Instantiated BM25Retriever or None if not found or corrupted.
         """
         if not bm25_index_path.exists():
-            logger.warning(f"BM25 index not found at {bm25_index_path}")
-            log_service_health("bm25_retriever", "not_found")
+            return None
+        try:
+            return BM25Retriever.from_persist_dir(str(bm25_index_path))
+        except (OSError, ValueError, KeyError) as e:
+            logger.warning(f"Failed to load BM25 retriever from {bm25_index_path}: {e}")
             return None
 
-        try:
-            from llama_index.retrievers.bm25 import BM25Retriever
-            retriever = BM25Retriever.from_persist_dir(str(bm25_index_path))
-            logger.info("BM25 retriever loaded successfully")
-            log_service_health("bm25_retriever", "loaded")
-            return retriever
-        except Exception as e:
-            logger.warning(f"Failed to load BM25 retriever: {e}")
-            log_service_health("bm25_retriever", "load_failed")
-            return None
+    def get_indexed_file_hashes(self) -> set[str]:
+        """
+        Retrieve the set of unique SHA-256 file hashes currently indexed.
+
+        Inspects the active docstore and manifest.json if present.
+
+        Returns:
+            Set of lowercase 64-character hexadecimal SHA-256 digests.
+        """
+        hashes: set[str] = set()
+        if self._index is not None and hasattr(self._index, "docstore") and self._index.docstore is not None:
+            for doc in self._index.docstore.docs.values():
+                h = doc.metadata.get("file_hash")
+                if h:
+                    hashes.add(str(h).lower())
+
+        manifest_path = self.persist_dir / "manifest.json"
+        if manifest_path.exists():
+            try:
+                data = json.loads(manifest_path.read_text(encoding="utf-8"))
+                for h in data.get("indexed_file_hashes", []):
+                    hashes.add(str(h).lower())
+            except (OSError, ValueError, json.JSONDecodeError) as e:
+                logger.debug(f"Could not load indexed hashes from manifest: {e}")
+
+        return hashes
+
+    def ingest_documents(
+        self,
+        directory: Path | str,
+        recursive: bool = True,
+        supported_extensions: tuple[str, ...] = (
+            ".pdf",
+            ".txt",
+            ".md",
+            ".markdown",
+            ".png",
+            ".jpg",
+            ".jpeg",
+        ),
+    ) -> list[TextNode]:
+        """
+        Ingest documents from a directory using DoclingPipeline with duplicate detection.
+
+        Checks SHA-256 file hashes against already indexed documents to skip duplicates
+        before parsing. Parses non-duplicate files through DoclingPipeline.ingest_file()
+        and sanitizes node metadata to strictly conform to the 5-field schema.
+
+        Args:
+            directory: Directory path containing source documents.
+            recursive: Whether to scan directory recursively.
+            supported_extensions: File extensions to process.
+
+        Returns:
+            List of sanitized TextNodes ready for indexing.
+        """
+        dir_path = Path(directory)
+        if not dir_path.exists():
+            raise FileNotFoundError(f"Directory not found: {dir_path}")
+        if not dir_path.is_dir():
+            raise ValueError(f"Path is not a directory: {dir_path}")
+
+        candidates = list(dir_path.rglob("*")) if recursive else list(dir_path.glob("*"))
+        files = [p for p in candidates if p.is_file() and p.suffix.lower() in supported_extensions]
+        files.sort()
+
+        indexed_hashes = self.get_indexed_file_hashes()
+        pipeline = DoclingPipeline(config_path=self.config_path)
+
+        all_nodes: list[TextNode] = []
+        session_hashes: set[str] = set()
+
+        for file_path in files:
+            try:
+                file_hash = compute_file_hash(file_path)
+                if is_duplicate_hash(file_hash, indexed_hashes) or file_hash in session_hashes:
+                    logger.info(f"Skipping duplicate file: {file_path.name} (hash: {file_hash[:8]}...)")
+                    continue
+
+                session_hashes.add(file_hash)
+                nodes = pipeline.ingest_file(file_path)
+                for node in nodes:
+                    sanitize_node_metadata(node)
+                    all_nodes.append(node)
+            except (OSError, ValueError, RuntimeError) as e:
+                logger.warning(f"Error ingesting file {file_path}: {e}")
+                continue
+
+        logger.info(f"Ingested {len(all_nodes)} nodes from {len(files)} files in {dir_path}")
+        return all_nodes
+
+    def ingest(self, data_dir: str) -> list[BaseNode]:
+        """
+        Backward-compatible document ingestion alias delegating to ingest_documents.
+
+        Args:
+            data_dir: Path string to directory containing document files.
+
+        Returns:
+            List of BaseNode instances conforming to the strict metadata schema.
+        """
+        nodes = self.ingest_documents(directory=Path(data_dir))
+        return list(nodes)
+
+    def _generate_manifest(self, directory: Path) -> dict[str, Any]:
+        """
+        Generate a manifest dictionary containing index metadata and SHA-256 file checksums.
+
+        Args:
+            directory: Directory containing index files to checksum.
+
+        Returns:
+            Manifest dictionary conforming to Tech Spec §5.2.
+        """
+        embed_config = get_embedding_config(self.config_path)
+        model_name = str(embed_config.get("embedding_model", "BAAI/bge-small-en-v1.5"))
+        dim = _EMBEDDING_DIMENSION_BY_MODEL.get(model_name, _FALLBACK_EMBEDDING_DIMENSION)
+
+        total_nodes = 0
+        indexed_hashes: set[str] = set()
+        if self._index is not None and hasattr(self._index, "docstore") and self._index.docstore is not None:
+            docs = self._index.docstore.docs
+            total_nodes = len(docs)
+            for d in docs.values():
+                h = d.metadata.get("file_hash")
+                if h:
+                    indexed_hashes.add(str(h).lower())
+
+        files_map: dict[str, str] = {}
+        if directory.exists():
+            for p in directory.rglob("*"):
+                if p.is_file() and p.name != "manifest.json":
+                    rel_path = p.relative_to(directory).as_posix()
+                    file_bytes = p.read_bytes()
+                    file_sha256 = hashlib.sha256(file_bytes).hexdigest()
+                    files_map[rel_path] = file_sha256
+                    # Also record top-level filename for direct lookup
+                    files_map[p.name] = file_sha256
+
+        manifest: dict[str, Any] = {
+            "version": "1.0",
+            "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+            "model_name": model_name,
+            "embedding_dimension": dim,
+            "total_nodes": total_nodes,
+            "indexed_file_hashes": sorted(indexed_hashes),
+            "files": files_map,
+        }
+        return manifest
+
+    def create_snapshot(self, snapshot_dir: Path | None = None) -> Path:
+        """
+        Create a versioned snapshot directory containing index artifacts and manifest.json.
+
+        Args:
+            snapshot_dir: Optional custom snapshot destination directory. If None,
+                creates a versioned directory under 'data/snapshots/snapshot_<timestamp>/'.
+
+        Returns:
+            Path to the created snapshot directory.
+        """
+        if snapshot_dir is None:
+            ts = datetime.datetime.now(datetime.timezone.utc).strftime("%Y%m%d_%H%M%S")
+            target_dir = Path("data/snapshots") / f"snapshot_{ts}"
+        else:
+            target_dir = Path(snapshot_dir)
+
+        target_dir.mkdir(parents=True, exist_ok=True)
+
+        if self.persist_dir.exists():
+            for item in self.persist_dir.iterdir():
+                if item.is_dir():
+                    shutil.copytree(item, target_dir / item.name, dirs_exist_ok=True)
+                elif item.is_file() and item.name != "manifest.json":
+                    shutil.copy2(item, target_dir / item.name)
+
+        manifest_data = self._generate_manifest(target_dir)
+        manifest_file = target_dir / "manifest.json"
+        manifest_file.write_text(json.dumps(manifest_data, indent=2), encoding="utf-8")
+
+        # Also write active manifest in persist_dir
+        if self.persist_dir.exists():
+            active_manifest = self.persist_dir / "manifest.json"
+            active_manifest.write_text(json.dumps(manifest_data, indent=2), encoding="utf-8")
+
+        logger.info(f"Created index snapshot at {target_dir}")
+        return target_dir
+
+    def index_nodes(self, nodes: list[BaseNode]) -> None:
+        """
+        Incrementally append nodes to FAISS HNSW and BM25 indexes with duplicate prevention.
+
+        Filters out nodes from files that are already indexed or nodes with matching node_ids.
+        Appends new vector embeddings to the FAISS HNSW graph without rebuilding.
+        Updates BM25 using cumulative nodes from docstore so prior documents are preserved.
+        Persists updated indexes and writes manifest.json.
+
+        Args:
+            nodes: List of BaseNode instances to append.
+        """
+        if not nodes:
+            return
+
+        if not self._initialized:
+            self._initialize_services()
+
+        storage_context = self._storage_context or (
+            getattr(self._index, "storage_context", None) if self._index else None
+        )
+        if self._index is None or storage_context is None:
+            raise RuntimeError("RAG index is not initialized")
+
+        # Duplicate filtering tier 2: check against existing docstore hashes and node IDs
+        already_indexed_hashes = self.get_indexed_file_hashes()
+        existing_node_ids = set(self._index.docstore.docs.keys())
+
+        nodes_to_insert: list[BaseNode] = []
+        for node in nodes:
+            node_hash = node.metadata.get("file_hash")
+            if node_hash and str(node_hash).lower() in already_indexed_hashes:
+                continue
+            if node.node_id in existing_node_ids:
+                continue
+            try:
+                sanitize_node_metadata(node)
+            except ValueError:
+                pass
+            nodes_to_insert.append(node)
+
+        if not nodes_to_insert:
+            logger.info("No new nodes to index (all were duplicates or already indexed)")
+            return
+
+        self.persist_dir.mkdir(parents=True, exist_ok=True)
+        faiss_index_path = self.persist_dir / "faiss_index"
+        bm25_index_path = self.persist_dir / "bm25_index"
+
+        # Incrementally append nodes to FAISS HNSW index and docstore
+        self._index.insert_nodes(nodes_to_insert)
+        self._index.storage_context.persist(persist_dir=str(faiss_index_path))
+
+        # Re-index BM25 using cumulative nodes from docstore to ensure no docs are lost
+        cumulative_nodes = list(self._index.docstore.docs.values())
+        bm25_config = get_bm25_config(self.config_path)
+        similarity_top_k = int(bm25_config.get("similarity_top_k", 20))
+
+        self._bm25_retriever = BM25Retriever.from_defaults(
+            nodes=cumulative_nodes,
+            similarity_top_k=similarity_top_k,
+            verbose=False,
+        )
+        bm25_index_path.mkdir(parents=True, exist_ok=True)
+        self._bm25_retriever.persist(str(bm25_index_path))
+        self._indexes_loaded = True
+
+        # Generate and save manifest.json
+        manifest_data = self._generate_manifest(self.persist_dir)
+        (self.persist_dir / "manifest.json").write_text(
+            json.dumps(manifest_data, indent=2), encoding="utf-8"
+        )
+        logger.info(
+            f"Successfully indexed {len(nodes_to_insert)} nodes. Total nodes: {len(cumulative_nodes)}"
+        )
+
+    async def query_async(
+        self,
+        query: str,
+        top_k: int = 5,
+        search_type: str = "hybrid",
+        token_budget: int = 4000,
+    ) -> MCPContextPayload:
+        """Execute an asynchronous query against the indexed documents.
+
+        Args:
+            query: The user query string.
+            top_k: Number of context items to return.
+            search_type: Search modality: 'hybrid', 'semantic', or 'keyword'.
+            token_budget: Upper limit for token consumption in the payload.
+
+        Returns:
+            MCPContextPayload containing retrieved and reranked context items.
+
+        Raises:
+            RuntimeError: If services are not initialized or indexes are not loaded.
+        """
+        if not self._initialized:
+            raise RuntimeError("RAG services not initialized")
+        if not self._indexes_loaded or not self._index:
+            raise RuntimeError("Indexes not loaded")
+
+        total_docs = top_k
+        if self._index and hasattr(self._index, "docstore"):
+            try:
+                total_docs = len(self._index.docstore.docs)
+            except (TypeError, AttributeError):
+                total_docs = top_k
+        candidate_k = max(1, min(total_docs, max(top_k * 2, 20)))
+        vector_retriever = self._index.as_retriever(similarity_top_k=candidate_k)
+
+        retriever: BaseRetriever
+        if search_type == "hybrid" and self._bm25_retriever:
+            retriever = QueryFusionRetriever(
+                [vector_retriever, self._bm25_retriever],
+                similarity_top_k=candidate_k,
+                num_queries=1,
+                mode=FUSION_MODES.RECIPROCAL_RANK,
+            )
+        elif search_type == "keyword" and self._bm25_retriever:
+            self._bm25_retriever.similarity_top_k = candidate_k
+            retriever = self._bm25_retriever
+        else:
+            retriever = vector_retriever
+
+        node_postprocessors: list[BaseNodePostprocessor] = []
+        if self._reranker is not None:
+            node_postprocessors.append(self._reranker)
+        node_postprocessors.extend([
+            MetadataBoostPostprocessor(config_path=self.config_path),
+            SimilarityPostprocessor(similarity_cutoff=0.6),
+        ])
+
+        synthesizer = get_response_synthesizer(response_mode=ResponseMode.NO_TEXT)
+        query_engine = RetrieverQueryEngine(
+            retriever=retriever,
+            response_synthesizer=synthesizer,
+            node_postprocessors=node_postprocessors,
+        )
+
+        response = await query_engine.aquery(query)
+
+        context_items: list[ContextItem] = []
+        for node in response.source_nodes[:top_k]:
+            context_items.append(
+                ContextItem(
+                    id=node.node.node_id,
+                    text=node.node.get_content(),
+                    score=max(0.0, min(1.0, node.score or 0.0)),
+                    meta=node.node.metadata,
+                )
+            )
+
+        return MCPContextPayload(
+            schema_version="1.0",
+            context=context_items,
+            query=query,
+            token_budget=token_budget,
+            provenance={
+                "selected_count": len(context_items),
+                "total_tokens": sum(len(c.text) // 4 for c in context_items),
+                "selection_method": "query_engine",
+            },
+        )
 
     def query(
         self,
         query: str,
         top_k: int = 5,
         search_type: str = "hybrid",
-        token_budget: int = 4000
-    ) -> Any:
-        """
-        Execute a complete query pipeline: retrieve, rerank, assemble context.
-        
-        Args:
-            query: The search query string
-            top_k: Number of top results to return after reranking
-            search_type: Type of search ("semantic", "keyword", "hybrid")
-            token_budget: Maximum token budget for assembled context
-            
-        Returns:
-            MCPContextPayload containing query results
-        
-        Raises:
-            RuntimeError: If services are not initialized or indexes not loaded
-        """
-        if not self._initialized:
-            raise RuntimeError("RAG services not initialized")
-        
-        if not self._indexes_loaded:
-            raise RuntimeError("Indexes not loaded")
-        
-        if not self._query_engine:
-            raise RuntimeError("Query engine not available")
-        
-        start_time = time.time()
-        request_id = f"query_{int(time.time() * 1000)}"
-        
-        logger.info(
-            "Starting query pipeline",
-            request_id=request_id,
-            query=query,
-            top_k=top_k,
-            search_type=search_type
-        )
-        
-        try:
-            # Step 1: Retrieve documents using QueryEngine
-            initial_k = top_k * 4  # Over-retrieve for better selection
-            retrieve_start = time.time()
-            
-            # Use QueryEngine to get response with nodes
-            response = self._query_engine.query(query)
-            retrieved_nodes = response.source_nodes[:initial_k] if response.source_nodes else []
-            
-            retrieve_duration = time.time() - retrieve_start
-            
-            logger.info(
-                "Retrieval complete",
-                request_id=request_id,
-                candidates=len(retrieved_nodes),
-                duration_ms=retrieve_duration * 1000
-            )
-            
-            # Step 2: Results already postprocessed by QueryEngine
-            # (metadata boost + cross-encoder reranking via native LlamaIndex postprocessors)
-            # Limit to final top_k
-            final_nodes = retrieved_nodes[:top_k]
-            
-            logger.info(
-                "Postprocessing complete (via QueryEngine)",
-                request_id=request_id,
-                results=len(final_nodes)
-            )
-            
-            # Step 3: Use Response Synthesizer to assemble context
-            assemble_start = time.time()
-            
-            if self._response_synthesizer:
-                # Use Response Synthesizer to generate context
-                # Note: synthesize method expects NodeWithScore objects, which final_nodes are
-                response = self._response_synthesizer.synthesize(
-                    query_str=query,
-                    nodes=final_nodes
-                )
-                
-                # Create MCP-compatible payload from Response Synthesizer output
-                from .libs.schemas.mcp_schemas import MCPContextPayload, ContextItem
-                context_items = []
-                for node_with_score in final_nodes:
-                    item = ContextItem(
-                        id=node_with_score.node.node_id or node_with_score.node.id_,
-                        text=node_with_score.node.get_content(),
-                        score=node_with_score.score,
-                        meta=node_with_score.node.metadata
-                    )
-                    context_items.append(item)
-                
-                # Estimate tokens (rough approximation: 4 chars per token)
-                total_chars = sum(len(item.text) for item in context_items)
-                estimated_tokens = total_chars // 4
+        token_budget: int = 4000,
+    ) -> MCPContextPayload:
+        """Execute a synchronous query against the indexed documents.
 
-                context_payload = MCPContextPayload(
-                    schema_version="1.0",
-                    context=context_items,
-                    query=query,
-                    token_budget=token_budget,
-                    provenance={
-                        'total_candidates': len(retrieved_nodes),
-                        'selected_count': len(context_items),
-                        'total_tokens': estimated_tokens,
-                        'selection_method': 'response_synthesizer_compact'
-                    }
-                )
-            else:
-                # Fallback when response_synthesizer is unavailable: build context
-                # directly from the retrieved nodes (NodeWithScore objects).
-                from .libs.schemas.mcp_schemas import MCPContextPayload, ContextItem
-                context_items = [
-                    ContextItem(
-                        id=node.node.node_id or node.node.id_,
-                        text=node.node.get_content(),
-                        score=node.score,
-                        meta=node.node.metadata
-                    )
-                    for node in final_nodes
-                ]
-                context_payload = MCPContextPayload(
-                    query=query,
-                    context=context_items,
-                    schema_version="1.0",
-                    token_budget=token_budget
-                )
-            
-            assemble_duration = time.time() - assemble_start
-            total_duration = time.time() - start_time
-            
-            # Update provenance with timing stats
-            if hasattr(context_payload, 'provenance'):
-                context_payload.provenance.update({
-                    'retrieve_duration_ms': round(retrieve_duration * 1000, 2),
-                    'assemble_duration_ms': round(assemble_duration * 1000, 2),
-                    'total_duration_ms': round(total_duration * 1000, 2),
-                    'candidates_retrieved': len(retrieved_nodes),
-                    'results_postprocessed': len(final_nodes),
-                    'search_type': search_type,
-                    'note': 'Query executed via native LlamaIndex QueryEngine'
-                })
-            
-            logger.info(
-                "Query pipeline complete",
-                request_id=request_id,
-                results=len(context_payload.context),
-                tokens=context_payload.total_tokens_estimate(),
-                duration_ms=total_duration * 1000
-            )
-            
-            # Record metrics
-            metrics.increment("orchestrator_queries_total")
-            metrics.histogram("orchestrator_query_duration_ms", total_duration * 1000)
-            metrics.histogram("orchestrator_retrieve_duration_ms", retrieve_duration * 1000)
-            metrics.gauge("orchestrator_results_count", len(context_payload.context))
-            
-            return context_payload
-            
-        except ValueError as e:
-            # Query validation or parameter errors
-            duration = time.time() - start_time
-            logger.error(
-                "Query pipeline failed: invalid parameters",
-                request_id=request_id,
-                query=query,
-                error=str(e),
-                duration_ms=duration * 1000
-            )
-            metrics.increment("orchestrator_query_errors_total")
-            raise RetrievalError(query, f"Invalid parameters: {e}") from e
-        
-        except (KeyError, AttributeError) as e:
-            # Missing data or attribute errors
-            duration = time.time() - start_time
-            logger.error(
-                "Query pipeline failed: data structure error",
-                request_id=request_id,
-                query=query,
-                error=str(e),
-                duration_ms=duration * 1000,
-                exc_info=True
-            )
-            metrics.increment("orchestrator_query_errors_total")
-            raise RetrievalError(query, f"Data structure error: {e}") from e
-        
-    async def query_async(
-        self,
-        query: str,
-        top_k: int = 5,
-        search_type: str = "hybrid",
-        token_budget: int = 4000
-    ) -> Any:
-        """
-        Execute query pipeline using LlamaIndex Workflow (async).
-        
         Args:
-            query: The search query string
-            top_k: Number of top results to return after reranking
-            search_type: Type of search ("semantic", "keyword", "hybrid")
-            token_budget: Maximum token budget for assembled context
-            
+            query: The user query string.
+            top_k: Number of context items to return.
+            search_type: Search modality: 'hybrid', 'semantic', or 'keyword'.
+            token_budget: Upper limit for token consumption in the payload.
+
         Returns:
-            MCPContextPayload containing query results
+            MCPContextPayload containing retrieved context items.
         """
-        if not self._workflow:
-            raise RuntimeError("RAG Workflow not initialized")
-        
-        start_time = time.time()
-        request_id = f"query_{int(time.time() * 1000)}"
-        
-        logger.info(
-            "Starting async query pipeline with Workflow",
-            request_id=request_id,
-            query=query,
-            top_k=top_k,
-            search_type=search_type
-        )
-        
-        try:
-            # Run workflow
-            result = await self._workflow.run(
-                query=query,
-                top_k=top_k,
-                search_type=search_type,
-                token_budget=token_budget
-            )
-            
-            context_payload = result
-            
-            total_duration = time.time() - start_time
-            
-            # Update provenance with timing stats
-            if hasattr(context_payload, 'provenance'):
-                context_payload.provenance.update({
-                    'total_duration_ms': round(total_duration * 1000, 2),
-                    'search_type': search_type,
-                    'note': 'Query executed via LlamaIndex Workflow'
-                })
-            
-            logger.info(
-                "Async query pipeline complete",
-                request_id=request_id,
-                results=len(context_payload.context),
-                tokens=context_payload.total_tokens_estimate(),
-                duration_ms=total_duration * 1000
-            )
-            
-            return context_payload
-            
-        except Exception as e:
-            duration = time.time() - start_time
-            logger.error(
-                "Async query pipeline failed",
-                request_id=request_id,
-                query=query,
-                error=str(e),
-                duration_ms=duration * 1000,
-                exc_info=True
-            )
-            raise RetrievalError(query, f"Workflow query failed: {e}") from e
+        return asyncio.run(self.query_async(query, top_k, search_type, token_budget))
 
     def search_documents(
         self,
         query: str,
         top_k: int = 10,
-        search_type: str = "semantic"
-    ) -> List[Dict[str, Any]]:
-        """
-        Simple document search without reranking or context assembly.
-        
+        search_type: str = "semantic",
+    ) -> list[dict[str, Any]]:
+        """Search documents and return structured dictionaries with full metadata.
+
         Args:
-            query: The search query string
-            top_k: Number of results to return
-            search_type: Type of search ("semantic", "keyword", "hybrid")
-            
-        Returns:
-            List of document dictionaries with text, score, and metadata
-        """
-        if not self._initialized or not self._query_engine:
-            raise RuntimeError("RAG services not initialized")
-        
-        logger.info(
-            "Executing document search",
-            query=query,
-            top_k=top_k,
-            search_type=search_type
-        )
-        
-        try:
-            # Use QueryEngine for search
-            response = self._query_engine.query(query)
-            nodes = response.source_nodes[:top_k] if response.source_nodes else []
-            
-            results = []
-            for node in nodes:
-                result = {
-                    'text': node.text,
-                    'score': getattr(node, 'score', 0.0),
-                    'metadata': node.metadata,
-                    'node_id': getattr(node, 'node_id', getattr(node, 'id_', ''))
-                }
-                results.append(result)
-            
-            logger.info(
-                "Document search complete",
-                query=query,
-                results=len(results)
-            )
-            
-            return results
-            
-        except ValueError as e:
-            logger.error("Document search failed: invalid parameters", query=query, error=str(e))
-            raise RetrievalError(query, f"Invalid parameters: {e}") from e
-        
-        except Exception as e:
-            logger.error("Document search failed: unexpected error", query=query, error=str(e), exc_info=True)
-            raise RetrievalError(query, f"Search failed: {e}") from e
+            query: Search query string.
+            top_k: Maximum number of results to return.
+            search_type: Search modality: 'semantic', 'hybrid', or 'keyword'.
 
-    def get_health_status(self) -> Dict[str, Any]:
-        """
-        Get comprehensive health status of all RAG services.
-        
         Returns:
-            Dictionary with health status of each service and overall system status
+            List of dictionaries containing document text, score, id, and metadata.
+
+        Raises:
+            RuntimeError: If services are not initialized or indexes are not loaded.
         """
-        status = {
-            'overall_status': 'healthy' if self._indexes_loaded else 'degraded',
-            'initialized': self._initialized,
-            'indexes_loaded': self._indexes_loaded,
-            'services': {
-                'embed_model': {
-                    'available': Settings.embed_model is not None,
-                    'status': 'healthy' if Settings.embed_model else 'not_initialized'
-                },
-                'vector_store': {
-                    'available': self._vector_store is not None,
-                    'index_loaded': self._index is not None,
-                    'status': (
-                        'healthy' if self._index else 'degraded'
-                    )
-                },
-                'bm25_retriever': {
-                    'available': self._bm25_retriever is not None,
-                    'status': 'healthy' if self._bm25_retriever else 'not_loaded'
-                },
-                'retriever': {
-                    'available': self._query_engine is not None,
-                    'status': 'healthy' if self._query_engine else 'not_initialized'
-                },
-                'postprocessors': {
-                    'available': self._query_engine is not None,
-                    'status': 'integrated_in_query_engine',
-                    'note': 'Metadata boost and reranking via native LlamaIndex postprocessors'
-                },
-                'assembler': {
-                    'available': self._response_synthesizer is not None,
-                    'status': 'healthy' if self._response_synthesizer else 'not_initialized',
-                    'note': 'Replaced with native LlamaIndex Response Synthesizer'
-                },
-                'workflow': {
-                    'available': self._workflow is not None,
-                    'status': 'healthy' if self._workflow else 'not_initialized'
+        if not self._initialized or not self._index:
+            raise RuntimeError("RAG services not initialized or indexes not loaded")
+
+        total_docs = top_k
+        if self._index and hasattr(self._index, "docstore"):
+            try:
+                total_docs = len(self._index.docstore.docs)
+            except (TypeError, AttributeError):
+                total_docs = top_k
+        candidate_k = max(1, min(total_docs, max(top_k * 3, 20)))
+        vector_retriever = self._index.as_retriever(similarity_top_k=candidate_k)
+        retriever: BaseRetriever
+        if search_type == "hybrid" and self._bm25_retriever:
+            retriever = QueryFusionRetriever(
+                [vector_retriever, self._bm25_retriever],
+                similarity_top_k=candidate_k,
+                num_queries=1,
+                mode=FUSION_MODES.RECIPROCAL_RANK,
+            )
+        elif search_type == "keyword" and self._bm25_retriever:
+            self._bm25_retriever.similarity_top_k = candidate_k
+            retriever = self._bm25_retriever
+        else:
+            retriever = vector_retriever
+
+        query_bundle = QueryBundle(query)
+        nodes = retriever.retrieve(query_bundle)
+
+        if self._reranker is not None:
+            nodes = self._reranker.postprocess_nodes(nodes, query_bundle)
+
+        postprocessor = MetadataBoostPostprocessor(config_path=self.config_path)
+        nodes = postprocessor.postprocess_nodes(nodes, query_bundle)
+
+        final_nodes = nodes[:top_k]
+
+        results: list[dict[str, Any]] = []
+        for node in final_nodes:
+            results.append(
+                {
+                    "id": node.node.node_id,
+                    "node_id": node.node.node_id,
+                    "text": node.node.get_content(),
+                    "score": float(node.score) if node.score is not None else 0.0,
+                    "metadata": node.node.metadata,
                 }
+            )
+        return results
+
+    def get_health_status(self) -> dict[str, Any]:
+        """Return comprehensive health status of RAG services and vector store.
+
+        Returns:
+            Dictionary containing health status, initialization state, and service details.
+        """
+        return {
+            "overall_status": "healthy" if self._indexes_loaded else "degraded",
+            "initialized": self._initialized,
+            "indexes_loaded": self._indexes_loaded,
+            "services": {
+                "vector_store": {
+                    "available": self._vector_store is not None,
+                    "status": "healthy" if self._index else "degraded",
+                },
+                "bm25_retriever": {
+                    "available": self._bm25_retriever is not None,
+                    "status": "healthy" if self._bm25_retriever else "not_loaded",
+                },
+                "reranker": {
+                    "available": self._reranker is not None,
+                    "status": "healthy" if self._reranker else "not_configured",
+                },
             },
-            'persist_dir': str(self.persist_dir),
-            'config_path': self.config_path
+            "persist_dir": str(self.persist_dir),
         }
-        
-        overall_status: str = str(status['overall_status'])
-        log_service_health("orchestrator", overall_status)
-        
-        return status
-
-    def reload_indexes(self) -> bool:
-        """Reload indexes from disk.
-
-        Returns:
-            True if indexes were successfully reloaded, False otherwise.
-        """
-        logger.info("Reloading indexes")
-
-        try:
-            self._indexes_loaded = False
-
-            # Resolve the active embedding model name for dimension lookup
-            embedding_model_name: str = (
-                Settings.embed_model.model_name
-                if Settings.embed_model and hasattr(Settings.embed_model, "model_name")
-                else next(iter(_EMBEDDING_DIMENSION_BY_MODEL))
-            )
-
-            # Reload FAISS index via shared helper
-            faiss_index_path = self.persist_dir / "faiss_index"
-            self._vector_store, self._storage_context, self._index, self._indexes_loaded = (
-                self._load_vector_store(faiss_index_path, embedding_model_name)
-            )
-
-            if not self._indexes_loaded:
-                logger.error("Failed to reload FAISS index from disk")
-                return False
-
-            # Reload BM25 retriever via shared helper
-            bm25_index_path = self.persist_dir / "bm25_index"
-            self._bm25_retriever = self._load_bm25_retriever(bm25_index_path)
-
-            # Reinitialize query engine with the existing response synthesizer
-            if self._indexes_loaded and self._index:
-                from src.utils.config_loader import get_retriever_config
-                retriever_config = get_retriever_config(self.config_path)
-                semantic_top_k = retriever_config.get('semantic_top_k', 20)
-
-                self._query_engine = self._index.as_query_engine(
-                    similarity_top_k=semantic_top_k,
-                    response_synthesizer=self._response_synthesizer
-                )
-                logger.info("QueryEngine reinitialized")
-
-            # Reinitialize workflow
-            if self._indexes_loaded and self._query_engine:
-                self._workflow = RAGWorkflow(
-                    query_engine=self._query_engine,
-                    response_synthesizer=self._response_synthesizer
-                )
-                logger.info("Workflow reinitialized with QueryEngine and Response Synthesizer")
-            else:
-                logger.warning("Cannot reinitialize Workflow: query engine not available")
-
-            logger.info("Index reload complete", success=self._indexes_loaded)
-            return self._indexes_loaded
-
-        except FileNotFoundError as e:
-            logger.error("Index reload failed: index files not found", error=str(e))
-            return False
-
-        except (IOError, OSError) as e:
-            logger.error("Index reload failed: file system error", error=str(e), exc_info=True)
-            return False
-
-        except Exception as e:
-            logger.error("Index reload failed: unexpected error", error=str(e), exc_info=True)
-            return False
 
 
-# Global orchestrator instance — created once at import time.
-# CPython's GIL guarantees that module-level assignments are atomic,
-# so no additional locking is needed for this single-user local deployment.
-_orchestrator_instance: RAGOrchestrator = RAGOrchestrator()
+_orchestrator_instance: RAGOrchestrator | None = None
 
 
-def get_orchestrator() -> RAGOrchestrator:
-    """
-    Return the module-level RAG orchestrator singleton.
+def get_orchestrator(
+    config_path: str = "config/settings.yaml",
+    persist_dir: str = "data/index",
+) -> RAGOrchestrator:
+    """Retrieve or initialize the singleton RAGOrchestrator instance.
 
-    The instance is created once at import time, which is thread-safe under
-    CPython. Configuration and index paths are read from ``config/settings.yaml``
-    via the orchestrator's own initialisation logic.
+    Args:
+        config_path: Path to the configuration YAML file.
+        persist_dir: Directory where index files are persisted.
 
     Returns:
-        The global ``RAGOrchestrator`` instance.
+        The singleton RAGOrchestrator instance.
     """
+    global _orchestrator_instance
+    if _orchestrator_instance is None:
+        _orchestrator_instance = RAGOrchestrator(
+            config_path=config_path,
+            persist_dir=persist_dir,
+        )
     return _orchestrator_instance
