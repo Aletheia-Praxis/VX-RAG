@@ -7,13 +7,17 @@ Provides command-line tools for ingestion, indexing, and querying.
 from __future__ import annotations
 
 import argparse
-import json
 import sys
 import time
 from pathlib import Path
-from typing import cast
 
-from src.rag.orchestrator import get_orchestrator
+import duckdb
+
+from src.rag.orchestrator import (
+    get_orchestrator,
+    load_intermediate_nodes,
+    persist_intermediate_nodes,
+)
 from src.utils.logging_config import get_logger, request_context
 from src.utils.metrics import get_metrics
 
@@ -84,13 +88,14 @@ def handle_ingest(args: argparse.Namespace) -> None:
         print(f"Ingesting documents from {args.data_dir}...")
         nodes = orchestrator.ingest(args.data_dir)
 
-        # Save nodes to JSON in processed directory
+        # Save nodes to DuckDB in processed directory to avoid Windows Defender file locking on plaintext JSON
         processed_dir = data_dir.parent / "processed"
         processed_dir.mkdir(parents=True, exist_ok=True)
-        nodes_file = processed_dir / "nodes.json"
-
-        with open(nodes_file, "w", encoding="utf-8") as f:
-            json.dump([node.to_dict() for node in nodes], f, ensure_ascii=False, indent=2)
+        try:
+            nodes_file = persist_intermediate_nodes(nodes=list(nodes), directory=processed_dir)
+        except (duckdb.Error, OSError) as err:
+            print(f"Storage error persisting intermediate nodes: {err}", file=sys.stderr)
+            sys.exit(1)
 
         duration = time.time() - start_time
         print(f"Ingestion complete. Processed {len(nodes)} nodes in {duration:.2f}s.")
@@ -100,26 +105,31 @@ def handle_ingest(args: argparse.Namespace) -> None:
 def handle_index(args: argparse.Namespace) -> None:
     """Handle index command."""
     with request_context():
-        from llama_index.core.schema import BaseNode, TextNode
-
         start_time = time.time()
         orchestrator = get_orchestrator(config_path=args.config, persist_dir=args.persist_dir)
 
         processed_dir = Path(args.data_dir).parent / "processed"
-        nodes_file = processed_dir / "nodes.json"
+        nodes_db = processed_dir / "nodes.duckdb"
+        nodes_json = processed_dir / "nodes.json"
 
-        if not nodes_file.exists():
-            print(f"Nodes file not found at {nodes_file}. Run 'ingest' first.")
+        try:
+            nodes = load_intermediate_nodes(directory=processed_dir, legacy_fallback=True)
+        except FileNotFoundError:
+            print(
+                f"Nodes file not found at {nodes_db} or {nodes_json}. Run 'ingest' first.",
+                file=sys.stderr,
+            )
+            sys.exit(1)
+        except (duckdb.Error, OSError) as err:
+            print(f"Storage error loading intermediate nodes: {err}", file=sys.stderr)
             sys.exit(1)
 
-        print(f"Loading nodes from {nodes_file}...")
-        with open(nodes_file, "r", encoding="utf-8") as f:
-            nodes_data = json.load(f)
-
-        nodes: list[BaseNode] = [cast(BaseNode, TextNode.from_dict(nd)) for nd in nodes_data]
         print(f"Building index from {len(nodes)} nodes...")
-
-        orchestrator.index_nodes(nodes)
+        try:
+            orchestrator.index_nodes(nodes)
+        except (duckdb.Error, OSError) as err:
+            print(f"Storage error updating index: {err}", file=sys.stderr)
+            sys.exit(1)
 
         duration = time.time() - start_time
         print(f"Indexing complete in {duration:.2f}s.")
