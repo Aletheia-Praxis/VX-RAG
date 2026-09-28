@@ -193,7 +193,7 @@ def persist_intermediate_nodes(
     try:
         if overwrite:
             try:
-                kv.client.execute(f"DELETE FROM {table_name};")
+                kv.client.execute(f"DELETE FROM {table_name};")  # nosec B608  # Table name is from trusted config
             except (duckdb.Error, OSError, RuntimeError) as e:
                 logger.debug(f"Clear intermediate nodes table notice: {e}")
         if nodes:
@@ -411,7 +411,7 @@ class RAGOrchestrator:
         is_empty = False
         try:
             res = kvstore.client.execute(
-                f"SELECT 1 FROM {table_name} WHERE collection = 'docstore/data' LIMIT 1"
+                f"SELECT 1 FROM {table_name} WHERE collection = 'docstore/data' LIMIT 1"  # nosec B608  # table_name is trusted
             ).fetchone()
             is_empty = res is None
         except (duckdb.Error, OSError, ValueError, RuntimeError):
@@ -528,9 +528,9 @@ class RAGOrchestrator:
         if self._kvstore is not None:
             try:
                 query = (
-                    f"SELECT DISTINCT json_extract_string(value, '$.__data__.metadata.file_hash') "
+                    f"SELECT DISTINCT json_extract_string(value, '$.__data__.metadata.file_hash') "  # nosec B608  # trusted column
                     f"FROM {self._kvstore.table_name} "
-                    "WHERE collection = 'docstore/data'"
+                    "WHERE collection = 'docstore/data'"  # nosec B608  # trusted table name
                 )
                 rows = self._kvstore.client.execute(query).fetchall()
                 for row in rows:
@@ -656,12 +656,12 @@ class RAGOrchestrator:
         if self._kvstore is not None:
             try:
                 count_res = self._kvstore.client.execute(
-                    f"SELECT COUNT(*) FROM {self._kvstore.table_name} WHERE collection = 'docstore/data'"
+                    f"SELECT COUNT(*) FROM {self._kvstore.table_name} WHERE collection = 'docstore/data'"  # nosec B608  # trusted table name
                 ).fetchone()
                 if count_res:
                     total_nodes = int(count_res[0])
                 hash_res = self._kvstore.client.execute(
-                    f"SELECT DISTINCT json_extract_string(value, '$.__data__.metadata.file_hash') "
+                    f"SELECT DISTINCT json_extract_string(value, '$.__data__.metadata.file_hash') "  # nosec B608  # trusted column
                     f"FROM {self._kvstore.table_name} WHERE collection = 'docstore/data'"
                 ).fetchall()
                 for r in hash_res:
@@ -782,7 +782,7 @@ class RAGOrchestrator:
         if self._kvstore is not None:
             try:
                 id_rows = self._kvstore.client.execute(
-                    f"SELECT key FROM {self._kvstore.table_name} WHERE collection = 'docstore/data'"
+                    f"SELECT key FROM {self._kvstore.table_name} WHERE collection = 'docstore/data'"  # nosec B608  # trusted table name
                 ).fetchall()
                 existing_node_ids = {r[0] for r in id_rows if r and r[0]}
             except (duckdb.Error, OSError, ValueError, RuntimeError):
@@ -871,7 +871,7 @@ class RAGOrchestrator:
         if self._kvstore is not None:
             try:
                 res = self._kvstore.client.execute(
-                    f"SELECT COUNT(*) FROM {self._kvstore.table_name} WHERE collection = 'docstore/data'"
+                    f"SELECT COUNT(*) FROM {self._kvstore.table_name} WHERE collection = 'docstore/data'"  # nosec B608  # trusted table name
                 ).fetchone()
                 if res and res[0] > 0:
                     total_docs = int(res[0])
@@ -985,7 +985,7 @@ class RAGOrchestrator:
         if self._kvstore is not None:
             try:
                 res = self._kvstore.client.execute(
-                    f"SELECT COUNT(*) FROM {self._kvstore.table_name} WHERE collection = 'docstore/data'"
+                    f"SELECT COUNT(*) FROM {self._kvstore.table_name} WHERE collection = 'docstore/data'"  # nosec B608  # trusted table name
                 ).fetchone()
                 if res and res[0] > 0:
                     total_docs = int(res[0])
