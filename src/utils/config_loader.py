@@ -450,6 +450,36 @@ def get_bm25_config(config_path: str | None = None) -> dict[str, Any]:
     return bm25_config
 
 
+def get_docstore_config(config_path: str | None = None) -> dict[str, Any]:
+    """
+    Get document store configuration from settings.yaml.
+
+    Args:
+        config_path: Path to settings.yaml file
+
+    Returns:
+        Dictionary with document store configuration:
+        - store_type: Document store backend ("duckdb" or "simple")
+        - db_name: Database file name (e.g. "docstore.duckdb")
+        - table_name: DuckDB table name
+    """
+    config = load_settings(config_path)
+
+    docstore_section = config.get('docstore', {})
+
+    docstore_config = {
+        'store_type': docstore_section.get('store_type', 'duckdb'),
+        'db_name': docstore_section.get('db_name', 'docstore.duckdb'),
+        'table_name': docstore_section.get('table_name', 'docstore'),
+    }
+
+    logger.info(
+        f"Loaded docstore config: store_type={docstore_config['store_type']}, "
+        f"db_name={docstore_config['db_name']}"
+    )
+    return docstore_config
+
+
 def get_data_directories(config_path: str | None = None) -> dict[str, str]:
     """
     Get data directory paths from settings.yaml.
