@@ -546,7 +546,7 @@ def get_mcp_config(config_path: str | None = None) -> dict[str, Any]:
         }),
         'defaults': mcp_section.get('defaults', {
             'top_k': 5,
-            'token_budget': 4000,
+            'token_budget': 4000,  # nosec B105  # not a password
             'search_top_k': 10,
             'apply_redaction': True
         })
