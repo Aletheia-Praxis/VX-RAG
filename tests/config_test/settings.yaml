@@ -24,6 +24,12 @@ faiss:
   hnsw_m: 32
   metric: "inner_product"
 
+# Document store configuration
+docstore:
+  store_type: "duckdb"
+  db_name: "docstore.duckdb"
+  table_name: "docstore"
+
 # Adaptive chunking for technical content
 adaptive_chunking:
   enabled: true
