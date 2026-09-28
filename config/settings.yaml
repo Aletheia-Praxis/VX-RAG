@@ -25,6 +25,12 @@ faiss:
   hnsw_m: 32               # Number of neighbors for HNSW graph (higher = better recall, more memory)
   metric: "inner_product"  # Similarity metric: inner_product (cosine), L2
 
+# Document store configuration
+docstore:
+  store_type: "duckdb"     # Document store backend: duckdb, simple
+  db_name: "docstore.duckdb"  # DuckDB database file name
+  table_name: "docstore"   # DuckDB key-value table name
+
 # Adaptive chunking for technical content
 adaptive_chunking:
   enabled: true
