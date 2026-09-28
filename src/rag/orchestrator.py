@@ -13,9 +13,12 @@ import datetime
 import hashlib
 import json
 import shutil
+import time
+from collections.abc import Sequence
 from pathlib import Path
 from typing import Any, cast
 
+import duckdb
 import faiss
 from llama_index.core import (
     QueryBundle,
@@ -34,8 +37,11 @@ from llama_index.core.retrievers.fusion_retriever import (
     QueryFusionRetriever,
 )
 from llama_index.core.schema import BaseNode, TextNode
+from llama_index.core.storage.docstore import BaseDocumentStore, SimpleDocumentStore
+from llama_index.core.storage.docstore.keyval_docstore import KVDocumentStore
 from llama_index.embeddings.huggingface import HuggingFaceEmbedding
 from llama_index.retrievers.bm25 import BM25Retriever
+from llama_index.storage.kvstore.duckdb import DuckDBKVStore
 from llama_index.vector_stores.faiss import FaissVectorStore
 
 from src.rag.exceptions import ServiceInitializationError
@@ -52,6 +58,7 @@ from src.rag.metadata import (
 )
 from src.utils.config_loader import (
     get_bm25_config,
+    get_docstore_config,
     get_embedding_config,
     get_faiss_config,
     get_reranker_config,
@@ -71,6 +78,181 @@ _EMBEDDING_DIMENSION_BY_MODEL: dict[str, int] = {
 }
 _FALLBACK_EMBEDDING_DIMENSION = 384
 
+DEFAULT_DOCSTORE_DB_NAME: str = "docstore.duckdb"
+DEFAULT_DOCSTORE_TABLE_NAME: str = "docstore"
+DEFAULT_INTERMEDIATE_NODES_DB_NAME: str = "nodes.duckdb"
+DEFAULT_INTERMEDIATE_NODES_TABLE_NAME: str = "intermediate_nodes"
+
+
+def _close_duckdb_kvstore(kvstore: DuckDBKVStore | None) -> None:
+    """Safely close DuckDB connection handles to prevent Windows file locks.
+
+    Args:
+        kvstore: DuckDBKVStore instance to close.
+    """
+    if kvstore is None:
+        return
+    try:
+        if (
+            hasattr(kvstore, "_thread_local")
+            and hasattr(kvstore._thread_local, "conn")
+            and kvstore._thread_local.conn
+        ):
+            kvstore._thread_local.conn.close()
+            kvstore._thread_local.conn = None
+        if hasattr(kvstore, "_shared_conn") and kvstore._shared_conn:
+            kvstore._shared_conn.close()
+            kvstore._shared_conn = None
+    except (duckdb.Error, OSError, RuntimeError) as e:
+        logger.debug(f"Error closing DuckDBKVStore connection: {e}")
+
+
+def _create_duckdb_kvstore(
+    database_name: str,
+    persist_dir: str,
+    table_name: str,
+    max_retries: int = 5,
+    initial_backoff: float = 0.2,
+) -> DuckDBKVStore:
+    """Create a DuckDBKVStore with exponential backoff on file lock contention.
+
+    On Windows, concurrent processes or background virus scanners can momentarily
+    hold an exclusive file lock. This helper retries with jittered backoff to avoid
+    prematurely failing operations.
+
+    Args:
+        database_name: Name of the DuckDB database file.
+        persist_dir: Directory where the database file resides.
+        table_name: Table name for KV pairs.
+        max_retries: Maximum retry attempts on lock contention.
+        initial_backoff: Initial sleep duration in seconds.
+
+    Returns:
+        Instantiated DuckDBKVStore instance.
+
+    Raises:
+        duckdb.IOException: If file lock contention cannot be resolved after retries.
+    """
+    backoff = initial_backoff
+    for attempt in range(max_retries):
+        try:
+            return DuckDBKVStore(
+                database_name=database_name,
+                persist_dir=persist_dir,
+                table_name=table_name,
+            )
+        except (duckdb.IOException, duckdb.Error) as e:
+            if attempt == max_retries - 1:
+                logger.error(
+                    f"Failed to acquire DuckDBKVStore for {database_name} after "
+                    f"{max_retries} attempts: {e}"
+                )
+                raise
+            logger.debug(
+                f"DuckDB lock contention on {database_name}, retrying in {backoff:.2f}s "
+                f"(attempt {attempt + 1}/{max_retries}): {e}"
+            )
+            time.sleep(backoff)
+            backoff *= 1.5
+
+    return DuckDBKVStore(
+        database_name=database_name,
+        persist_dir=persist_dir,
+        table_name=table_name,
+    )
+
+
+def persist_intermediate_nodes(
+    nodes: Sequence[BaseNode],
+    directory: Path | str,
+    db_name: str = DEFAULT_INTERMEDIATE_NODES_DB_NAME,
+    table_name: str = DEFAULT_INTERMEDIATE_NODES_TABLE_NAME,
+    overwrite: bool = True,
+) -> Path:
+    """Persist intermediate ingestion nodes directly to DuckDB to avoid Defender locks.
+
+    Args:
+        nodes: Sequence of BaseNode instances to persist.
+        directory: Directory where the DuckDB database will be stored.
+        db_name: Database file name.
+        table_name: DuckDB table name.
+        overwrite: Whether to clear existing records in intermediate nodes table.
+
+    Returns:
+        Path to the saved DuckDB database file.
+    """
+    target_dir = Path(directory)
+    target_dir.mkdir(parents=True, exist_ok=True)
+    db_path = target_dir / db_name
+
+    kv = _create_duckdb_kvstore(
+        database_name=db_name,
+        persist_dir=str(target_dir),
+        table_name=table_name,
+    )
+    try:
+        if overwrite:
+            try:
+                kv.client.execute(f"DELETE FROM {table_name};")
+            except (duckdb.Error, OSError, RuntimeError) as e:
+                logger.debug(f"Clear intermediate nodes table notice: {e}")
+        if nodes:
+            kv.put_all([(node.node_id, node.to_dict()) for node in nodes])
+        try:
+            kv.client.execute("CHECKPOINT;")
+        except (duckdb.Error, OSError, RuntimeError) as e:
+            logger.debug(f"Checkpoint notice: {e}")
+    finally:
+        _close_duckdb_kvstore(kv)
+
+    return db_path
+
+
+def load_intermediate_nodes(
+    directory: Path | str,
+    db_name: str = DEFAULT_INTERMEDIATE_NODES_DB_NAME,
+    table_name: str = DEFAULT_INTERMEDIATE_NODES_TABLE_NAME,
+    legacy_fallback: bool = True,
+) -> list[BaseNode]:
+    """Load intermediate nodes from DuckDB or fallback to legacy nodes.json.
+
+    Args:
+        directory: Directory containing intermediate node files.
+        db_name: DuckDB database file name.
+        table_name: DuckDB table name.
+        legacy_fallback: Whether to attempt fallback to nodes.json if DuckDB is absent.
+
+    Returns:
+        List of loaded BaseNode instances.
+
+    Raises:
+        FileNotFoundError: If neither DuckDB nor legacy nodes file is found.
+    """
+    dir_path = Path(directory)
+    db_path = dir_path / db_name
+    legacy_json = dir_path / "nodes.json"
+
+    if db_path.exists():
+        kv = _create_duckdb_kvstore(
+            database_name=db_name,
+            persist_dir=str(dir_path),
+            table_name=table_name,
+        )
+        try:
+            records = kv.get_all()
+            return [cast(BaseNode, TextNode.from_dict(rec)) for rec in records.values()]
+        finally:
+            _close_duckdb_kvstore(kv)
+
+    if legacy_fallback and legacy_json.exists():
+        logger.info(f"Loading intermediate nodes from legacy JSON: {legacy_json}")
+        with open(legacy_json, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        return [cast(BaseNode, TextNode.from_dict(rec)) for rec in data]
+
+    raise FileNotFoundError(
+        f"Nodes file not found at {db_path} or {legacy_json}. Run 'ingest' first."
+    )
 
 
 class RAGOrchestrator:
@@ -87,6 +269,7 @@ class RAGOrchestrator:
         config_path: str = "config/settings.yaml",
         persist_dir: str = "data/index",
         auto_load: bool = True,
+        docstore_path: str | Path | None = None,
     ) -> None:
         """
         Initialize the RAG orchestrator.
@@ -95,12 +278,16 @@ class RAGOrchestrator:
             config_path: Path to configuration YAML file.
             persist_dir: Directory path for persisting FAISS and BM25 indexes.
             auto_load: Whether to automatically initialize services on instantiation.
+            docstore_path: Optional explicit path to docstore DuckDB database.
         """
         self.config_path = config_path
         self.persist_dir = Path(persist_dir)
+        self.docstore_path = Path(docstore_path) if docstore_path else None
 
         self._vector_store: FaissVectorStore | None = None
         self._storage_context: StorageContext | None = None
+        self._docstore: BaseDocumentStore | None = None
+        self._kvstore: DuckDBKVStore | None = None
         self._index: VectorStoreIndex | None = None
         self._bm25_retriever: BM25Retriever | None = None
         self._reranker: BGECrossEncoderReranker | None = None
@@ -110,6 +297,36 @@ class RAGOrchestrator:
 
         if auto_load:
             self._initialize_services()
+
+    def _checkpoint_docstore(self, kvstore: DuckDBKVStore | None = None) -> None:
+        """Checkpoint DuckDB WAL without closing the connection.
+
+        Args:
+            kvstore: Optional DuckDBKVStore instance; defaults to self._kvstore.
+        """
+        target = kvstore or self._kvstore
+        if target is not None:
+            try:
+                target.client.execute("CHECKPOINT;")
+            except (duckdb.Error, OSError, RuntimeError) as e:
+                logger.debug(f"DuckDB checkpoint notice: {e}")
+
+    def _checkpoint_and_flush_docstore(self) -> None:
+        """Checkpoint DuckDB WAL and flush connection to allow safe file access on Windows."""
+        if self._kvstore is not None:
+            self._checkpoint_docstore(self._kvstore)
+            _close_duckdb_kvstore(self._kvstore)
+
+    def close(self) -> None:
+        """Close any open storage resources, DuckDB connections, and release file locks."""
+        self._checkpoint_and_flush_docstore()
+
+    def __del__(self) -> None:
+        """Destructor to clean up resources."""
+        try:
+            self.close()
+        except (duckdb.Error, OSError, RuntimeError) as e:
+            logger.debug(f"Destructor cleanup error: {e}")
 
     def _initialize_services(self) -> None:
         """Initialize all RAG services, models, and load indexes."""
@@ -151,6 +368,80 @@ class RAGOrchestrator:
         except Exception as e:
             raise ServiceInitializationError("orchestrator", str(e)) from e
 
+    def _get_docstore_and_kvstore(
+        self,
+        faiss_index_path: Path,
+    ) -> tuple[BaseDocumentStore, DuckDBKVStore | None]:
+        """Initialize or load DuckDBKVStore and KVDocumentStore with legacy JSON migration.
+
+        Args:
+            faiss_index_path: Path to FAISS index directory.
+
+        Returns:
+            Tuple of (docstore, kvstore).
+        """
+        docstore_config = get_docstore_config(self.config_path)
+        store_type = str(docstore_config.get("store_type", "duckdb")).lower()
+        db_name = str(docstore_config.get("db_name", DEFAULT_DOCSTORE_DB_NAME))
+        table_name = str(docstore_config.get("table_name", DEFAULT_DOCSTORE_TABLE_NAME))
+
+        if store_type == "simple":
+            if (faiss_index_path / "docstore.json").exists():
+                return SimpleDocumentStore.from_persist_dir(str(faiss_index_path)), None
+            return SimpleDocumentStore(), None
+
+        if self.docstore_path is not None:
+            docstore_dir = self.docstore_path.parent
+            db_name = self.docstore_path.name
+        else:
+            if (faiss_index_path / db_name).exists() and not (self.persist_dir / db_name).exists():
+                docstore_dir = faiss_index_path
+            else:
+                docstore_dir = self.persist_dir
+
+        docstore_dir.mkdir(parents=True, exist_ok=True)
+        kvstore = _create_duckdb_kvstore(
+            database_name=db_name,
+            persist_dir=str(docstore_dir),
+            table_name=table_name,
+        )
+        docstore = KVDocumentStore(kvstore=kvstore)
+
+        # Efficient emptiness check without deserializing all documents
+        is_empty = False
+        try:
+            res = kvstore.client.execute(
+                f"SELECT 1 FROM {table_name} WHERE collection = 'docstore/data' LIMIT 1"
+            ).fetchone()
+            is_empty = res is None
+        except (duckdb.Error, OSError, ValueError, RuntimeError):
+            is_empty = len(docstore.docs) == 0
+
+        # Legacy JSON migration if DuckDB docstore is currently empty
+        if is_empty:
+            legacy_candidates = [
+                faiss_index_path / "docstore.json",
+                self.persist_dir / "docstore.json",
+            ]
+            for legacy_json in legacy_candidates:
+                if legacy_json.exists():
+                    try:
+                        legacy_ds = SimpleDocumentStore.from_persist_dir(str(legacy_json.parent))
+                        if legacy_ds.docs:
+                            logger.info(
+                                f"Migrating {len(legacy_ds.docs)} documents from legacy "
+                                f"{legacy_json} to DuckDBKVStore"
+                            )
+                            docstore.add_documents(list(legacy_ds.docs.values()))
+                            self._checkpoint_docstore(kvstore)
+                            break
+                    except (duckdb.Error, OSError, ValueError, RuntimeError) as e:
+                        logger.warning(
+                            f"Could not migrate legacy docstore from {legacy_json}: {e}"
+                        )
+
+        return docstore, kvstore
+
     def _load_vector_store(
         self,
         faiss_index_path: Path,
@@ -169,6 +460,8 @@ class RAGOrchestrator:
         faiss_config = get_faiss_config(self.config_path)
         hnsw_m = int(faiss_config.get("hnsw_m", 32))
 
+        self._docstore, self._kvstore = self._get_docstore_and_kvstore(faiss_index_path)
+
         try:
             from llama_index.core import load_index_from_storage
 
@@ -177,6 +470,7 @@ class RAGOrchestrator:
 
             vector_store = FaissVectorStore.from_persist_dir(str(faiss_index_path))
             storage_context = StorageContext.from_defaults(
+                docstore=self._docstore,
                 vector_store=vector_store,
                 persist_dir=str(faiss_index_path),
             )
@@ -193,7 +487,10 @@ class RAGOrchestrator:
                 embedding_dimension, hnsw_m, faiss.METRIC_INNER_PRODUCT
             )
             vector_store = FaissVectorStore(faiss_index=faiss_index)
-            storage_context = StorageContext.from_defaults(vector_store=vector_store)
+            storage_context = StorageContext.from_defaults(
+                docstore=self._docstore,
+                vector_store=vector_store,
+            )
             index = VectorStoreIndex(
                 nodes=[],
                 storage_context=storage_context,
@@ -228,7 +525,25 @@ class RAGOrchestrator:
             Set of lowercase 64-character hexadecimal SHA-256 digests.
         """
         hashes: set[str] = set()
-        if self._index is not None and hasattr(self._index, "docstore") and self._index.docstore is not None:
+        if self._kvstore is not None:
+            try:
+                query = (
+                    f"SELECT DISTINCT json_extract_string(value, '$.__data__.metadata.file_hash') "
+                    f"FROM {self._kvstore.table_name} "
+                    "WHERE collection = 'docstore/data'"
+                )
+                rows = self._kvstore.client.execute(query).fetchall()
+                for row in rows:
+                    if row and row[0]:
+                        hashes.add(str(row[0]).lower())
+            except (duckdb.Error, OSError, ValueError, RuntimeError) as e:
+                logger.debug(f"Direct DuckDB hash query failed, falling back to docstore.docs: {e}")
+                if self._index is not None and hasattr(self._index, "docstore") and self._index.docstore is not None:
+                    for doc in self._index.docstore.docs.values():
+                        h = doc.metadata.get("file_hash")
+                        if h:
+                            hashes.add(str(h).lower())
+        elif self._index is not None and hasattr(self._index, "docstore") and self._index.docstore is not None:
             for doc in self._index.docstore.docs.values():
                 h = doc.metadata.get("file_hash")
                 if h:
@@ -338,24 +653,45 @@ class RAGOrchestrator:
 
         total_nodes = 0
         indexed_hashes: set[str] = set()
-        if self._index is not None and hasattr(self._index, "docstore") and self._index.docstore is not None:
+        if self._kvstore is not None:
+            try:
+                count_res = self._kvstore.client.execute(
+                    f"SELECT COUNT(*) FROM {self._kvstore.table_name} WHERE collection = 'docstore/data'"
+                ).fetchone()
+                if count_res:
+                    total_nodes = int(count_res[0])
+                hash_res = self._kvstore.client.execute(
+                    f"SELECT DISTINCT json_extract_string(value, '$.__data__.metadata.file_hash') "
+                    f"FROM {self._kvstore.table_name} WHERE collection = 'docstore/data'"
+                ).fetchall()
+                for r in hash_res:
+                    if r and r[0]:
+                        indexed_hashes.add(str(r[0]).lower())
+            except (duckdb.Error, OSError, ValueError, RuntimeError) as e:
+                logger.debug(f"Direct DuckDB manifest query failed: {e}")
+            self._checkpoint_and_flush_docstore()
+        elif self._index is not None and hasattr(self._index, "docstore") and self._index.docstore is not None:
             docs = self._index.docstore.docs
             total_nodes = len(docs)
             for d in docs.values():
                 h = d.metadata.get("file_hash")
                 if h:
                     indexed_hashes.add(str(h).lower())
+            self._checkpoint_and_flush_docstore()
 
         files_map: dict[str, str] = {}
         if directory.exists():
             for p in directory.rglob("*"):
                 if p.is_file() and p.name != "manifest.json":
                     rel_path = p.relative_to(directory).as_posix()
-                    file_bytes = p.read_bytes()
-                    file_sha256 = hashlib.sha256(file_bytes).hexdigest()
-                    files_map[rel_path] = file_sha256
-                    # Also record top-level filename for direct lookup
-                    files_map[p.name] = file_sha256
+                    try:
+                        file_bytes = p.read_bytes()
+                        file_sha256 = hashlib.sha256(file_bytes).hexdigest()
+                        files_map[rel_path] = file_sha256
+                        # Also record top-level filename for direct lookup
+                        files_map[p.name] = file_sha256
+                    except (PermissionError, OSError) as err:
+                        logger.warning(f"Could not compute checksum for {p}: {err}")
 
         manifest: dict[str, Any] = {
             "version": "1.0",
@@ -368,7 +704,7 @@ class RAGOrchestrator:
         }
         return manifest
 
-    def create_snapshot(self, snapshot_dir: Path | None = None) -> Path:
+    def create_snapshot(self, snapshot_dir: Path | str | None = None) -> Path:
         """
         Create a versioned snapshot directory containing index artifacts and manifest.json.
 
@@ -387,12 +723,22 @@ class RAGOrchestrator:
 
         target_dir.mkdir(parents=True, exist_ok=True)
 
+        # Checkpoint and flush DuckDB docstore before copying to prevent Win32 file sharing lock
+        self._checkpoint_and_flush_docstore()
+
         if self.persist_dir.exists():
             for item in self.persist_dir.iterdir():
                 if item.is_dir():
                     shutil.copytree(item, target_dir / item.name, dirs_exist_ok=True)
                 elif item.is_file() and item.name != "manifest.json":
                     shutil.copy2(item, target_dir / item.name)
+
+        if self.docstore_path and self.docstore_path.exists():
+            try:
+                if not self.docstore_path.is_relative_to(self.persist_dir):
+                    shutil.copy2(self.docstore_path, target_dir / self.docstore_path.name)
+            except (ValueError, TypeError):
+                shutil.copy2(self.docstore_path, target_dir / self.docstore_path.name)
 
         manifest_data = self._generate_manifest(target_dir)
         manifest_file = target_dir / "manifest.json"
@@ -406,7 +752,7 @@ class RAGOrchestrator:
         logger.info(f"Created index snapshot at {target_dir}")
         return target_dir
 
-    def index_nodes(self, nodes: list[BaseNode]) -> None:
+    def index_nodes(self, nodes: Sequence[BaseNode]) -> None:
         """
         Incrementally append nodes to FAISS HNSW and BM25 indexes with duplicate prevention.
 
@@ -416,7 +762,7 @@ class RAGOrchestrator:
         Persists updated indexes and writes manifest.json.
 
         Args:
-            nodes: List of BaseNode instances to append.
+            nodes: Sequence of BaseNode instances to append.
         """
         if not nodes:
             return
@@ -432,7 +778,17 @@ class RAGOrchestrator:
 
         # Duplicate filtering tier 2: check against existing docstore hashes and node IDs
         already_indexed_hashes = self.get_indexed_file_hashes()
-        existing_node_ids = set(self._index.docstore.docs.keys())
+        existing_node_ids: set[str] = set()
+        if self._kvstore is not None:
+            try:
+                id_rows = self._kvstore.client.execute(
+                    f"SELECT key FROM {self._kvstore.table_name} WHERE collection = 'docstore/data'"
+                ).fetchall()
+                existing_node_ids = {r[0] for r in id_rows if r and r[0]}
+            except (duckdb.Error, OSError, ValueError, RuntimeError):
+                existing_node_ids = set(self._index.docstore.docs.keys())
+        elif self._index is not None and hasattr(self._index, "docstore") and self._index.docstore is not None:
+            existing_node_ids = set(self._index.docstore.docs.keys())
 
         nodes_to_insert: list[BaseNode] = []
         for node in nodes:
@@ -473,6 +829,9 @@ class RAGOrchestrator:
         self._bm25_retriever.persist(str(bm25_index_path))
         self._indexes_loaded = True
 
+        # Checkpoint and flush DuckDB docstore before manifest calculation on Windows
+        self._checkpoint_and_flush_docstore()
+
         # Generate and save manifest.json
         manifest_data = self._generate_manifest(self.persist_dir)
         (self.persist_dir / "manifest.json").write_text(
@@ -509,7 +868,16 @@ class RAGOrchestrator:
             raise RuntimeError("Indexes not loaded")
 
         total_docs = top_k
-        if self._index and hasattr(self._index, "docstore"):
+        if self._kvstore is not None:
+            try:
+                res = self._kvstore.client.execute(
+                    f"SELECT COUNT(*) FROM {self._kvstore.table_name} WHERE collection = 'docstore/data'"
+                ).fetchone()
+                if res and res[0] > 0:
+                    total_docs = int(res[0])
+            except (duckdb.Error, OSError, ValueError, RuntimeError):
+                total_docs = top_k
+        elif self._index and hasattr(self._index, "docstore"):
             try:
                 total_docs = len(self._index.docstore.docs)
             except (TypeError, AttributeError):
@@ -614,7 +982,16 @@ class RAGOrchestrator:
             raise RuntimeError("RAG services not initialized or indexes not loaded")
 
         total_docs = top_k
-        if self._index and hasattr(self._index, "docstore"):
+        if self._kvstore is not None:
+            try:
+                res = self._kvstore.client.execute(
+                    f"SELECT COUNT(*) FROM {self._kvstore.table_name} WHERE collection = 'docstore/data'"
+                ).fetchone()
+                if res and res[0] > 0:
+                    total_docs = int(res[0])
+            except (duckdb.Error, OSError, ValueError, RuntimeError):
+                total_docs = top_k
+        elif self._index and hasattr(self._index, "docstore"):
             try:
                 total_docs = len(self._index.docstore.docs)
             except (TypeError, AttributeError):
@@ -665,6 +1042,9 @@ class RAGOrchestrator:
         Returns:
             Dictionary containing health status, initialization state, and service details.
         """
+        has_docstore = self._docstore is not None or (
+            self._index is not None and hasattr(self._index, "docstore") and self._index.docstore is not None
+        )
         return {
             "overall_status": "healthy" if self._indexes_loaded else "degraded",
             "initialized": self._initialized,
@@ -673,6 +1053,11 @@ class RAGOrchestrator:
                 "vector_store": {
                     "available": self._vector_store is not None,
                     "status": "healthy" if self._index else "degraded",
+                },
+                "docstore": {
+                    "available": has_docstore,
+                    "type": "duckdb" if self._kvstore is not None else "simple",
+                    "status": "healthy" if has_docstore else "degraded",
                 },
                 "bm25_retriever": {
                     "available": self._bm25_retriever is not None,
@@ -693,12 +1078,14 @@ _orchestrator_instance: RAGOrchestrator | None = None
 def get_orchestrator(
     config_path: str = "config/settings.yaml",
     persist_dir: str = "data/index",
+    docstore_path: str | Path | None = None,
 ) -> RAGOrchestrator:
     """Retrieve or initialize the singleton RAGOrchestrator instance.
 
     Args:
         config_path: Path to the configuration YAML file.
         persist_dir: Directory where index files are persisted.
+        docstore_path: Optional explicit path to docstore DuckDB database.
 
     Returns:
         The singleton RAGOrchestrator instance.
@@ -708,5 +1095,6 @@ def get_orchestrator(
         _orchestrator_instance = RAGOrchestrator(
             config_path=config_path,
             persist_dir=persist_dir,
+            docstore_path=docstore_path,
         )
     return _orchestrator_instance
