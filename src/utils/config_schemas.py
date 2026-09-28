@@ -71,6 +71,20 @@ class FAISSConfig(BaseModel):
     metric: Literal["inner_product", "L2"] = Field(default="inner_product", description="Similarity metric")
 
 
+class DocstoreConfig(BaseModel):
+    """Docstore configuration."""
+
+    store_type: Literal["duckdb", "simple"] = Field(
+        default="duckdb", description="Document store backend type"
+    )
+    db_name: str = Field(
+        default="docstore.duckdb", description="DuckDB database file name"
+    )
+    table_name: str = Field(
+        default="docstore", description="DuckDB table name for key-value storage"
+    )
+
+
 class BM25Config(BaseModel):
     """BM25 configuration."""
     
@@ -217,6 +231,7 @@ class VXRAGSettings(BaseModel):
     
     # Configuration sections
     faiss: FAISSConfig = Field(default_factory=FAISSConfig)
+    docstore: DocstoreConfig = Field(default_factory=DocstoreConfig)
     adaptive_chunking: AdaptiveChunkingConfig = Field(default_factory=AdaptiveChunkingConfig)
     retriever: RetrieverConfig = Field(default_factory=RetrieverConfig)
     bm25: BM25Config = Field(default_factory=BM25Config)
