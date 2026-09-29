@@ -8,7 +8,6 @@ configuration builders, CLI execution helpers, and MCP protocol helpers.
 from __future__ import annotations
 
 import io
-import os
 import sys
 import yaml
 from pathlib import Path
@@ -23,11 +22,7 @@ from typing import (
 import pytest
 
 if TYPE_CHECKING:
-    from _pytest.capture import CaptureFixture
-    from _pytest.fixtures import FixtureRequest
-    from _pytest.logging import LogCaptureFixture
-    from _pytest.monkeypatch import MonkeyPatch
-    from pytest_mock.plugin import MockerFixture
+    pass
 
 # Ensure project root is on sys.path
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent

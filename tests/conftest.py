@@ -30,12 +30,9 @@ except ImportError:
     pass
 
 # Ignore legacy test files whose corresponding source modules were removed during git refactoring
-# (awaiting replacement in upcoming milestones: M3 RAG Core, M4 MCP wrappers, M5 Integration/E2E)
 collect_ignore = [
-    "unit_test/mcp_test/test_bridge.py",
     "unit_test/mcp_test/test_server.py",
     "integration_test/test_mcp_workflow_integration.py",
-    "integration_test/test_workflow_integration.py",
 ]
 
 # Ensure RateLimiter queues requests when active concurrency reaches max_concurrent
@@ -200,6 +197,9 @@ def pytest_configure(config: Any) -> None:
     Args:
         config: Pytest configuration object
     """
+    # Register custom marks to avoid PytestUnknownMarkWarning
+    config.addinivalue_line("markers", "unit: mark test as a unit test")
+
     # Set pytest log level
     config.option.log_cli = False
     config.option.log_cli_level = "WARNING"
