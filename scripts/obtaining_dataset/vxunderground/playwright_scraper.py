@@ -281,7 +281,8 @@ def main() -> None:
             
             # Using launch_persistent_context with channel="chrome" uses the real installed Google Chrome
             # This is the most reliable way to bypass Cloudflare.
-            assert USER_DATA_DIR is not None
+            if USER_DATA_DIR is None:
+                raise RuntimeError("USER_DATA_DIR is not set; cannot launch persistent browser context.")
             context = p.chromium.launch_persistent_context(
                 user_data_dir=USER_DATA_DIR,
                 channel="chrome",
