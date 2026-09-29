@@ -193,11 +193,11 @@ class LlamaIndexTokenCounter:
     
     def get_total_embedding_tokens(self) -> int:
         """Get total embedding tokens counted."""
-        return self.token_counter.total_embedding_token_count
+        return int(self.token_counter.total_embedding_token_count)
     
     def get_total_llm_tokens(self) -> int:
         """Get total LLM tokens (prompt + completion) counted."""
-        return self.token_counter.total_llm_token_count
+        return int(self.token_counter.total_llm_token_count)
     
     def get_stats(self) -> Dict[str, Any]:
         """
