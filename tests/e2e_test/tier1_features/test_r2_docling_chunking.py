@@ -14,18 +14,12 @@ from __future__ import annotations
 
 import re
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Dict, List
-from unittest.mock import MagicMock, patch
+from typing import TYPE_CHECKING, List
 
 import pytest
-from llama_index.core.schema import TextNode
 
 if TYPE_CHECKING:
-    from _pytest.capture import CaptureFixture
-    from _pytest.fixtures import FixtureRequest
-    from _pytest.logging import LogCaptureFixture
-    from _pytest.monkeypatch import MonkeyPatch
-    from pytest_mock.plugin import MockerFixture
+    pass
 
 
 class TestFeature6DoclingStandardExtraction:
@@ -229,7 +223,6 @@ class TestFeature9MarkdownAwareChunking:
         default_chunk_size = 1024
         # Simulated text of ~2000 tokens
         words = ["token"] * 2500
-        text = " ".join(words)
 
         chunks: List[str] = []
         words_per_chunk = default_chunk_size

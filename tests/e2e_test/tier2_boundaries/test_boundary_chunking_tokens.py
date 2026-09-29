@@ -9,17 +9,12 @@ and extreme technical document layout boundaries.
 from __future__ import annotations
 
 import re
-from typing import TYPE_CHECKING, Any, Dict, List
+from typing import TYPE_CHECKING, List
 
-import pytest
-from src.rag.libs.schemas.mcp_schemas import ContextItem, MCPContextPayload
+from src.rag.libs.schemas.mcp_schemas import ContextItem
 
 if TYPE_CHECKING:
-    from _pytest.capture import CaptureFixture
-    from _pytest.fixtures import FixtureRequest
-    from _pytest.logging import LogCaptureFixture
-    from _pytest.monkeypatch import MonkeyPatch
-    from pytest_mock.plugin import MockerFixture
+    pass
 
 
 class TestBoundaryChunkingAndTokens:

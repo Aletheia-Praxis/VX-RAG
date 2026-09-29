@@ -16,7 +16,7 @@ import asyncio
 import hashlib
 import json
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Dict, List, Set
+from typing import TYPE_CHECKING, Set
 
 import pytest
 from llama_index.core.schema import NodeWithScore, TextNode
@@ -25,11 +25,7 @@ from src.mcp.formatters import format_query_response, format_search_response
 from src.rag.libs.schemas.mcp_schemas import ContextItem, MCPContextPayload
 
 if TYPE_CHECKING:
-    from _pytest.capture import CaptureFixture
-    from _pytest.fixtures import FixtureRequest
-    from _pytest.logging import LogCaptureFixture
-    from _pytest.monkeypatch import MonkeyPatch
-    from pytest_mock.plugin import MockerFixture
+    pass
 
 
 class TestCrossFeaturePipeline:

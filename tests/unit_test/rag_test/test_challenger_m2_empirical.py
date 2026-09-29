@@ -145,7 +145,6 @@ class TestChallengerCodeFencePreservation:
             for i in range(line_count)
         ]
         raw_code = "```c\n" + "\n".join(code_lines) + "\n```"
-        total_tokens = count_tokens(raw_code)
 
         doc = f"# Technical Analysis\n\n{raw_code}\n\nConcluded disassembly."
         nodes = pipeline.chunk_markdown(doc)

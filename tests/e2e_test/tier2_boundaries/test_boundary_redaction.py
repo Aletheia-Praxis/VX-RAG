@@ -10,7 +10,6 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-import pytest
 from src.mcp.formatters import (
     redact_email_addresses,
     redact_ip_addresses,
@@ -18,11 +17,7 @@ from src.mcp.formatters import (
 )
 
 if TYPE_CHECKING:
-    from _pytest.capture import CaptureFixture
-    from _pytest.fixtures import FixtureRequest
-    from _pytest.logging import LogCaptureFixture
-    from _pytest.monkeypatch import MonkeyPatch
-    from pytest_mock.plugin import MockerFixture
+    pass
 
 
 class TestBoundaryRedaction:

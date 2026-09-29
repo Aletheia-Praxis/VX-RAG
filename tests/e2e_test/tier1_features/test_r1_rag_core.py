@@ -16,18 +16,13 @@ import hashlib
 import json
 import math
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Dict, List, Tuple
-from unittest.mock import MagicMock, patch
+from typing import TYPE_CHECKING, Any, Dict, List
 
 import pytest
 from llama_index.core.schema import NodeWithScore, TextNode
 
 if TYPE_CHECKING:
-    from _pytest.capture import CaptureFixture
-    from _pytest.fixtures import FixtureRequest
-    from _pytest.logging import LogCaptureFixture
-    from _pytest.monkeypatch import MonkeyPatch
-    from pytest_mock.plugin import MockerFixture
+    pass
 
 
 class TestFeature1BGEEmbeddingIntegration:
@@ -100,7 +95,6 @@ class TestFeature2BGECrossEncoderReranker:
 
     def test_cross_encoder_rerank_reorders_by_query_relevance(self) -> None:
         """Verify cross-encoder reorders retrieved candidate nodes by relevance score."""
-        query = "vssadmin volume shadow copy deletion"
         node_irrelevant = TextNode(
             text="General HTML web design principles",
             id_="node_1",
@@ -111,11 +105,6 @@ class TestFeature2BGECrossEncoderReranker:
             id_="node_2",
             metadata={"file_name": "lockbit.md", "file_type": "md", "creation_date": "2026-01-01T00:00:00Z", "ingestion_date": "2026-01-01T00:00:00Z", "file_hash": "hash2"}
         )
-
-        initial_candidates = [
-            NodeWithScore(node=node_irrelevant, score=0.75),
-            NodeWithScore(node=node_relevant, score=0.70),
-        ]
 
         # Simulate reranker updating scores: relevant node gets higher cross-encoder score
         reranked = sorted(
@@ -396,7 +385,6 @@ class TestFeature5HybridSearchBM25AndVector:
 
     def test_hybrid_search_pure_semantic_match_preservation(self) -> None:
         """Verify semantic conceptual match without exact keywords is retrieved via vector search."""
-        concept_query = "adversary invalidating restore points before crypto operation"
         vector_node = TextNode(
             text="Ransomware executes vssadmin delete shadows to inhibit recovery",
             id_="node_concept"
