@@ -2,13 +2,11 @@ import os
 import sqlite3
 import hashlib
 import requests
-import time
 import shutil
 import threading
 import queue
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
-from typing import Optional, Any
 from playwright.sync_api import sync_playwright, Page
 from playwright_stealth import Stealth
 from dotenv import load_dotenv
