@@ -37,7 +37,7 @@ TMP_DIR.mkdir(parents=True, exist_ok=True)
 # Concurrency globals
 DB_LOCK = threading.Lock()
 # Max 50 items in queue to prevent S3 link expiration
-DOWNLOAD_QUEUE = queue.Queue(maxsize=50)
+DOWNLOAD_QUEUE: queue.Queue[tuple[str, str, str]] = queue.Queue(maxsize=50)
 SHUTDOWN_FLAG = threading.Event()
 MAX_WORKERS = int(os.getenv("VXUG_MAX_WORKERS", "10"))
 
@@ -281,6 +281,7 @@ def main() -> None:
             
             # Using launch_persistent_context with channel="chrome" uses the real installed Google Chrome
             # This is the most reliable way to bypass Cloudflare.
+            assert USER_DATA_DIR is not None
             context = p.chromium.launch_persistent_context(
                 user_data_dir=USER_DATA_DIR,
                 channel="chrome",
