@@ -52,7 +52,7 @@ def get_token_stats() -> Dict[str, Any]:
         Dictionary with token counts, or empty dict if no token counter found
     """
     if Settings.callback_manager is None:
-        logger.warning("No global CallbackManager configured")
+        logger.warning("No global CallbackManager configured")  # type: ignore[unreachable]
         return {}
     
     # Find TokenCountingHandler in handlers
@@ -74,7 +74,7 @@ def get_token_stats() -> Dict[str, Any]:
 def reset_token_counts() -> None:
     """Reset all global token counters in LlamaIndex CallbackManager."""
     if Settings.callback_manager is None:
-        logger.warning("No global CallbackManager configured")
+        logger.warning("No global CallbackManager configured")  # type: ignore[unreachable]
         return
     
     for handler in Settings.callback_manager.handlers:
@@ -94,7 +94,7 @@ def get_global_token_counter() -> Optional[TokenCountingHandler]:
         TokenCountingHandler | None
     """
     if Settings.callback_manager is None:
-        return None
+        return None  # type: ignore[unreachable]
 
     for handler in Settings.callback_manager.handlers:
         if isinstance(handler, TokenCountingHandler):
@@ -130,7 +130,7 @@ def ensure_global_token_counter(model_name: str = "gpt-3.5-turbo", verbose: bool
     )
 
     if Settings.callback_manager is None:
-        Settings.callback_manager = CallbackManager([token_counter])
+        Settings.callback_manager = CallbackManager([token_counter])  # type: ignore[unreachable]
     else:
         Settings.callback_manager.handlers.append(token_counter)
 
