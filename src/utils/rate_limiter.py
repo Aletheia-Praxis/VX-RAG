@@ -187,7 +187,7 @@ class RateLimiter:
 
         # Acquire the semaphore — this is the single authoritative gate
         try:
-            acquired = await asyncio.wait_for(
+            await asyncio.wait_for(
                 self._semaphore.acquire(), timeout=effective_timeout
             )
         except asyncio.TimeoutError:
