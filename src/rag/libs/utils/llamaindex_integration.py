@@ -6,8 +6,7 @@ VX-RAG components and LlamaIndex ecosystem.
 """
 
 from src.utils.logging_config import get_logger
-from typing import List, Dict, Any, Optional
-from llama_index.core.schema import NodeWithScore, BaseNode, Document as LlamaDocument
+from typing import Dict, Any, Optional
 from llama_index.core.callbacks import CallbackManager, TokenCountingHandler
 from llama_index.core import Settings
 import tiktoken
