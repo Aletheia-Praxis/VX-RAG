@@ -249,7 +249,7 @@ async def run_sse(host: str = "localhost", port: int = 8000) -> None:
     import uvicorn
 
     await start_server()
-    app = mcp.sse_app()
+    app = mcp.sse_app()  # type: ignore[attr-defined]
     config = uvicorn.Config(
         app, host=host, port=port, log_level="info", access_log=True
     )
