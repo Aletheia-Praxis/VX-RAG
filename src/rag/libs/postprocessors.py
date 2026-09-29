@@ -25,7 +25,7 @@ _INFERENCE_FALLBACK_EXCEPTIONS: tuple[type[BaseException], ...] = (Exception,)
 __all__ = ["BGECrossEncoderReranker", "MetadataBoostPostprocessor"]
 
 
-class MetadataBoostPostprocessor(BaseNodePostprocessor):
+class MetadataBoostPostprocessor(BaseNodePostprocessor):  # type: ignore[misc]
     """
     Postprocessor that boosts node scores based on metadata completeness.
 
@@ -132,7 +132,7 @@ class MetadataBoostPostprocessor(BaseNodePostprocessor):
             return nodes
 
 
-class BGECrossEncoderReranker(BaseNodePostprocessor):
+class BGECrossEncoderReranker(BaseNodePostprocessor):  # type: ignore[misc]
     """
     Cross-Encoder Reranker using BAAI/bge-reranker-base.
 
