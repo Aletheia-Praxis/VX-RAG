@@ -5,8 +5,9 @@ Provides functions for estimating token counts and selecting documents within to
 Uses LlamaIndex TokenCountingHandler for native integration.
 """
 
+from typing import Any
+
 from src.utils.logging_config import get_logger
-from typing import List, Dict, Any, Tuple, Optional
 
 from .token_counter import LlamaIndexTokenCounter
 
@@ -37,17 +38,17 @@ class TokenBudgeter:
         """Count tokens in text using LlamaIndex tokenizer."""
         return self._counter.count_tokens(text)
     
-    def estimate_document_tokens(self, document: Dict[str, Any]) -> int:
+    def estimate_document_tokens(self, document: dict[str, Any]) -> int:
         """Estimate tokens for a document dictionary."""
         return self._counter.estimate_document_tokens(document)
     
     def select_documents_by_budget(
         self,
-        documents: List[Dict[str, Any]],
+        documents: list[dict[str, Any]],
         token_budget: int,
-        max_items: Optional[int] = None,
-        min_score: Optional[float] = None
-    ) -> Tuple[List[Dict[str, Any]], int]:
+        max_items: int | None = None,
+        min_score: float | None = None
+    ) -> tuple[list[dict[str, Any]], int]:
         """
         Select documents within token budget, prioritizing by relevance score.
         
@@ -66,10 +67,10 @@ class TokenBudgeter:
     
     def select_documents_by_relevance(
         self,
-        documents: List[Dict[str, Any]],
+        documents: list[dict[str, Any]],
         max_items: int = 10,
-        min_score: Optional[float] = None
-    ) -> List[Dict[str, Any]]:
+        min_score: float | None = None
+    ) -> list[dict[str, Any]]:
         """
         Select top documents by relevance score.
         
@@ -87,7 +88,7 @@ class TokenBudgeter:
         """Reset all accumulated token counts."""
         self._counter.reset_counts()
     
-    def get_stats(self) -> Dict[str, Any]:
+    def get_stats(self) -> dict[str, Any]:
         """
         Get comprehensive token usage statistics from LlamaIndex.
         
@@ -98,13 +99,13 @@ class TokenBudgeter:
 
 
 def budget_and_assemble(
-    results: List[Dict[str, Any]],
+    results: list[dict[str, Any]],
     token_budget: int = 2048,
     query: str = "",
-    max_items: Optional[int] = None,
-    min_score: Optional[float] = None,
+    max_items: int | None = None,
+    min_score: float | None = None,
     model_name: str = "gpt-3.5-turbo"
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """
     Budget and assemble context from retrieval results using LlamaIndex token counting.
     
@@ -125,9 +126,7 @@ def budget_and_assemble(
     budgeter = TokenBudgeter(model_name=model_name)
     
     # Extract documents from results (handle different formats)
-    documents = []
-    for result in results:
-        documents.append(result)
+    documents = list(results)
     
     # Select documents within budget using LlamaIndex token counting
     selected_docs, total_tokens = budgeter.select_documents_by_budget(

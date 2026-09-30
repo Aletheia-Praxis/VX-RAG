@@ -5,11 +5,13 @@ Provides adapters and helpers for seamless integration between
 VX-RAG components and LlamaIndex ecosystem.
 """
 
-from src.utils.logging_config import get_logger
-from typing import Dict, Any, Optional
-from llama_index.core.callbacks import CallbackManager, TokenCountingHandler
-from llama_index.core import Settings
+from typing import Any
+
 import tiktoken
+from llama_index.core import Settings
+from llama_index.core.callbacks import CallbackManager, TokenCountingHandler
+
+from src.utils.logging_config import get_logger
 
 logger = get_logger(__name__)
 
@@ -20,7 +22,6 @@ class VXRAGLlamaIndexAdapter:
     
     DEPRECATED: Use standalone functions instead.
     """
-    pass
 
 
 # Convenience functions for common operations
@@ -44,7 +45,7 @@ def setup_vxrag_llamaindex_integration(
     return ensure_global_token_counter(model_name=model_name, verbose=verbose)
 
 
-def get_token_stats() -> Dict[str, Any]:
+def get_token_stats() -> dict[str, Any]:
     """
     Get global token statistics from LlamaIndex CallbackManager.
     
@@ -86,7 +87,7 @@ def reset_token_counts() -> None:
     logger.warning("No TokenCountingHandler found to reset")
 
 
-def get_global_token_counter() -> Optional[TokenCountingHandler]:
+def get_global_token_counter() -> TokenCountingHandler | None:
     """
     Return the TokenCountingHandler currently registered in LlamaIndex Settings.callback_manager.
 

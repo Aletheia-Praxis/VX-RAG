@@ -5,10 +5,14 @@ Provides a unified interface for token counting and document budgeting
 using LlamaIndex native token counting infrastructure.
 """
 
-from src.utils.logging_config import get_logger
-from typing import List, Dict, Any, Tuple, Optional
+from typing import Any
 
-from .llamaindex_integration import get_global_token_counter, ensure_global_token_counter
+from src.utils.logging_config import get_logger
+
+from .llamaindex_integration import (
+    ensure_global_token_counter,
+    get_global_token_counter,
+)
 
 logger = get_logger(__name__)
 
@@ -61,7 +65,7 @@ class LlamaIndexTokenCounter:
         tokens = self.token_counter.tokenizer(text)
         return len(tokens)
     
-    def estimate_document_tokens(self, document: Dict[str, Any]) -> int:
+    def estimate_document_tokens(self, document: dict[str, Any]) -> int:
         """
         Estimate tokens for a document dictionary.
         
@@ -88,11 +92,11 @@ class LlamaIndexTokenCounter:
     
     def select_documents_by_budget(
         self,
-        documents: List[Dict[str, Any]],
+        documents: list[dict[str, Any]],
         token_budget: int,
-        max_items: Optional[int] = None,
-        min_score: Optional[float] = None
-    ) -> Tuple[List[Dict[str, Any]], int]:
+        max_items: int | None = None,
+        min_score: float | None = None
+    ) -> tuple[list[dict[str, Any]], int]:
         """
         Select documents within token budget, prioritizing by relevance score.
         
@@ -127,7 +131,7 @@ class LlamaIndexTokenCounter:
         )
         
         # Greedy selection within budget
-        selected: List[Dict[str, Any]] = []
+        selected: list[dict[str, Any]] = []
         total_tokens = 0
         
         for doc in sorted_docs:
@@ -153,10 +157,10 @@ class LlamaIndexTokenCounter:
     
     def select_documents_by_relevance(
         self,
-        documents: List[Dict[str, Any]],
+        documents: list[dict[str, Any]],
         max_items: int = 10,
-        min_score: Optional[float] = None
-    ) -> List[Dict[str, Any]]:
+        min_score: float | None = None
+    ) -> list[dict[str, Any]]:
         """
         Select top documents by relevance score without token budgeting.
         
@@ -199,7 +203,7 @@ class LlamaIndexTokenCounter:
         """Get total LLM tokens (prompt + completion) counted."""
         return int(self.token_counter.total_llm_token_count)
     
-    def get_stats(self) -> Dict[str, Any]:
+    def get_stats(self) -> dict[str, Any]:
         """
         Get comprehensive token usage statistics.
         
