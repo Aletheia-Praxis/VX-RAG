@@ -2,7 +2,7 @@
 RAG Orchestrator - High-level coordinator for RAG pipeline operations.
 
 This module provides a clean, high-level interface for coordinating all RAG services.
-It uses native LlamaIndex abstractions: RetrieverQueryEngine, QueryFusionRetriever,
+It uses native LlamaIndex abstractions: RetrieverQueryEngine, ReciprocalRankFusionRetriever,
 BM25Retriever, FAISS HNSW vector store, and node post-processors.
 """
 
@@ -28,15 +28,12 @@ from llama_index.core import (
     get_response_synthesizer,
 )
 from llama_index.core.base.base_retriever import BaseRetriever
+from llama_index.core.llms import MockLLM
 from llama_index.core.postprocessor import SimilarityPostprocessor
 from llama_index.core.postprocessor.types import BaseNodePostprocessor
 from llama_index.core.query_engine import RetrieverQueryEngine
 from llama_index.core.response_synthesizers import ResponseMode
-from llama_index.core.retrievers.fusion_retriever import (
-    FUSION_MODES,
-    QueryFusionRetriever,
-)
-from llama_index.core.schema import BaseNode, TextNode
+from llama_index.core.schema import BaseNode, NodeWithScore, TextNode
 from llama_index.core.storage.docstore import BaseDocumentStore, SimpleDocumentStore
 from llama_index.core.storage.docstore.keyval_docstore import KVDocumentStore
 from llama_index.embeddings.huggingface import HuggingFaceEmbedding
@@ -82,6 +79,7 @@ DEFAULT_DOCSTORE_DB_NAME: str = "docstore.duckdb"
 DEFAULT_DOCSTORE_TABLE_NAME: str = "docstore"
 DEFAULT_INTERMEDIATE_NODES_DB_NAME: str = "nodes.duckdb"
 DEFAULT_INTERMEDIATE_NODES_TABLE_NAME: str = "intermediate_nodes"
+DEFAULT_RRF_K: int = 60
 
 
 def _close_duckdb_kvstore(kvstore: DuckDBKVStore | None) -> None:
@@ -255,6 +253,134 @@ def load_intermediate_nodes(
     )
 
 
+def reciprocal_rank_fusion(
+    results: Sequence[Sequence[NodeWithScore]],
+    k: int = DEFAULT_RRF_K,
+    top_k: int | None = None,
+) -> list[NodeWithScore]:
+    """Fuse multiple lists of retrieved nodes using Reciprocal Rank Fusion (RRF).
+
+    Computes:
+        RRF_Score = sum(1.0 / (k + rank))
+    where rank is the 1-based index (1, 2, ..., N) of each node in each
+    retriever's ranked list.
+
+    Args:
+        results: Ranked node candidate sequences from individual retrievers.
+        k: Smoothing constant to penalize low-ranked candidates (default: 60).
+        top_k: Optional maximum number of fused candidates to return.
+
+    Returns:
+        List of fused NodeWithScore objects ordered descending by RRF score.
+    """
+    if k < 0:
+        raise ValueError(f"RRF smoothing constant k must be non-negative, got {k}")
+
+    fused_scores: dict[str, float] = {}
+    node_map: dict[str, NodeWithScore] = {}
+
+    for node_list in results:
+        sorted_nodes = sorted(
+            node_list,
+            key=lambda item: item.score if item.score is not None else float("-inf"),
+            reverse=True,
+        )
+        seen_in_run: set[str] = set()
+        rank = 1
+        for item in sorted_nodes:
+            node_id = item.node.node_id
+            if node_id in seen_in_run:
+                continue
+            seen_in_run.add(node_id)
+            if node_id not in node_map:
+                node_map[node_id] = item
+            fused_scores[node_id] = fused_scores.get(node_id, 0.0) + (1.0 / (k + rank))
+            rank += 1
+
+    sorted_node_ids = sorted(
+        fused_scores.keys(),
+        key=lambda nid: fused_scores[nid],
+        reverse=True,
+    )
+
+    reranked_nodes: list[NodeWithScore] = [
+        NodeWithScore(
+            node=node_map[node_id].node,
+            score=fused_scores[node_id],
+        )
+        for node_id in sorted_node_ids
+    ]
+
+    if top_k is not None:
+        return reranked_nodes[: max(0, top_k)]
+    return reranked_nodes
+
+
+class ReciprocalRankFusionRetriever(BaseRetriever):
+    """Standalone Reciprocal Rank Fusion (RRF) retriever combining multiple retrievers.
+
+    Fuses retrieved candidates from multiple retrievers (e.g. dense vector and sparse BM25)
+    using the reciprocal rank score formula:
+        RRF_Score = sum(1.0 / (k + rank))
+    without any dependency on external LLM services or API keys.
+    """
+
+    def __init__(
+        self,
+        retrievers: Sequence[BaseRetriever],
+        similarity_top_k: int = 10,
+        k: int = DEFAULT_RRF_K,
+        callback_manager: Any | None = None,
+    ) -> None:
+        """Initialize ReciprocalRankFusionRetriever.
+
+        Args:
+            retrievers: Sequence of BaseRetriever instances to query and fuse.
+            similarity_top_k: Number of fused candidates to return.
+            k: Reciprocal rank fusion constant (default: 60).
+            callback_manager: Optional callback manager for tracing.
+        """
+        super().__init__(callback_manager=callback_manager)
+        self._retrievers: list[BaseRetriever] = list(retrievers)
+        self._similarity_top_k: int = similarity_top_k
+        self._k: int = k
+
+    def _retrieve(self, query_bundle: QueryBundle) -> list[NodeWithScore]:
+        """Retrieve candidates synchronously from all retrievers and fuse them.
+
+        Args:
+            query_bundle: QueryBundle containing the query string.
+
+        Returns:
+            List of fused NodeWithScore candidates.
+        """
+        all_results: list[list[NodeWithScore]] = [
+            retriever.retrieve(query_bundle) for retriever in self._retrievers
+        ]
+        return reciprocal_rank_fusion(
+            results=all_results,
+            k=self._k,
+            top_k=self._similarity_top_k,
+        )
+
+    async def _aretrieve(self, query_bundle: QueryBundle) -> list[NodeWithScore]:
+        """Retrieve candidates asynchronously in parallel from all retrievers and fuse them.
+
+        Args:
+            query_bundle: QueryBundle containing the query string.
+
+        Returns:
+            List of fused NodeWithScore candidates.
+        """
+        tasks = [retriever.aretrieve(query_bundle) for retriever in self._retrievers]
+        all_results: list[list[NodeWithScore]] = await asyncio.gather(*tasks)
+        return reciprocal_rank_fusion(
+            results=all_results,
+            k=self._k,
+            top_k=self._similarity_top_k,
+        )
+
+
 class RAGOrchestrator:
     """
     High-level orchestrator for RAG pipeline operations using LlamaIndex native components.
@@ -263,6 +389,24 @@ class RAGOrchestrator:
     incremental FAISS HNSW vector indexing, BM25 indexing, cross-encoder reranking
     with BAAI/bge-reranker-base, snapshot persistence, and query execution.
     """
+
+    @staticmethod
+    def reciprocal_rank_fusion(
+        results: Sequence[Sequence[NodeWithScore]],
+        k: int = DEFAULT_RRF_K,
+        top_k: int | None = None,
+    ) -> list[NodeWithScore]:
+        """Fuse multiple lists of retrieved nodes using Reciprocal Rank Fusion (RRF).
+
+        Args:
+            results: Sequences of retrieved nodes from individual retrievers.
+            k: Smoothing constant for reciprocal rank score (default: 60).
+            top_k: Optional maximum number of fused nodes to return.
+
+        Returns:
+            List of fused NodeWithScore candidates sorted descending by RRF score.
+        """
+        return reciprocal_rank_fusion(results=results, k=k, top_k=top_k)
 
     def __init__(
         self,
@@ -294,6 +438,9 @@ class RAGOrchestrator:
 
         self._initialized = False
         self._indexes_loaded = False
+
+        # Explicitly configure MockLLM to eliminate external OpenAI API key requirements
+        Settings.llm = MockLLM()
 
         if auto_load:
             self._initialize_services()
@@ -334,6 +481,9 @@ class RAGOrchestrator:
             return
 
         try:
+            # Configure MockLLM to avoid OpenAI API key checks in LlamaIndex response synthesizers
+            Settings.llm = MockLLM()
+
             embed_config = get_embedding_config(self.config_path)
             embedding_model_name: str = embed_config.get("embedding_model", "BAAI/bge-small-en-v1.5")
             embedding_device: str = embed_config.get("embedding_device", "cpu")
@@ -887,11 +1037,11 @@ class RAGOrchestrator:
 
         retriever: BaseRetriever
         if search_type == "hybrid" and self._bm25_retriever:
-            retriever = QueryFusionRetriever(
-                [vector_retriever, self._bm25_retriever],
+            self._bm25_retriever.similarity_top_k = candidate_k
+            retriever = ReciprocalRankFusionRetriever(
+                retrievers=[vector_retriever, self._bm25_retriever],
                 similarity_top_k=candidate_k,
-                num_queries=1,
-                mode=FUSION_MODES.RECIPROCAL_RANK,
+                k=DEFAULT_RRF_K,
             )
         elif search_type == "keyword" and self._bm25_retriever:
             self._bm25_retriever.similarity_top_k = candidate_k
@@ -1000,11 +1150,11 @@ class RAGOrchestrator:
         vector_retriever = self._index.as_retriever(similarity_top_k=candidate_k)
         retriever: BaseRetriever
         if search_type == "hybrid" and self._bm25_retriever:
-            retriever = QueryFusionRetriever(
-                [vector_retriever, self._bm25_retriever],
+            self._bm25_retriever.similarity_top_k = candidate_k
+            retriever = ReciprocalRankFusionRetriever(
+                retrievers=[vector_retriever, self._bm25_retriever],
                 similarity_top_k=candidate_k,
-                num_queries=1,
-                mode=FUSION_MODES.RECIPROCAL_RANK,
+                k=DEFAULT_RRF_K,
             )
         elif search_type == "keyword" and self._bm25_retriever:
             self._bm25_retriever.similarity_top_k = candidate_k
@@ -1098,3 +1248,12 @@ def get_orchestrator(
             docstore_path=docstore_path,
         )
     return _orchestrator_instance
+
+
+def reset_orchestrator() -> None:
+    """Reset and close the singleton RAGOrchestrator instance."""
+    global _orchestrator_instance
+    if _orchestrator_instance is not None:
+        _orchestrator_instance.close()
+        _orchestrator_instance = None
+
