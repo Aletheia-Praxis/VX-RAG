@@ -22,7 +22,7 @@ from contextlib import contextmanager
 from datetime import datetime, timezone
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
-from typing import Any, TypeVar, cast
+from typing import Any, TextIO, TypeVar, cast
 
 import yaml
 
@@ -212,6 +212,7 @@ _shared_file_handlers: dict[str, SafeRotatingFileHandler] = {}
 _logger_cache: dict[str, StructuredLogger] = {}
 _logger_instance: StructuredLogger | None = None
 _global_logging_overrides: dict[str, Any] = {}
+_console_stream: TextIO = sys.stdout
 
 
 def _safe_windows_rotator(source: str, dest: str) -> None:
@@ -390,7 +391,7 @@ def _get_or_create_rotating_handler(
 
 def reset_logging_handlers() -> None:
     """Close and clear all cached handlers and loggers (for testing teardown)."""
-    global _logger_instance
+    global _logger_instance, _console_stream
     with _logging_lock:
         for logger in list(_logger_cache.values()):
             for handler in logger.logger.handlers[:]:
@@ -404,7 +405,45 @@ def reset_logging_handlers() -> None:
         _logger_cache.clear()
         _logger_instance = None
         _global_logging_overrides.clear()
+        _console_stream = sys.stdout
         clear_request_id()
+
+
+def configure_console_stream(stream: TextIO = sys.stderr) -> None:
+    """
+    Rebind all existing logging StreamHandlers targeting standard output and set default stream.
+
+    Ensures that structured logging does not pollute sys.stdout in stdio transport modes.
+
+    Args:
+        stream: Target stream for console output (defaults to sys.stderr).
+    """
+    global _console_stream
+    with _logging_lock:
+        target_streams: tuple[Any, ...] = (sys.stdout, sys.stderr, _console_stream, None)
+        handlers_to_rebind: list[logging.Handler] = list(logging.root.handlers)
+        for logger_wrapper in _logger_cache.values():
+            handlers_to_rebind.extend(logger_wrapper.logger.handlers)
+
+        for logger_obj in logging.Logger.manager.loggerDict.values():
+            if isinstance(logger_obj, logging.Logger):
+                handlers_to_rebind.extend(logger_obj.handlers)
+
+        for handler in handlers_to_rebind:
+            if (
+                isinstance(handler, logging.StreamHandler)
+                and not isinstance(handler, logging.FileHandler)
+                and type(handler).__name__ != "_StderrHandler"
+                and (
+                    handler.stream in target_streams
+                    or getattr(handler, "stream", None) in target_streams
+                )
+            ):
+                try:
+                    handler.setStream(stream)
+                except (AttributeError, ValueError):
+                    pass
+        _console_stream = stream
 
 
 class StructuredLogger:
@@ -444,7 +483,7 @@ class StructuredLogger:
             )
 
         # Console handler
-        console_handler = logging.StreamHandler(sys.stdout)
+        console_handler = logging.StreamHandler(_console_stream)
         console_handler.setFormatter(formatter)
         self.logger.addHandler(console_handler)
 
