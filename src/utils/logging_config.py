@@ -574,6 +574,21 @@ class StructuredLogger:
         extra = self._prepare_extra(kwargs)
         self.logger.error(message, exc_info=exc_info, extra=extra)
 
+    def exception(self, message: str, **kwargs: Any) -> None:
+        """
+        Log exception message with traceback.
+
+        Equivalent to error() with exc_info=True. Follows the standard
+        logging.Logger.exception() interface for use inside except blocks.
+
+        Args:
+            message: Message text.
+            **kwargs: Additional parameters passed to logger.
+        """
+        kwargs.setdefault("exc_info", True)
+        extra = self._prepare_extra(kwargs)
+        self.logger.error(message, exc_info=True, extra=extra)
+
     def warning(self, message: str, **kwargs: Any) -> None:
         """
         Log warning message.
