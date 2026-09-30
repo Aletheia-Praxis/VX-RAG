@@ -4,7 +4,8 @@ Manual test script for TaskQueue with asyncio.to_thread().
 
 import asyncio
 import time
-from src.utils.task_queue import TaskQueue, TaskPriority
+
+from src.utils.task_queue import TaskPriority, TaskQueue
 
 
 def sync_task(value: int, delay: float = 0.1) -> int:

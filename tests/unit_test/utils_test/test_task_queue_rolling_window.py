@@ -5,9 +5,10 @@ Tests the FIFO buffer behavior where oldest tasks are evicted when limits are re
 """
 
 import asyncio
-import pytest
 import time
 from pathlib import Path
+
+import pytest
 
 from src.utils.task_queue import (
     TaskQueue,

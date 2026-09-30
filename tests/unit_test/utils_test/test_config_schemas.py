@@ -8,16 +8,16 @@ import pytest
 from pydantic import ValidationError
 
 from src.utils.config_schemas import (
-    VXRAGSettings,
-    EmbeddingConfig,
-    ChunkingConfig,
     AdaptiveChunkingProfile,
+    ChunkingConfig,
+    DuplicateDetectionConfig,
+    EmbeddingConfig,
     FAISSConfig,
-    RetrieverConfig,
-    RerankerConfig,
     MCPConfig,
     RateLimitConfig,
-    DuplicateDetectionConfig,
+    RerankerConfig,
+    RetrieverConfig,
+    VXRAGSettings,
 )
 
 

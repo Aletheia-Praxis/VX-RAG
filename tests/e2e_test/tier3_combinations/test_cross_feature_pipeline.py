@@ -16,16 +16,12 @@ import asyncio
 import hashlib
 import json
 from pathlib import Path
-from typing import TYPE_CHECKING, Set
 
 import pytest
 from llama_index.core.schema import NodeWithScore, TextNode
 
 from src.mcp.formatters import format_query_response, format_search_response
 from src.rag.libs.schemas.mcp_schemas import ContextItem, MCPContextPayload
-
-if TYPE_CHECKING:
-    pass
 
 
 class TestCrossFeaturePipeline:
@@ -56,7 +52,7 @@ class TestCrossFeaturePipeline:
         }
 
         # Step 2: Ingest into registry
-        processed_hashes: Set[str] = set()
+        processed_hashes: set[str] = set()
         processed_hashes.add(metadata["file_hash"])
 
         # Step 3: Attempt duplicate ingestion

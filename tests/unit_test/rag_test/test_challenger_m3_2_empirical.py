@@ -13,8 +13,9 @@ from __future__ import annotations
 
 import hashlib
 import math
+from collections.abc import Generator
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Generator
+from typing import TYPE_CHECKING, Any
 from unittest.mock import MagicMock, patch
 
 import pytest

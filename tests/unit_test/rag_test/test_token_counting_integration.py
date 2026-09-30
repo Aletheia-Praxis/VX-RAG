@@ -2,8 +2,8 @@ import pytest
 from llama_index.core import Settings
 
 from src.rag.libs.utils.llamaindex_integration import (
-    get_global_token_counter,
     ensure_global_token_counter,
+    get_global_token_counter,
 )
 from src.rag.libs.utils.token_counter import LlamaIndexTokenCounter
 

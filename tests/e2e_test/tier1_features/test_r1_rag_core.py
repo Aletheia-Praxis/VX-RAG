@@ -16,13 +16,10 @@ import hashlib
 import json
 import math
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Dict, List
+from typing import Any
 
 import pytest
 from llama_index.core.schema import NodeWithScore, TextNode
-
-if TYPE_CHECKING:
-    pass
 
 
 class TestFeature1BGEEmbeddingIntegration:
@@ -35,14 +32,17 @@ class TestFeature1BGEEmbeddingIntegration:
 
     def test_bge_small_embedding_dimension_contract(self) -> None:
         """Verify that BAAI/bge-small-en-v1.5 is configured for 384 dimensions."""
-        from src.rag.orchestrator import _EMBEDDING_DIMENSION_BY_MODEL, _FALLBACK_EMBEDDING_DIMENSION
+        from src.rag.orchestrator import (
+            _EMBEDDING_DIMENSION_BY_MODEL,
+            _FALLBACK_EMBEDDING_DIMENSION,
+        )
 
         expected_dim = 384
         # Model must map to 384 or fallback to 384 dimension
         model_dim = _EMBEDDING_DIMENSION_BY_MODEL.get("BAAI/bge-small-en-v1.5", _FALLBACK_EMBEDDING_DIMENSION)
         assert model_dim == expected_dim, f"Expected 384 dimensions for BGE-small, found {model_dim}"
 
-    def test_bge_embedding_device_contract(self, isolated_e2e_env: Dict[str, Any]) -> None:
+    def test_bge_embedding_device_contract(self, isolated_e2e_env: dict[str, Any]) -> None:
         """Verify embedding device configuration defaults strictly to CPU."""
         config_data = isolated_e2e_env["config_data"]
         assert config_data.get("embedding_device") == "cpu", "Embedding model must execute on CPU"
@@ -160,7 +160,7 @@ class TestFeature2BGECrossEncoderReranker:
             NodeWithScore(node=TextNode(text="Snippet B", id_="B"), score=0.74),
         ]
 
-        def fail_rerank(items: List[NodeWithScore]) -> List[NodeWithScore]:
+        def fail_rerank(items: list[NodeWithScore]) -> list[NodeWithScore]:
             raise RuntimeError("CUDA/CPU compute backend unavailable")
 
         # Fallback contract: caught exception returns original candidates unchanged
@@ -242,7 +242,7 @@ class TestFeature3FAISSHNSWIncrementalAppends:
         index = faiss.IndexHNSWFlat(384, 32, faiss.METRIC_INNER_PRODUCT)
         invalid_vector = np.random.randn(1, 768).astype(np.float32)
 
-        with pytest.raises(Exception):
+        with pytest.raises(RuntimeError):
             index.add(invalid_vector)
 
     def test_faiss_hnsw_persistence_roundtrip(self, tmp_path: Path) -> None:
@@ -360,7 +360,7 @@ class TestFeature5HybridSearchBM25AndVector:
     def test_hybrid_search_prioritizes_double_match_nodes(self) -> None:
         """Verify nodes appearing in both vector and BM25 results receive higher fusion rank."""
         # node_common appears in both rank 1
-        rrf_scores: Dict[str, float] = {}
+        rrf_scores: dict[str, float] = {}
         k = 60  # RRF constant
 
         vector_ranks = {"node_common": 1, "node_vector_only": 2}

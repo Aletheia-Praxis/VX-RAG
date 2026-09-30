@@ -16,7 +16,7 @@ from __future__ import annotations
 import hashlib
 import json
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Dict, List, Set
+from typing import Any
 
 import pytest
 
@@ -25,9 +25,6 @@ from src.mcp.formatters import (
     format_search_response,
 )
 from src.rag.libs.schemas.mcp_schemas import ContextItem, MCPContextPayload
-
-if TYPE_CHECKING:
-    pass
 
 
 class TestCybersecurityWorkflows:
@@ -221,8 +218,8 @@ class TestCybersecurityWorkflows:
         3. Scanned PDF triggers conditional Tesseract OCR.
         4. Re-submitting identical file triggers exact duplicate detection and skips re-indexing.
         """
-        processed_hashes: Set[str] = set()
-        ingested_files: List[Dict[str, Any]] = []
+        processed_hashes: set[str] = set()
+        ingested_files: list[dict[str, Any]] = []
 
         # Document A: Clean Markdown
         doc_a = tmp_path / "analysis.md"

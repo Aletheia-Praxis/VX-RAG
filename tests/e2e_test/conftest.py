@@ -9,20 +9,14 @@ from __future__ import annotations
 
 import io
 import sys
-import yaml
+from collections.abc import Generator
 from pathlib import Path
 from typing import (
-    TYPE_CHECKING,
     Any,
-    Dict,
-    Generator,
-    List,
 )
 
 import pytest
-
-if TYPE_CHECKING:
-    pass
+import yaml
 
 # Ensure project root is on sys.path
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
@@ -162,7 +156,7 @@ This signature (0x5A4D) indicates the legacy DOS stub header.
 
 
 @pytest.fixture
-def isolated_e2e_env(tmp_path: Path) -> Dict[str, Any]:
+def isolated_e2e_env(tmp_path: Path) -> dict[str, Any]:
     """
     Provide an isolated filesystem environment and configuration for E2E tests.
 
@@ -187,7 +181,7 @@ def isolated_e2e_env(tmp_path: Path) -> Dict[str, Any]:
 
     config_path = config_dir / "test_settings.yaml"
 
-    config_data: Dict[str, Any] = {
+    config_data: dict[str, Any] = {
         "data_dir": str(tmp_path),
         "raw_data_dir": str(raw_dir),
         "processed_data_dir": str(processed_dir),
@@ -283,7 +277,7 @@ def run_cli_command() -> Generator[Any, None, None]:
     Yields:
         Callable runner accepting list of string arguments and returning CLIExecutionResult.
     """
-    def _runner(args: List[str]) -> CLIExecutionResult:
+    def _runner(args: list[str]) -> CLIExecutionResult:
         """Run CLI with arguments."""
         from src.cli import main
 
@@ -303,7 +297,7 @@ def run_cli_command() -> Generator[Any, None, None]:
             main()
         except SystemExit as exc:
             exit_code = exc.code if isinstance(exc.code, int) else (1 if exc.code else 0)
-        except Exception as err:
+        except BaseException as err:  # noqa: BLE001 — CLI runner must capture all errors
             captured_stderr.write(str(err))
             exit_code = 1
         finally:

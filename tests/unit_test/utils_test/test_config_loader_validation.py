@@ -4,11 +4,12 @@ Unit tests for configuration loader with Pydantic validation.
 Tests the config_loader module's ability to load and validate configuration.
 """
 
-import pytest
-import yaml
 from pathlib import Path
 
-from src.utils.config_loader import load_settings, get_validated_settings
+import pytest
+import yaml
+
+from src.utils.config_loader import get_validated_settings, load_settings
 from src.utils.config_schemas import VXRAGSettings
 
 

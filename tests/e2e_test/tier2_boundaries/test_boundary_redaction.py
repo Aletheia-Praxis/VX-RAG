@@ -8,16 +8,11 @@ complex email formats, and technical identifier preservation.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
-
 from src.mcp.formatters import (
     redact_email_addresses,
     redact_ip_addresses,
     redact_sensitive_data,
 )
-
-if TYPE_CHECKING:
-    pass
 
 
 class TestBoundaryRedaction:

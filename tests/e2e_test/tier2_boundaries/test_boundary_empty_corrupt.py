@@ -11,12 +11,9 @@ from __future__ import annotations
 import hashlib
 import json
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Dict, List
+from typing import Any
 
 import pytest
-
-if TYPE_CHECKING:
-    pass
 
 
 class TestBoundaryEmptyAndCorruptFiles:
@@ -31,7 +28,7 @@ class TestBoundaryEmptyAndCorruptFiles:
         empty_hash = hashlib.sha256(empty_pdf.read_bytes()).hexdigest()
         assert empty_hash == "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
 
-        def ingest_file(path: Path) -> List[Any]:
+        def ingest_file(path: Path) -> list[Any]:
             if path.stat().st_size == 0:
                 # Expected behavior: skip and return empty node list
                 return []
@@ -72,7 +69,7 @@ class TestBoundaryEmptyAndCorruptFiles:
         truncated_pdf = tmp_path / "truncated.pdf"
         truncated_pdf.write_bytes(b"%PDF-1.5\n%truncated abruptly without %%EOF")
 
-        def safe_parse(path: Path) -> Dict[str, Any]:
+        def safe_parse(path: Path) -> dict[str, Any]:
             raw = path.read_bytes()
             if b"%%EOF" not in raw:
                 # Log error and return error status
@@ -104,7 +101,7 @@ class TestBoundaryEmptyAndCorruptFiles:
         locked_file = tmp_path / "locked.txt"
         locked_file.write_text("Secret content", encoding="utf-8")
 
-        def batch_ingest(files: List[Path]) -> List[str]:
+        def batch_ingest(files: list[Path]) -> list[str]:
             results = []
             for f in files:
                 try:

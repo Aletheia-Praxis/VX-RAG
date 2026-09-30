@@ -13,14 +13,11 @@ import datetime
 import hashlib
 import re
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Dict, Set
+from typing import Any
 
 import pytest
 
-if TYPE_CHECKING:
-    pass
-
-STRICT_METADATA_KEYS: Set[str] = {
+STRICT_METADATA_KEYS: set[str] = {
     "file_name",
     "file_type",
     "creation_date",
@@ -29,7 +26,7 @@ STRICT_METADATA_KEYS: Set[str] = {
 }
 
 
-def sanitize_metadata_to_strict_schema(raw_meta: Dict[str, Any]) -> Dict[str, str]:
+def sanitize_metadata_to_strict_schema(raw_meta: dict[str, Any]) -> dict[str, str]:
     """
     Sanitize an arbitrary metadata dictionary to enforce strictly the 5 schema fields.
 
@@ -145,7 +142,7 @@ class TestFeature12ExactDuplicateDetection:
 
     def test_duplicate_detection_skips_known_hash(self) -> None:
         """Verify ingestion filter identifies and skips already processed file hashes."""
-        processed_registry: Set[str] = {
+        processed_registry: set[str] = {
             "a1b2c3d4e5f60718293a4b5c6d7e8f90a1b2c3d4e5f60718293a4b5c6d7e8f90"
         }
 
@@ -155,7 +152,7 @@ class TestFeature12ExactDuplicateDetection:
 
     def test_duplicate_detection_allows_novel_file_content(self) -> None:
         """Verify ingestion filter accepts novel file hashes."""
-        processed_registry: Set[str] = {
+        processed_registry: set[str] = {
             "a" * 64
         }
         novel_hash = "b" * 64

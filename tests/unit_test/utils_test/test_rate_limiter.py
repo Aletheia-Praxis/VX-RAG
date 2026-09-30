@@ -3,13 +3,10 @@ Unit tests for Rate Limiter.
 """
 
 import asyncio
+
 import pytest
-from typing import TYPE_CHECKING
 
 from src.utils.rate_limiter import RateLimiter, get_rate_limiter
-
-if TYPE_CHECKING:
-    pass
 
 
 @pytest.fixture

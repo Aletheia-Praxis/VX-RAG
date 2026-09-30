@@ -12,12 +12,11 @@ from __future__ import annotations
 
 import sys
 from pathlib import Path
-from typing import List
 
 import pytest
 
 
-def run_e2e_suite(extra_args: List[str] | None = None) -> int:
+def run_e2e_suite(extra_args: list[str] | None = None) -> int:
     """
     Execute the E2E test suite using pytest.
 

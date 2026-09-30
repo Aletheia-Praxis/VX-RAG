@@ -14,12 +14,8 @@ from __future__ import annotations
 
 import re
 from pathlib import Path
-from typing import TYPE_CHECKING, List
 
 import pytest
-
-if TYPE_CHECKING:
-    pass
 
 
 class TestFeature6DoclingStandardExtraction:
@@ -224,7 +220,7 @@ class TestFeature9MarkdownAwareChunking:
         # Simulated text of ~2000 tokens
         words = ["token"] * 2500
 
-        chunks: List[str] = []
+        chunks: list[str] = []
         words_per_chunk = default_chunk_size
         step = int(words_per_chunk * 0.85)  # 15% overlap
         for i in range(0, len(words), step):

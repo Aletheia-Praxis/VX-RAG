@@ -200,9 +200,11 @@ class TestProseParagraphOverlapStress:
             "Network alert triggered.",
             "Host telemetry detected anomalous service installation.",
             "The advanced threat adversary persisted across reboot by installing a malicious service.",
-            "During in-depth forensic investigation of memory dump samples, analysts extracted several "
-            "obfuscated DLL modules exhibiting dynamic API resolution and anti-debugging capabilities "
-            "designed specifically to evade sandbox analysis.",
+            (
+                "During in-depth forensic investigation of memory dump samples, analysts extracted several "
+                "obfuscated DLL modules exhibiting dynamic API resolution and anti-debugging capabilities "
+                "designed specifically to evade sandbox analysis."
+            ),
         ]
 
         paras: list[str] = []

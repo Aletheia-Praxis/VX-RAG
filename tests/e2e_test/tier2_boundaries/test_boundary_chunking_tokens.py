@@ -9,12 +9,8 @@ and extreme technical document layout boundaries.
 from __future__ import annotations
 
 import re
-from typing import TYPE_CHECKING, List
 
 from src.rag.libs.schemas.mcp_schemas import ContextItem
-
-if TYPE_CHECKING:
-    pass
 
 
 class TestBoundaryChunkingAndTokens:
@@ -31,9 +27,9 @@ class TestBoundaryChunkingAndTokens:
 
         candidates = [node_high, node_med, node_low]
 
-        def assemble_within_budget(items: List[ContextItem], budget: int) -> List[ContextItem]:
+        def assemble_within_budget(items: list[ContextItem], budget: int) -> list[ContextItem]:
             sorted_items = sorted(items, key=lambda x: x.score or 0.0, reverse=True)
-            selected: List[ContextItem] = []
+            selected: list[ContextItem] = []
             used_tokens = 0
             for it in sorted_items:
                 tokens = len(it.text.split())
@@ -84,7 +80,7 @@ int x = 0;
         """Verify a string of 10,000 characters without whitespace does not cause an infinite loop."""
         long_token = "A" * 10000
 
-        def safe_split_long_tokens(text: str, max_chunk_chars: int = 1000) -> List[str]:
+        def safe_split_long_tokens(text: str, max_chunk_chars: int = 1000) -> list[str]:
             chunks = []
             for i in range(0, len(text), max_chunk_chars):
                 chunks.append(text[i:i + max_chunk_chars])

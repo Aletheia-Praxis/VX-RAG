@@ -4,10 +4,10 @@ Test-specific logging configuration.
 This module provides logging setup for tests to prevent pollution of production logs.
 """
 
-import sys
 import logging
+import sys
+from datetime import datetime, timezone
 from pathlib import Path
-from datetime import datetime
 
 
 def configure_test_logging(log_dir: Path) -> None:
@@ -40,7 +40,7 @@ def configure_test_logging(log_dir: Path) -> None:
     root_logger.addHandler(console_handler)
     
     # File handler - capture all DEBUG messages
-    timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+    timestamp = datetime.now(tz=timezone.utc).strftime("%Y-%m-%d_%H-%M-%S")
     log_file = log_dir / f"test_run_{timestamp}.log"
     
     file_handler = logging.FileHandler(log_file, encoding='utf-8')

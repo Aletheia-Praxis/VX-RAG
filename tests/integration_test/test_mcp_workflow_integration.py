@@ -5,10 +5,11 @@ Tests that MCP handlers correctly use the new async Workflow
 instead of the old synchronous orchestrator methods.
 """
 
-import pytest
-from unittest.mock import Mock, AsyncMock, patch
+from unittest.mock import AsyncMock, Mock, patch
 
+import pytest
 from src.mcp.handlers import handle_query_knowledge_base
+
 from src.mcp.schemas import QueryKnowledgeBaseRequest
 
 

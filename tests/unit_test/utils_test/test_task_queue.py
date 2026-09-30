@@ -3,19 +3,16 @@ Unit tests for Task Queue system.
 """
 
 import asyncio
-import pytest
 from pathlib import Path
-from typing import TYPE_CHECKING
+
+import pytest
 
 from src.utils.task_queue import (
+    TaskPriority,
     TaskQueue,
     TaskStatus,
-    TaskPriority,
     get_task_queue,
 )
-
-if TYPE_CHECKING:
-    pass
 
 
 @pytest.fixture
@@ -211,7 +208,6 @@ async def test_queue_stats(task_queue: TaskQueue) -> None:
     
     def dummy_task() -> None:
         """Dummy task."""
-        pass
     
     await task_queue.start()
     

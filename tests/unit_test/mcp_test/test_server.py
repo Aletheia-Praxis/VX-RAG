@@ -3,6 +3,7 @@ Tests for MCP server module.
 """
 
 from unittest.mock import Mock
+
 from src.mcp.bridge import MCPBridge
 
 

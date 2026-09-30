@@ -17,8 +17,9 @@ from __future__ import annotations
 import datetime
 import hashlib
 import json
+from collections.abc import Generator
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Generator
+from typing import TYPE_CHECKING, Any
 
 import faiss
 import numpy as np
