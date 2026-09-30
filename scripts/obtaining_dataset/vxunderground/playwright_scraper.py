@@ -1,15 +1,16 @@
-import os
-import sqlite3
 import hashlib
-import requests
-import shutil
-import threading
+import os
 import queue
+import shutil
+import sqlite3
+import threading
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
-from playwright.sync_api import sync_playwright, Page
-from playwright_stealth import Stealth
+
+import requests
 from dotenv import load_dotenv
+from playwright.sync_api import Page, sync_playwright
+from playwright_stealth import Stealth
 
 # Load local environment variables from the script's directory
 ENV_PATH = Path(__file__).resolve().parent / ".env"
@@ -109,10 +110,9 @@ def download_file(url: str, temp_path: Path) -> bool:
         response = requests.get(url, stream=True, timeout=60)
         response.raise_for_status()
         with open(temp_path, "wb") as f:
-            for chunk in response.iter_content(chunk_size=8192):
-                f.write(chunk)
+            f.writelines(response.iter_content(chunk_size=8192))
         return True
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001 — network/HTTP errors are unpredictable
         print(f"[Worker] Error downloading {url}: {e}")
         return False
 
@@ -179,7 +179,7 @@ def download_worker(conn: sqlite3.Connection) -> None:
             DOWNLOAD_QUEUE.task_done()
         except queue.Empty:
             continue
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 — Playwright/threading errors are unpredictable
             print(f"[Worker] Unexpected error: {e}")
 
 
@@ -203,7 +203,7 @@ def crawl_path(page: Page, path: str, conn: sqlite3.Connection) -> None:
         # Check for Cloudflare challenge
         try:
             page.wait_for_selector("table tbody tr", timeout=15000)
-        except Exception:
+        except Exception:  # noqa: BLE001 — Playwright TimeoutError and others all need catching
             if page.query_selector("iframe[src*='cloudflare']") or "verify you are human" in page.content().lower():
                 print("[Crawler] Cloudflare challenge detected! Please solve it manually in the browser window.")
                 page.wait_for_selector("table tbody tr", timeout=300000) # Wait 5 mins for manual solve
@@ -253,7 +253,7 @@ def crawl_path(page: Page, path: str, conn: sqlite3.Connection) -> None:
             c.execute("UPDATE queue SET status = 'completed' WHERE path = ?", (path,))
             conn.commit()
         
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001 — Playwright navigation errors are unpredictable
         print(f"[Crawler] Error crawling {path}: {e}")
         with DB_LOCK:
             c = conn.cursor()
@@ -314,7 +314,7 @@ def main() -> None:
                 
                 try:
                     crawl_path(page, current_path, conn)
-                except Exception as e:
+                except Exception as e:  # noqa: BLE001 — crawl_path raises various Playwright errors
                     print(f"Error crawling {current_path}: {e}")
                     with DB_LOCK:
                         c = conn.cursor()
