@@ -4,9 +4,10 @@ MCP (Model Context Protocol) schemas for context assembly.
 Defines Pydantic models for MCP-compatible payloads used in RAG system.
 """
 
-from typing import List, Dict, Any, Optional
-from pydantic import BaseModel, Field, field_validator
 from datetime import datetime, timezone
+from typing import Any
+
+from pydantic import BaseModel, Field, field_validator
 
 # Only this schema version is currently supported.
 # Increment here when the payload contract changes.
@@ -18,12 +19,12 @@ class ContextItem(BaseModel):
     
     id: str = Field(..., description="Unique identifier for the context item")
     text: str = Field(..., description="Text content of the context item")
-    score: Optional[float] = Field(None, description="Relevance score (0.0 to 1.0)")
-    meta: Dict[str, Any] = Field(default_factory=dict, description="Metadata for the context item")
+    score: float | None = Field(None, description="Relevance score (0.0 to 1.0)")
+    meta: dict[str, Any] = Field(default_factory=dict, description="Metadata for the context item")
     
     @field_validator('score')
     @classmethod
-    def validate_score(cls, v: Optional[float]) -> Optional[float]:
+    def validate_score(cls, v: float | None) -> float | None:
         if v is not None and not (0.0 <= v <= 1.0):
             raise ValueError('Score must be between 0.0 and 1.0')
         return v
@@ -33,14 +34,14 @@ class MCPContextPayload(BaseModel):
     """MCP-compatible context payload for LLM queries."""
     
     schema_version: str = Field("1.0", description="MCP schema version")
-    context: List[ContextItem] = Field(..., description="List of context items")
+    context: list[ContextItem] = Field(..., description="List of context items")
     query: str = Field(..., description="Original user query")
     token_budget: int = Field(2048, description="Maximum token budget for context")
-    timestamp: Optional[datetime] = Field(
+    timestamp: datetime | None = Field(
         default_factory=lambda: datetime.now(timezone.utc),
         description="Payload creation timestamp (timezone-aware UTC)",
     )
-    provenance: Dict[str, Any] = Field(default_factory=dict, description="Provenance information")
+    provenance: dict[str, Any] = Field(default_factory=dict, description="Provenance information")
 
     @field_validator('schema_version')
     @classmethod
@@ -74,10 +75,10 @@ class ContextAssemblyRequest(BaseModel):
     """Request model for context assembly."""
     
     query: str = Field(..., description="User query")
-    documents: List[Dict[str, Any]] = Field(..., description="Retrieved documents with metadata")
-    token_budget: Optional[int] = Field(2048, description="Token budget")
-    max_items: Optional[int] = Field(10, description="Maximum number of context items")
-    min_score: Optional[float] = Field(0.0, description="Minimum relevance score to include")
+    documents: list[dict[str, Any]] = Field(..., description="Retrieved documents with metadata")
+    token_budget: int | None = Field(2048, description="Token budget")
+    max_items: int | None = Field(10, description="Maximum number of context items")
+    min_score: float | None = Field(0.0, description="Minimum relevance score to include")
 
 
 class ContextAssemblyResponse(BaseModel):
