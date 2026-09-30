@@ -48,6 +48,12 @@ def main() -> None:
     query_parser.add_argument("--persist-dir", type=str, default="data/index")
     query_parser.add_argument("--config", type=str, default="config/settings.yaml")
     query_parser.add_argument("--top-k", type=int, default=5)
+    query_parser.add_argument(
+        "--search-type",
+        choices=["hybrid", "semantic", "keyword"],
+        default="hybrid",
+        help="Search modality: hybrid (default), semantic (vector only), or keyword (BM25 only)",
+    )
 
     # Serve MCP command
     serve_parser = subparsers.add_parser("serve", help="Start MCP server")
@@ -142,7 +148,10 @@ def handle_query(args: argparse.Namespace) -> None:
         orchestrator = get_orchestrator(config_path=args.config, persist_dir=args.persist_dir)
 
         print(f"Querying for: {args.query}")
-        result = orchestrator.query(query=args.query, top_k=args.top_k, search_type="hybrid")
+        # Execute query with requested search modality (defaults to search_type="hybrid")
+        result = orchestrator.query(
+            query=args.query, top_k=args.top_k, search_type=args.search_type
+        )
 
         for i, item in enumerate(result.context, 1):
             print(f"\n[{i}] Score: {item.score:.4f}")
