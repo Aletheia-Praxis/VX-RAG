@@ -96,11 +96,12 @@ class TestFeatures13To16CLICommands:
         assert "--top-k" in res.stdout
 
     def test_cli_serve_help_flag(self, run_cli_command: Callable[[list[str]], Any]) -> None:
-        """Verify cli serve --help displays transport options."""
+        """Verify cli serve --help displays transport and persist-dir options."""
         res = run_cli_command(["serve", "--help"])
         assert res.exit_code == 0
         assert "--transport" in res.stdout
         assert "stdio" in res.stdout
+        assert "--persist-dir" in res.stdout
 
     def test_cli_serve_transport_options(self, run_cli_command: Callable[[list[str]], Any]) -> None:
         """Verify cli serve accepts valid transport options."""
@@ -112,6 +113,60 @@ class TestFeatures13To16CLICommands:
         """Verify cli serve rejects invalid transport values."""
         res = run_cli_command(["serve", "--transport", "websocket_invalid"])
         assert res.exit_code != 0
+
+    def test_cli_serve_persist_dir_forwarding(self, run_cli_command: Callable[[list[str]], Any]) -> None:
+        """Verify cli serve forwards custom --persist-dir to server runtime."""
+        with (
+            patch("src.mcp.server.run_stdio") as mock_run_stdio,
+            patch("src.mcp.server.configure_server") as mock_configure_server,
+        ):
+            res = run_cli_command(["serve", "--persist-dir", "custom/indices/path"])
+            assert res.exit_code == 0
+            mock_configure_server.assert_called_once_with(
+                config_path="config/settings.yaml",
+                persist_dir="custom/indices/path",
+            )
+            mock_run_stdio.assert_called_once_with(
+                config_path="config/settings.yaml",
+                persist_dir="custom/indices/path",
+            )
+
+    def test_cli_serve_stdio_redirects_banner_and_logging_to_stderr(self, run_cli_command: Callable[[list[str]], Any]) -> None:
+        """Verify cli serve stdio transport outputs banners to stderr, leaving stdout clean."""
+        with (
+            patch("src.mcp.server.run_stdio") as mock_run_stdio,
+            patch("src.mcp.server.configure_server"),
+        ):
+            mock_run_stdio.side_effect = lambda **kwargs: None
+            res = run_cli_command(["serve", "--transport", "stdio"])
+            assert res.exit_code == 0
+            assert "Starting MCP server with transport: stdio" in res.stderr
+            assert "Starting MCP server with transport: stdio" not in res.stdout
+            assert res.stdout.strip() == ""
+
+    def test_cli_serve_sse_banner_to_stdout(self, run_cli_command: Callable[[list[str]], Any]) -> None:
+        """Verify non-stdio transports output startup banners to stdout."""
+        def _dummy_run(coro: Any) -> None:
+            coro.close()
+
+        with (
+            patch("asyncio.run", side_effect=_dummy_run),
+            patch("src.mcp.server.configure_server"),
+        ):
+            res = run_cli_command(["serve", "--transport", "sse"])
+            assert res.exit_code == 0
+            assert "Starting MCP server with transport: sse" in res.stdout
+
+    def test_cli_serve_stdio_keyboard_interrupt_to_stderr(self, run_cli_command: Callable[[list[str]], Any]) -> None:
+        """Verify KeyboardInterrupt banner in stdio mode goes to stderr."""
+        with (
+            patch("src.mcp.server.run_stdio", side_effect=KeyboardInterrupt),
+            patch("src.mcp.server.configure_server"),
+        ):
+            res = run_cli_command(["serve", "--transport", "stdio"])
+            assert res.exit_code == 0
+            assert "Server shutdown complete" in res.stderr
+            assert "Server shutdown complete" not in res.stdout
 
 
 class TestFeatures17And18FastMCPServerAndConcurrency:

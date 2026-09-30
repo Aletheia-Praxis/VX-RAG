@@ -215,16 +215,16 @@ async def test_fastmcp_server_runtime_and_sequential_lock() -> None:
         assert str(parsed) == req_id
 
 
-def test_cli_serve_lacks_persist_dir_argument() -> None:
-    """Empirically confirm that CLI 'serve' lacks --persist-dir argument."""
+def test_cli_serve_supports_persist_dir_argument() -> None:
+    """Empirically confirm that CLI 'serve' accepts --persist-dir argument."""
     proc = subprocess.run(
-        [sys.executable, "-m", "src.cli", "serve", "--persist-dir", "data/index_test_1000"],
+        [sys.executable, "-m", "src.cli", "serve", "--help"],
         capture_output=True,
         text=True,
         check=False,
     )
-    assert proc.returncode != 0
-    assert "unrecognized arguments: --persist-dir" in proc.stderr
+    assert proc.returncode == 0
+    assert "--persist-dir" in proc.stdout
 
 
 def test_cli_query_succeeds_without_openai_api_key_in_clean_env() -> None:
@@ -247,8 +247,29 @@ def test_cli_query_succeeds_without_openai_api_key_in_clean_env() -> None:
     assert "Query complete." in proc.stdout
 
 
-def test_cli_serve_stdio_stdout_logging_pollution() -> None:
-    """Empirically confirm that CLI serve outputs print banners and logs to stdout."""
+def test_cli_serve_stdio_stdout_logging_clean() -> None:
+    """Empirically confirm that CLI serve outputs print banners to stderr in stdio mode."""
     cli_source = Path("src/cli.py").read_text(encoding="utf-8")
-    assert 'print(f"Starting MCP server with transport: {args.transport}")' in cli_source
+    assert "banner_file = sys.stderr if is_stdio else sys.stdout" in cli_source
+    assert 'print(f"Starting MCP server with transport: {args.transport}", file=banner_file)' in cli_source
     assert 'search_type="hybrid"' in cli_source
+
+    script = (
+        "import sys\n"
+        "from unittest.mock import patch\n"
+        "with patch('src.mcp.server.mcp.run'):\n"
+        "    from src.cli import main\n"
+        "    sys.argv = ['cli.py', 'serve', '--transport', 'stdio', '--persist-dir', 'data/index_test_1000']\n"
+        "    main()\n"
+    )
+    proc = subprocess.run(
+        [sys.executable, "-c", script],
+        capture_output=True,
+        text=True,
+        timeout=30,
+        check=False,
+    )
+    assert proc.returncode == 0
+    assert proc.stdout == ""
+    assert "Starting MCP server with transport: stdio" in proc.stderr
+
