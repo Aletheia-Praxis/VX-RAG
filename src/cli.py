@@ -60,6 +60,12 @@ def main() -> None:
     serve_parser.add_argument("--host", type=str, default="localhost")
     serve_parser.add_argument("--port", type=int, default=8000)
     serve_parser.add_argument("--config", type=str, default="config/settings.yaml")
+    serve_parser.add_argument(
+        "--persist-dir",
+        type=str,
+        default="data/index",
+        help="Directory containing persisted FAISS and BM25 indices",
+    )
     serve_parser.add_argument("--transport", choices=["stdio", "sse", "http"], default="stdio")
     serve_parser.add_argument("--cors", action="store_true")
     serve_parser.add_argument("--allowed-origins", type=str, default="*")
@@ -164,21 +170,46 @@ def handle_query(args: argparse.Namespace) -> None:
 
 def handle_serve(args: argparse.Namespace) -> None:
     """Handle serve command."""
+    from src.utils.logging_config import configure_console_stream
+
+    is_stdio = args.transport == "stdio"
+    banner_file = sys.stderr if is_stdio else sys.stdout
+
+    if is_stdio:
+        configure_console_stream(sys.stderr)
+
+    print(f"Starting MCP server with transport: {args.transport}", file=banner_file)
+
     with request_context():
         import asyncio
 
-        from src.mcp.server import run_http, run_sse, run_stdio
+        from src.mcp.server import configure_server, run_http, run_sse, run_stdio
 
-        print(f"Starting MCP server with transport: {args.transport}")
+        configure_server(config_path=args.config, persist_dir=args.persist_dir)
+
         try:
             if args.transport == "stdio":
-                run_stdio()
+                run_stdio(config_path=args.config, persist_dir=args.persist_dir)
             elif args.transport == "sse":
-                asyncio.run(run_sse(host=args.host, port=args.port))
+                asyncio.run(
+                    run_sse(
+                        host=args.host,
+                        port=args.port,
+                        config_path=args.config,
+                        persist_dir=args.persist_dir,
+                    )
+                )
             elif args.transport == "http":
-                asyncio.run(run_http(host=args.host, port=args.port))
+                asyncio.run(
+                    run_http(
+                        host=args.host,
+                        port=args.port,
+                        config_path=args.config,
+                        persist_dir=args.persist_dir,
+                    )
+                )
         except KeyboardInterrupt:
-            print("\nServer shutdown complete")
+            print("\nServer shutdown complete", file=banner_file)
 
 
 if __name__ == "__main__":
