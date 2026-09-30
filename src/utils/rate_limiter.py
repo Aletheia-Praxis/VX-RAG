@@ -13,9 +13,10 @@ For single-user local system, provides:
 
 import asyncio
 import time
-from dataclasses import dataclass, field
-from typing import Any, Callable, Coroutine, Optional, Dict, Tuple
 from collections import deque
+from collections.abc import Callable, Coroutine
+from dataclasses import dataclass, field
+from typing import Any
 
 from src.utils.logging_config import get_logger
 
@@ -39,8 +40,8 @@ class QueuedRequest:
 
     request_id: str
     handler: Callable[..., Coroutine[Any, Any, Any]]
-    args: Tuple[Any, ...]
-    kwargs: Dict[str, Any]
+    args: tuple[Any, ...]
+    kwargs: dict[str, Any]
     queued_at: float
     timeout: float
     # Each queued request owns its own Event so it can be woken up individually
@@ -135,9 +136,9 @@ class RateLimiter:
         self,
         request_id: str,
         handler: Callable[..., Coroutine[Any, Any, Any]],
-        args: Tuple[Any, ...] = (),
-        kwargs: Optional[Dict[str, Any]] = None,
-        timeout: Optional[float] = None,
+        args: tuple[Any, ...] = (),
+        kwargs: dict[str, Any] | None = None,
+        timeout: float | None = None,
     ) -> Any:
         """
         Execute a request with rate limiting.
@@ -224,11 +225,10 @@ class RateLimiter:
             raise
 
         except Exception as e:
-            logger.error(
+            logger.exception(
                 "Request failed",
                 request_id=request_id,
                 error=str(e),
-                exc_info=True,
             )
             raise
 
@@ -245,8 +245,8 @@ class RateLimiter:
         self,
         request_id: str,
         handler: Callable[..., Coroutine[Any, Any, Any]],
-        args: Tuple[Any, ...],
-        kwargs: Dict[str, Any],
+        args: tuple[Any, ...],
+        kwargs: dict[str, Any],
         timeout: float,
     ) -> None:
         """
@@ -318,7 +318,7 @@ class RateLimiter:
                 except ValueError:
                     pass
 
-    def get_stats(self) -> Dict[str, Any]:
+    def get_stats(self) -> dict[str, Any]:
         """
         Return current rate-limiter statistics.
 
@@ -363,7 +363,7 @@ class RateLimiter:
 
 
 # Global rate limiter instance
-_rate_limiter: Optional[RateLimiter] = None
+_rate_limiter: RateLimiter | None = None
 
 
 def get_rate_limiter(

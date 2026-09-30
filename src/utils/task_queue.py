@@ -18,11 +18,12 @@ import functools
 import json
 import time
 import uuid
+from collections.abc import Callable
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timezone
 from enum import Enum
 from pathlib import Path
-from typing import Any, Callable, Dict, Optional, Tuple
+from typing import Any
 
 from src.utils.logging_config import get_logger
 
@@ -70,15 +71,15 @@ class QueueTask:
     task_id: str
     name: str
     func: Callable[..., Any]
-    args: Tuple[Any, ...] = ()
-    kwargs: Optional[Dict[str, Any]] = None
+    args: tuple[Any, ...] = ()
+    kwargs: dict[str, Any] | None = None
     priority: TaskPriority = TaskPriority.NORMAL
     status: TaskStatus = TaskStatus.PENDING
     result: Any = None
-    error: Optional[str] = None
-    created_at: Optional[float] = None
-    started_at: Optional[float] = None
-    completed_at: Optional[float] = None
+    error: str | None = None
+    created_at: float | None = None
+    started_at: float | None = None
+    completed_at: float | None = None
     retries: int = 3
     max_retries: int = 3
     
@@ -89,7 +90,7 @@ class QueueTask:
         if self.kwargs is None:
             self.kwargs = {}
     
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """
         Convert task to dictionary for serialization.
         Excludes func as it's not serializable.
@@ -155,7 +156,7 @@ class TaskQueue:
     def __init__(
         self,
         max_concurrent_tasks: int = 2,
-        state_file: Optional[Path] = None,
+        state_file: Path | None = None,
         enable_persistence: bool = True,
         max_completed_tasks: int = 100,
         max_failed_tasks: int = 50,
@@ -179,14 +180,14 @@ class TaskQueue:
         self._queue: asyncio.PriorityQueue[QueueTask] = asyncio.PriorityQueue()
         
         # Task registry (all tasks by ID)
-        self._tasks: Dict[str, QueueTask] = {}
+        self._tasks: dict[str, QueueTask] = {}
         
         # Currently running tasks
-        self._running_tasks: Dict[str, asyncio.Task[Any]] = {}
+        self._running_tasks: dict[str, asyncio.Task[Any]] = {}
         
         # Control flags
         self._running = False
-        self._worker_task: Optional[asyncio.Task[Any]] = None
+        self._worker_task: asyncio.Task[Any] | None = None
         
         # Semaphore for rate limiting
         self._concurrency_semaphore = asyncio.Semaphore(max_concurrent_tasks)
@@ -257,8 +258,8 @@ class TaskQueue:
         self,
         name: str,
         func: Callable[..., Any],
-        args: Tuple[Any, ...] = (),
-        kwargs: Optional[Dict[str, Any]] = None,
+        args: tuple[Any, ...] = (),
+        kwargs: dict[str, Any] | None = None,
         priority: TaskPriority = TaskPriority.NORMAL,
         max_retries: int = 3,
     ) -> str:
@@ -303,7 +304,7 @@ class TaskQueue:
         
         return task_id
     
-    async def get_task_status(self, task_id: str) -> Optional[Dict[str, Any]]:
+    async def get_task_status(self, task_id: str) -> dict[str, Any] | None:
         """
         Get status of a task.
         
@@ -395,7 +396,7 @@ class TaskQueue:
                 )
                 del self._tasks[task.task_id]
     
-    def get_queue_stats(self) -> Dict[str, Any]:
+    def get_queue_stats(self) -> dict[str, Any]:
         """
         Get queue statistics.
         
@@ -441,7 +442,7 @@ class TaskQueue:
                 asyncio.create_task(self._execute_task(task))
                 
             except Exception as e:
-                logger.error(f"Error in worker loop: {e}", exc_info=True)
+                logger.exception("Error in worker loop")
         
         logger.info("TaskQueue worker loop stopped")
     
@@ -491,11 +492,10 @@ class TaskQueue:
                 )
                 
             except Exception as e:
-                logger.error(
+                logger.exception(
                     f"Task failed: {task.name}",
                     task_id=task.task_id,
                     error=str(e),
-                    exc_info=True,
                 )
                 
                 # Retry logic
@@ -530,27 +530,30 @@ class TaskQueue:
     
     async def _save_state(self) -> None:
         """Save task queue state to disk."""
+        import anyio
         try:
             state = {
                 'tasks': [task.to_dict() for task in self._tasks.values()],
-                'saved_at': datetime.now().isoformat(),
+                'saved_at': datetime.now(tz=timezone.utc).isoformat(),
             }
-            
-            with open(self.state_file, 'w') as f:
-                json.dump(state, f, indent=2)
-                
-        except Exception as e:
+
+            async with await anyio.open_file(self.state_file, 'w') as f:
+                await f.write(json.dumps(state, indent=2))
+
+        except OSError as e:
             logger.error(f"Failed to save task queue state: {e}")
-    
+
     async def _load_state(self) -> None:
         """Load task queue state from disk."""
+        import anyio
         if not self.state_file.exists():
             logger.info("No task queue state file found, starting fresh")
             return
-        
+
         try:
-            with open(self.state_file, 'r') as f:
-                state = json.load(f)
+            async with await anyio.open_file(self.state_file, 'r') as f:
+                content = await f.read()
+            state = json.loads(content)
 
             # Restore pending tasks only (running tasks are lost on crash).
             # NOTE: The actual callable cannot be restored from disk. These tasks
@@ -574,12 +577,12 @@ class TaskQueue:
                     state_file=str(self.state_file),
                 )
 
-        except Exception as e:
+        except (OSError, ValueError) as e:
             logger.error(f"Failed to load task queue state: {e}")
 
 
 # Global task queue instance
-_task_queue: Optional[TaskQueue] = None
+_task_queue: TaskQueue | None = None
 
 
 def get_task_queue(
