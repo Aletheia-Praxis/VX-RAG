@@ -25,7 +25,7 @@ from llama_index.core import Settings
 from llama_index.core.llms import MockLLM
 
 from src.mcp.server import mcp, query_lock
-from src.rag.orchestrator import get_orchestrator
+from src.rag.orchestrator import get_orchestrator, reset_orchestrator
 
 INDEX_DIR: Path = Path("data/index_test_1000")
 MANIFEST_PATH: Path = INDEX_DIR / "manifest.json"
@@ -227,8 +227,10 @@ def test_cli_serve_lacks_persist_dir_argument() -> None:
     assert "unrecognized arguments: --persist-dir" in proc.stderr
 
 
-def test_cli_query_fails_without_openai_api_key_in_clean_env() -> None:
-    """Empirically confirm that CLI query fails without OPENAI_API_KEY in a clean process."""
+def test_cli_query_succeeds_without_openai_api_key_in_clean_env() -> None:
+    """Empirically confirm that CLI query succeeds without OPENAI_API_KEY in a clean process."""
+    reset_orchestrator()
+
     env = dict(os.environ)
     env.pop("OPENAI_API_KEY", None)
     env["PYTHONPATH"] = "."
@@ -240,8 +242,9 @@ def test_cli_query_fails_without_openai_api_key_in_clean_env() -> None:
         env=env,
         check=False,
     )
-    assert proc.returncode != 0
-    assert "No API key found for OpenAI" in proc.stderr or "Could not load OpenAI model" in proc.stderr
+    assert proc.returncode == 0
+    assert "No API key found for OpenAI" not in proc.stderr
+    assert "Query complete." in proc.stdout
 
 
 def test_cli_serve_stdio_stdout_logging_pollution() -> None:
