@@ -441,7 +441,7 @@ class TaskQueue:
                 # Execute task with concurrency control
                 asyncio.create_task(self._execute_task(task))
                 
-            except Exception as e:
+            except Exception:
                 logger.exception("Error in worker loop")
         
         logger.info("TaskQueue worker loop stopped")
