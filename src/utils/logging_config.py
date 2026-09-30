@@ -585,9 +585,9 @@ class StructuredLogger:
             message: Message text.
             **kwargs: Additional parameters passed to logger.
         """
-        kwargs.setdefault("exc_info", True)
+        include_exc_info: bool = kwargs.pop("exc_info", True)
         extra = self._prepare_extra(kwargs)
-        self.logger.error(message, exc_info=True, extra=extra)
+        self.logger.error(message, exc_info=include_exc_info, extra=extra)
 
     def warning(self, message: str, **kwargs: Any) -> None:
         """
