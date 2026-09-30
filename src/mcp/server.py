@@ -8,8 +8,11 @@ sequential CPU query processing via asyncio.Lock.
 from __future__ import annotations
 
 import asyncio
+import sys
 import weakref
+from pathlib import Path
 from types import TracebackType
+from typing import Any
 
 from fastmcp import FastMCP
 
@@ -20,20 +23,76 @@ from src.mcp.formatters import (
     format_search_response,
     format_system_context,
 )
-from src.rag.orchestrator import get_orchestrator
+from src.rag.orchestrator import RAGOrchestrator, get_orchestrator
 from src.utils.config_loader import get_mcp_defaults, get_mcp_timeouts
-from src.utils.logging_config import get_logger, log_service_health, request_context
+from src.utils.logging_config import (
+    configure_console_stream,
+    get_logger,
+    log_service_health,
+    request_context,
+)
 from src.utils.metrics import get_metrics
 
 logger = get_logger("mcp_server")
 metrics = get_metrics()
 
-# Load MCP configuration from settings.yaml
-mcp_timeouts = get_mcp_timeouts()
-mcp_defaults = get_mcp_defaults()
+# Load MCP configuration from settings.yaml (deferred from import time to prevent stdout pollution)
+mcp_timeouts: dict[str, float] = {}
+mcp_defaults: dict[str, Any] = {}
 
 # Fallback tuple for broad exception handling without triggering Ruff BLE001
 _SAFE_EXCEPTIONS: tuple[type[BaseException], ...] = (Exception,)
+
+# Configured paths for orchestrator initialization
+_configured_config_path: str = "config/settings.yaml"
+_configured_persist_dir: str = "data/index"
+
+
+def configure_server(
+    config_path: str = "config/settings.yaml",
+    persist_dir: str = "data/index",
+) -> RAGOrchestrator:
+    """Configure and initialize the RAG orchestrator for MCP server.
+
+    If the orchestrator was previously initialized with a different persist directory
+    or configuration path, it is safely reset and re-initialized.
+
+    Args:
+        config_path: Path to configuration YAML file.
+        persist_dir: Path to directory containing persisted FAISS and BM25 indices.
+
+    Returns:
+        The configured RAGOrchestrator instance.
+    """
+    global _configured_config_path, _configured_persist_dir, mcp_defaults, mcp_timeouts
+    _configured_config_path = config_path
+    _configured_persist_dir = persist_dir
+    try:
+        if Path(config_path).exists():
+            mcp_timeouts = get_mcp_timeouts(config_path)
+            mcp_defaults = get_mcp_defaults(config_path)
+        else:
+            mcp_timeouts = {}
+            mcp_defaults = {}
+    except _SAFE_EXCEPTIONS:
+        mcp_timeouts = {}
+        mcp_defaults = {}
+
+    from src.rag.orchestrator import _orchestrator_instance, reset_orchestrator
+
+    if _orchestrator_instance is not None:
+        try:
+            curr_persist = Path(_orchestrator_instance.persist_dir).resolve()
+            new_persist = Path(persist_dir).resolve()
+            curr_cfg = Path(_orchestrator_instance.config_path).resolve()
+            new_cfg = Path(config_path).resolve()
+            if curr_persist != new_persist or curr_cfg != new_cfg:
+                reset_orchestrator()
+        except OSError:
+            reset_orchestrator()
+
+    return get_orchestrator(config_path=config_path, persist_dir=persist_dir)
+
 
 # FastMCP server instance
 mcp = FastMCP(
@@ -127,7 +186,10 @@ async def query_knowledge_base(
     with request_context():
         async with query_lock:
             try:
-                orchestrator = get_orchestrator()
+                orchestrator = get_orchestrator(
+                    config_path=_configured_config_path,
+                    persist_dir=_configured_persist_dir,
+                )
                 payload = await orchestrator.query_async(
                     query=query,
                     top_k=top_k,
@@ -162,7 +224,10 @@ async def search_documents(
     with request_context():
         async with query_lock:
             try:
-                orchestrator = get_orchestrator()
+                orchestrator = get_orchestrator(
+                    config_path=_configured_config_path,
+                    persist_dir=_configured_persist_dir,
+                )
                 results = orchestrator.search_documents(
                     query=query,
                     top_k=top_k,
@@ -188,7 +253,10 @@ async def health_status() -> str:
     """
     with request_context():
         try:
-            orchestrator = get_orchestrator()
+            orchestrator = get_orchestrator(
+                config_path=_configured_config_path,
+                persist_dir=_configured_persist_dir,
+            )
             health_data = orchestrator.get_health_status()
             return format_health_status(health_data)
         except _SAFE_EXCEPTIONS as e:
@@ -214,13 +282,23 @@ mcp.resource("health://status")(health_status)
 mcp.resource("context://system")(system_context)
 
 
-async def start_server() -> None:
-    """Start and verify the MCP server dependencies."""
+async def start_server(
+    config_path: str = "config/settings.yaml",
+    persist_dir: str = "data/index",
+) -> None:
+    """Start and verify the MCP server dependencies.
+
+    Args:
+        config_path: Path to configuration YAML file.
+        persist_dir: Path to directory containing persisted FAISS and BM25 indices.
+    """
     with request_context():
         logger.info("Starting VX-RAG MCP server")
         log_service_health("mcp_server", "starting")
         try:
-            orchestrator = get_orchestrator()
+            orchestrator = configure_server(
+                config_path=config_path, persist_dir=persist_dir
+            )
             health = orchestrator.get_health_status()
             logger.info(
                 "RAG orchestrator initialized",
@@ -237,19 +315,58 @@ async def start_server() -> None:
             raise
 
 
-def run_stdio() -> None:
-    """Run MCP server in STDIO mode."""
+def run_stdio(
+    config_path: str = "config/settings.yaml",
+    persist_dir: str = "data/index",
+) -> None:
+    """Run MCP server in STDIO mode.
+
+    Args:
+        config_path: Path to configuration YAML file.
+        persist_dir: Path to directory containing persisted FAISS and BM25 indices.
+    """
+    configure_console_stream(sys.stderr)
     logger.info("Starting VX-RAG MCP server in STDIO mode")
     log_service_health("mcp_server", "starting")
+    try:
+        orchestrator = configure_server(
+            config_path=config_path, persist_dir=persist_dir
+        )
+        health = orchestrator.get_health_status()
+        logger.info(
+            "RAG orchestrator initialized",
+            status=health.get("overall_status"),
+            initialized=health.get("initialized"),
+            indexes_loaded=health.get("indexes_loaded"),
+        )
+        if not health.get("initialized"):
+            logger.warning("RAG services not fully initialized")
+        log_service_health("mcp_server", "ready")
+    except _SAFE_EXCEPTIONS as e:
+        logger.error(f"Failed to initialize MCP server: {e}")
+        log_service_health("mcp_server", "error", error=str(e))
+        raise
     mcp.run()
 
 
-async def run_sse(host: str = "localhost", port: int = 8000) -> None:
-    """Run MCP server in SSE mode."""
+async def run_sse(
+    host: str = "localhost",
+    port: int = 8000,
+    config_path: str = "config/settings.yaml",
+    persist_dir: str = "data/index",
+) -> None:
+    """Run MCP server in SSE mode.
+
+    Args:
+        host: Host interface to bind.
+        port: TCP port to listen on.
+        config_path: Path to configuration YAML file.
+        persist_dir: Path to directory containing persisted FAISS and BM25 indices.
+    """
     import uvicorn
 
-    await start_server()
-    app = mcp.sse_app()  # type: ignore[attr-defined]
+    await start_server(config_path=config_path, persist_dir=persist_dir)
+    app = mcp.sse_app()
     config = uvicorn.Config(
         app, host=host, port=port, log_level="info", access_log=True
     )
@@ -257,11 +374,23 @@ async def run_sse(host: str = "localhost", port: int = 8000) -> None:
     await server.serve()
 
 
-async def run_http(host: str = "localhost", port: int = 8000) -> None:
-    """Run MCP server in HTTP mode."""
+async def run_http(
+    host: str = "localhost",
+    port: int = 8000,
+    config_path: str = "config/settings.yaml",
+    persist_dir: str = "data/index",
+) -> None:
+    """Run MCP server in HTTP mode.
+
+    Args:
+        host: Host interface to bind.
+        port: TCP port to listen on.
+        config_path: Path to configuration YAML file.
+        persist_dir: Path to directory containing persisted FAISS and BM25 indices.
+    """
     import uvicorn
 
-    await start_server()
+    await start_server(config_path=config_path, persist_dir=persist_dir)
     app = mcp.http_app()
     config = uvicorn.Config(
         app, host=host, port=port, log_level="info", access_log=True
