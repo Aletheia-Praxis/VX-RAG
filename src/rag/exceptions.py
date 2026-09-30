@@ -8,7 +8,6 @@ in the RAG pipeline, enabling more precise error handling and debugging.
 
 class RAGException(Exception):
     """Base exception for all RAG-related errors."""
-    pass
 
 
 class ServiceInitializationError(RAGException):
