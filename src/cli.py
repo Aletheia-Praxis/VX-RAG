@@ -66,7 +66,7 @@ def main() -> None:
         default="data/index",
         help="Directory containing persisted FAISS and BM25 indices",
     )
-    serve_parser.add_argument("--transport", choices=["stdio", "sse", "http"], default="stdio")
+    serve_parser.add_argument("--transport", choices=["stdio", "http"], default="stdio")
     serve_parser.add_argument("--cors", action="store_true")
     serve_parser.add_argument("--allowed-origins", type=str, default="*")
 
@@ -183,22 +183,13 @@ def handle_serve(args: argparse.Namespace) -> None:
     with request_context():
         import asyncio
 
-        from src.mcp.server import configure_server, run_http, run_sse, run_stdio
+        from src.mcp.server import configure_server, run_http, run_stdio
 
         configure_server(config_path=args.config, persist_dir=args.persist_dir)
 
         try:
             if args.transport == "stdio":
                 run_stdio(config_path=args.config, persist_dir=args.persist_dir)
-            elif args.transport == "sse":
-                asyncio.run(
-                    run_sse(
-                        host=args.host,
-                        port=args.port,
-                        config_path=args.config,
-                        persist_dir=args.persist_dir,
-                    )
-                )
             elif args.transport == "http":
                 asyncio.run(
                     run_http(
