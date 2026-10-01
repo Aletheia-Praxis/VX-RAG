@@ -94,21 +94,18 @@ def test_index_artifacts_manifest_and_hashes() -> None:
     assert verified_count == 13, f"Expected 13 verified physical files, got {verified_count}"
 
 
-def test_faiss_and_bm25_structures_in_memory() -> None:
-    """Empirically inspect FAISS HNSW Flat and BM25 index objects in memory."""
-    import faiss
-
+def test_vector_store_and_bm25_structures_in_memory() -> None:
+    """Empirically inspect Qdrant vector store and BM25 index objects in memory."""
     orchestrator = get_orchestrator(persist_dir=str(INDEX_DIR))
     vector_store = orchestrator._vector_store
     assert vector_store is not None, "Vector store was not initialized"
 
-    faiss_index = vector_store._faiss_index
-    assert faiss_index is not None, "FAISS index object is missing"
-    assert type(faiss_index).__name__ == "IndexHNSWFlat"
-    assert faiss_index.d == 384, f"Expected dimension 384, got {faiss_index.d}"
-    assert faiss_index.ntotal == 84, f"Expected 84 vectors, got {faiss_index.ntotal}"
-    assert faiss_index.metric_type == faiss.METRIC_INNER_PRODUCT
-    assert faiss_index.is_trained is True
+    client = orchestrator._qdrant_client
+    assert client is not None, "Qdrant client is missing"
+    collection_name = vector_store.collection_name
+    collection_info = client.get_collection(collection_name)
+    assert collection_info is not None, "Qdrant collection is missing"
+    assert collection_info.points_count == 84, f"Expected 84 points, got {collection_info.points_count}"
 
     bm25 = orchestrator._bm25_retriever
     assert bm25 is not None, "BM25 retriever was not initialized"

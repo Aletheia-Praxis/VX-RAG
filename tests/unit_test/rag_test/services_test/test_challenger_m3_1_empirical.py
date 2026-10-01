@@ -498,12 +498,9 @@ class TestSnapshotPersistenceEmpirical:
         manifest_file = result_dir / "manifest.json"
         assert manifest_file.exists()
 
-        faiss_dir = result_dir / "faiss_index"
-        assert faiss_dir.exists()
-        assert (faiss_dir / "default__vector_store.json").exists()
-
         bm25_dir = result_dir / "bm25_index"
         assert bm25_dir.exists()
+        assert any(result_dir.glob("*.json")), "Expected index metadata or store files in snapshot"
 
         # Invariant 2: Manifest schema validation
         manifest_data = json.loads(manifest_file.read_text(encoding="utf-8"))
@@ -632,16 +629,17 @@ class TestSnapshotPersistenceEmpirical:
         manifest_file = result_dir / "manifest.json"
         manifest_data = json.loads(manifest_file.read_text(encoding="utf-8"))
         files_map: dict[str, str] = manifest_data["files"]
-
         # Deliberately corrupt a file in snapshot
-        target_file = result_dir / "faiss_index" / "default__vector_store.json"
+        rel_files = [rf for rf in files_map if (result_dir / rf).is_file()]
+        assert len(rel_files) > 0, "No files found in snapshot to tamper with"
+        rel_path = rel_files[0]
+        target_file = result_dir / rel_path
         original_bytes = target_file.read_bytes()
         target_file.write_bytes(original_bytes + b"\x00TAMPER_BYTE")
 
         # Recompute SHA-256
         corrupted_bytes = target_file.read_bytes()
         corrupted_sha256 = hashlib.sha256(corrupted_bytes).hexdigest()
-        rel_path = target_file.relative_to(result_dir).as_posix()
 
         # Invariant: Tampered file's hash must NOT match manifest
         assert files_map[rel_path] != corrupted_sha256

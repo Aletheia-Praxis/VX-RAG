@@ -23,7 +23,6 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 from unittest.mock import MagicMock, patch
 
-import faiss
 import pytest
 from llama_index.core.base.embeddings.base import BaseEmbedding
 from llama_index.core.schema import NodeWithScore, TextNode
@@ -128,6 +127,11 @@ class TestRAGOrchestratorInitialization:
         dim = _EMBEDDING_DIMENSION_BY_MODEL.get("BAAI/bge-small-en-v1.5", _FALLBACK_EMBEDDING_DIMENSION)
         assert dim == 384
 
+    def test_bge_m3_embedding_dimension_mapping(self) -> None:
+        """Verify BAAI/bge-m3 maps to 1024 dimensions."""
+        dim = _EMBEDDING_DIMENSION_BY_MODEL.get("BAAI/bge-m3", _FALLBACK_EMBEDDING_DIMENSION)
+        assert dim == 1024
+
     @patch("src.rag.orchestrator.HuggingFaceEmbedding")
     @patch("src.rag.orchestrator.BGECrossEncoderReranker")
     def test_initialize_services_configures_bge_models(
@@ -169,15 +173,15 @@ class TestRAGOrchestratorInitialization:
         )
 
 
-class TestFAISSHNSWVectorStoreFallback:
-    """Test suite for FAISS HNSW vector store initialization and fallback."""
+class TestQdrantVectorStoreInitialization:
+    """Test suite for Qdrant vector store initialization."""
 
-    def test_empty_vector_store_fallback_creates_hnsw_flat(
+    def test_empty_vector_store_initializes_qdrant_collection(
         self,
         temp_config_file: str,
         tmp_path: Path,
     ) -> None:
-        """Verify empty vector store fallback avoids VectorStoreIndex.from_vector_store crash.
+        """Verify empty vector store initializes Qdrant collection cleanly.
 
         Args:
             temp_config_file: Path to temporary config YAML.
@@ -191,17 +195,22 @@ class TestFAISSHNSWVectorStoreFallback:
         )
 
         vector_store, storage_context, index, loaded = orchestrator._load_vector_store(
-            persist_dir / "faiss_index",
-            "BAAI/bge-small-en-v1.5",
+            persist_dir / "qdrant",
+            "BAAI/bge-m3",
         )
 
-        assert not loaded
-        assert vector_store is not None
-        assert storage_context is not None
-        assert index is not None
-        # Verify internal FAISS index is IndexHNSWFlat with dimension 384
-        assert vector_store._faiss_index.d == 384
-        assert isinstance(vector_store._faiss_index, faiss.IndexHNSWFlat)
+        try:
+            assert not loaded
+            assert vector_store is not None
+            assert storage_context is not None
+            assert index is not None
+            assert orchestrator._qdrant_client is not None
+            collections = orchestrator._qdrant_client.get_collections().collections
+            assert any(c.name == "vx_rag_collection" for c in collections)
+            collection_info = orchestrator._qdrant_client.get_collection("vx_rag_collection")
+            assert collection_info.config.params.vectors.size == 1024
+        finally:
+            orchestrator.close()
 
 
 class TestIndexedFileHashesAndDuplicateDetection:

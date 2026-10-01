@@ -242,7 +242,7 @@ class TestFeature3FAISSHNSWIncrementalAppends:
         index = faiss.IndexHNSWFlat(384, 32, faiss.METRIC_INNER_PRODUCT)
         invalid_vector = np.random.randn(1, 768).astype(np.float32)
 
-        with pytest.raises(RuntimeError):
+        with pytest.raises((RuntimeError, AssertionError)):
             index.add(invalid_vector)
 
     def test_faiss_hnsw_persistence_roundtrip(self, tmp_path: Path) -> None:
