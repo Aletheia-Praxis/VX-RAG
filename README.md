@@ -246,13 +246,12 @@ docker compose --profile http up
 ### Available Modes
 
 - **STDIO** (default): IDE integration via MCP client
-- **HTTP**: REST API for testing (port 8000)
-- **SSE**: Server-Sent Events for web clients
+- **HTTP**: Streamable HTTP for remote connections and testing (port 8000)
 
 ### Ports
 
 - **25191**: Standard MCP server port
-- **8000**: HTTP/SSE modes for development
+- **8000**: HTTP mode for development
 
 More details: [docs/DOCKER_DEPLOYMENT.md](docs/DOCKER_DEPLOYMENT.md)
 
