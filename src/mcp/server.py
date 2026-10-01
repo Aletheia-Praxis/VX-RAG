@@ -59,7 +59,7 @@ def configure_server(
 
     Args:
         config_path: Path to configuration YAML file.
-        persist_dir: Path to directory containing persisted FAISS and BM25 indices.
+        persist_dir: Path to directory containing persisted Qdrant and BM25 indices.
 
     Returns:
         The configured RAGOrchestrator instance.
@@ -290,7 +290,7 @@ async def start_server(
 
     Args:
         config_path: Path to configuration YAML file.
-        persist_dir: Path to directory containing persisted FAISS and BM25 indices.
+        persist_dir: Path to directory containing persisted Qdrant and BM25 indices.
     """
     with request_context():
         logger.info("Starting VX-RAG MCP server")
@@ -323,7 +323,7 @@ def run_stdio(
 
     Args:
         config_path: Path to configuration YAML file.
-        persist_dir: Path to directory containing persisted FAISS and BM25 indices.
+        persist_dir: Path to directory containing persisted Qdrant and BM25 indices.
     """
     configure_console_stream(sys.stderr)
     logger.info("Starting VX-RAG MCP server in STDIO mode")
@@ -361,7 +361,7 @@ async def run_http(
         host: Host interface to bind.
         port: TCP port to listen on.
         config_path: Path to configuration YAML file.
-        persist_dir: Path to directory containing persisted FAISS and BM25 indices.
+        persist_dir: Path to directory containing persisted Qdrant and BM25 indices.
     """
     import uvicorn
 
