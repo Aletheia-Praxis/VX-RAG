@@ -17,9 +17,15 @@ embedding_trust_remote_code: false
 # Indexing configuration
 chunk_size: 1024
 chunk_overlap: 200
-vector_store: "faiss"
+vector_store: "qdrant"
 
-# FAISS Index configuration
+# Qdrant Index configuration
+qdrant:
+  collection_name: "test_vx_rag_collection"
+  path: "./tests/test_data/index/qdrant"
+  distance: "Cosine"
+
+# FAISS Index configuration (legacy)
 faiss:
   hnsw_m: 32
   metric: "inner_product"
