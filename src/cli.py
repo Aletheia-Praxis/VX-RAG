@@ -64,7 +64,7 @@ def main() -> None:
         "--persist-dir",
         type=str,
         default="data/index",
-        help="Directory containing persisted FAISS and BM25 indices",
+        help="Directory containing persisted Qdrant and BM25 indices",
     )
     serve_parser.add_argument("--transport", choices=["stdio", "http"], default="stdio")
     serve_parser.add_argument("--cors", action="store_true")
@@ -118,8 +118,6 @@ def handle_index(args: argparse.Namespace) -> None:
     """Handle index command."""
     with request_context():
         start_time = time.time()
-        orchestrator = get_orchestrator(config_path=args.config, persist_dir=args.persist_dir)
-
         processed_dir = Path(args.data_dir).parent / "processed"
         nodes_db = processed_dir / "nodes.duckdb"
         nodes_json = processed_dir / "nodes.json"
@@ -136,6 +134,7 @@ def handle_index(args: argparse.Namespace) -> None:
             print(f"Storage error loading intermediate nodes: {err}", file=sys.stderr)
             sys.exit(1)
 
+        orchestrator = get_orchestrator(config_path=args.config, persist_dir=args.persist_dir)
         print(f"Building index from {len(nodes)} nodes...")
         try:
             orchestrator.index_nodes(nodes)
