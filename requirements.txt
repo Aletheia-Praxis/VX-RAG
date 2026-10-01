@@ -1,51 +1,51 @@
 # Core dependencies
 # LlamaIndex: RAG framework
-llama-index-core>=0.12.0
-llama-index-cli>=0.4.0
-llama-index-vector-stores-faiss>=0.4.0
-llama-index-retrievers-bm25>=0.6.0
-llama-index-embeddings-huggingface>=0.4.0
-llama-index-readers-file>=0.5.4
+llama-index-core>=0.14.25
+llama-index-cli>=0.5.7
+llama-index-vector-stores-faiss>=0.7.0
+llama-index-retrievers-bm25>=0.8.0
+llama-index-embeddings-huggingface>=0.8.0
+llama-index-readers-file>=0.7.0
 
 # Docling: Advanced document parsing and processing
-docling~=2.61.1
+docling~=2.130.0
 
 # Embeddings: State-of-the-art text embeddings
-sentence-transformers~=5.1.2
+sentence-transformers~=6.1.0
 
 # MCP framework: Model Context Protocol server
-fastmcp~=2.13.0
-pydantic~=2.12.4
-fastapi~=0.121.1
-uvicorn[standard]~=0.38.0
+fastmcp~=4.0.10
+pydantic~=2.13.5
+fastapi~=0.141.1
+uvicorn[standard]~=0.54.0
 
 # Data processing: Core data manipulation libraries
-beautifulsoup4~=4.14.2
-pandas~=2.3.3
-tiktoken~=0.12.0
-joblib~=1.5.2
+beautifulsoup4~=4.15.0
+pandas>=2.0.0
+tiktoken~=0.14.0
+joblib~=1.6.0
 
 # Web scraping and automation: Browser automation tools
-selenium~=4.38.0
+selenium~=4.49.0
 selenium-wire~=5.1.0
-requests~=2.32.5
+requests~=2.34.2
 playwright
 
 # Configuration: Environment and settings management
-pyyaml>=6.0.0
-python-dotenv>=1.0.0
+pyyaml>=6.0.3
+python-dotenv>=1.2.3
 
 # Vector storage: FAISS for efficient similarity search
-faiss-cpu~=1.12.0
+faiss-cpu~=1.15.1
 
 # Development: Testing and language detection
-pytest~=9.0.0
-pytest-mock~=3.15.1
+pytest~=9.1.1
+pytest-mock~=3.16.0
 pytest-asyncio~=1.4.0
 langdetect~=1.0.9
 
 # Quality and Static Analysis
-ruff>=0.14.0
-mypy>=1.10.0
+ruff>=0.16.9
+mypy>=2.3.1
 types-requests
 types-PyYAML
