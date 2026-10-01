@@ -316,7 +316,7 @@ def reciprocal_rank_fusion(
     return reranked_nodes
 
 
-class ReciprocalRankFusionRetriever(BaseRetriever):
+class ReciprocalRankFusionRetriever(BaseRetriever):  # type: ignore[misc]
     """Standalone Reciprocal Rank Fusion (RRF) retriever combining multiple retrievers.
 
     Fuses retrieved candidates from multiple retrievers (e.g. dense vector and sparse BM25)
