@@ -13,7 +13,7 @@ from pydantic import BaseModel, Field, model_validator
 class EmbeddingConfig(BaseModel):
     """Embedding model configuration."""
     
-    embedding_model: str = Field(default="BAAI/bge-small-en-v1.5", description="Embedding model name")
+    embedding_model: str = Field(default="BAAI/bge-m3", description="Embedding model name")
     embedding_device: Literal["cpu", "cuda"] = Field(default="cpu", description="Device for embedding")
     embedding_batch_size: int = Field(default=10, ge=1, le=1000, description="Batch size for embeddings")
     embedding_cache_size: int = Field(default=1000, ge=0, description="Cache size for embeddings")
@@ -64,6 +64,20 @@ class ChunkingConfig(BaseModel):
         return self
 
 
+class QdrantConfig(BaseModel):
+    """Qdrant vector store configuration."""
+
+    collection_name: str = Field(
+        default="vx_rag_collection", description="Qdrant collection name"
+    )
+    path: str = Field(
+        default="./data/index/qdrant", description="Local disk storage path for Qdrant"
+    )
+    distance: Literal["Cosine", "Euclid", "Dot"] = Field(
+        default="Cosine", description="Vector distance metric"
+    )
+
+
 class FAISSConfig(BaseModel):
     """FAISS index configuration."""
     
@@ -105,7 +119,7 @@ class RetrieverConfig(BaseModel):
 class RerankerConfig(BaseModel):
     """Reranker configuration."""
     
-    model_name: str = Field(default="BAAI/bge-reranker-base", description="Reranker model")
+    model_name: str = Field(default="BAAI/bge-reranker-v2-m3", description="Reranker model")
     top_k: int = Field(default=5, ge=1, le=50, description="Top K after reranking")
     device: Literal["cpu", "cuda"] = Field(default="cpu", description="Device for reranking")
     metadata_boost: float = Field(default=0.1, ge=0.0, le=1.0, description="Metadata boost factor")
@@ -218,7 +232,7 @@ class VXRAGSettings(BaseModel):
     snapshots_dir: str = Field(default="./data/snapshots")
     
     # Embedding
-    embedding_model: str = Field(default="BAAI/bge-small-en-v1.5")
+    embedding_model: str = Field(default="BAAI/bge-m3")
     embedding_device: Literal["cpu", "cuda"] = Field(default="cpu")
     embedding_batch_size: int = Field(default=10, ge=1, le=1000)
     embedding_cache_size: int = Field(default=1000, ge=0)
@@ -227,9 +241,10 @@ class VXRAGSettings(BaseModel):
     # Chunking
     chunk_size: int = Field(default=1024, ge=128, le=4096)
     chunk_overlap: int = Field(default=200, ge=0)
-    vector_store: str = Field(default="faiss")
+    vector_store: str = Field(default="qdrant")
     
     # Configuration sections
+    qdrant: QdrantConfig = Field(default_factory=QdrantConfig)
     faiss: FAISSConfig = Field(default_factory=FAISSConfig)
     docstore: DocstoreConfig = Field(default_factory=DocstoreConfig)
     adaptive_chunking: AdaptiveChunkingConfig = Field(default_factory=AdaptiveChunkingConfig)
@@ -263,3 +278,7 @@ class VXRAGSettings(BaseModel):
         "extra": "allow",  # Allow extra fields for forward compatibility
         "validate_assignment": True,  # Validate on assignment
     }
+
+
+# Backward compatibility alias
+SettingsSchema = VXRAGSettings

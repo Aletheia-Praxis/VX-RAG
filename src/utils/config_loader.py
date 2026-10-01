@@ -230,7 +230,7 @@ def get_embedding_config(config_path: str | None = None) -> dict[str, Any]:
     raw_embedder = config.get("embedder")
     embedder_cfg: dict[str, Any] = raw_embedder if isinstance(raw_embedder, dict) else {}
 
-    embedding_model = embedder_cfg.get("embedding_model") or config.get("embedding_model") or "BAAI/bge-small-en-v1.5"
+    embedding_model = embedder_cfg.get("embedding_model") or config.get("embedding_model") or "BAAI/bge-m3"
     embedding_device = embedder_cfg.get("embedding_device") or config.get("embedding_device") or "cpu"
     embedding_batch_size: int = int(
         embedder_cfg.get("embedding_batch_size")
@@ -277,10 +277,10 @@ def get_embedding_model_name(config_path: str | None = None) -> str:
         config = load_settings(config_path)
         raw_embedder = config.get("embedder")
         embedder_cfg: dict[str, Any] = raw_embedder if isinstance(raw_embedder, dict) else {}
-        return str(embedder_cfg.get("embedding_model") or config.get("embedding_model") or "BAAI/bge-small-en-v1.5")
+        return str(embedder_cfg.get("embedding_model") or config.get("embedding_model") or "BAAI/bge-m3")
     except (FileNotFoundError, ValueError) as e:
         logger.warning(f"Failed to load config, using default: {e}")
-        return "BAAI/bge-small-en-v1.5"
+        return "BAAI/bge-m3"
 
 
 def get_vector_store_config(config_path: str | None = None) -> dict[str, Any]:
@@ -292,12 +292,12 @@ def get_vector_store_config(config_path: str | None = None) -> dict[str, Any]:
         
     Returns:
         Dictionary with vector store configuration:
-        - vector_store: Store type (e.g., 'faiss', 'chroma')
+        - vector_store: Store type (e.g., 'qdrant', 'faiss')
         - Additional vector store settings
     """
     config = load_settings(config_path)
     
-    vector_store = config.get('vector_store', 'faiss')
+    vector_store = config.get('vector_store', 'qdrant')
     
     vector_config = {
         'vector_store': vector_store
@@ -317,14 +317,14 @@ def get_vector_store_type(config_path: str | None = None) -> str:
         config_path: Path to settings.yaml file
         
     Returns:
-        Vector store type string (e.g., 'faiss', 'chroma')
+        Vector store type string (e.g., 'qdrant', 'faiss')
     """
     try:
         config = load_settings(config_path)
-        return str(config.get('vector_store', 'faiss'))
+        return str(config.get('vector_store', 'qdrant'))
     except (FileNotFoundError, ValueError) as e:
         logger.warning(f"Failed to load config, using default: {e}")
-        return 'faiss'
+        return 'qdrant'
 
 
 
@@ -348,7 +348,7 @@ def get_reranker_config(config_path: str | None = None) -> dict[str, Any]:
     reranker_section = config.get('reranker', {})
     
     reranker_config = {
-        'model_name': reranker_section.get('model_name', 'BAAI/bge-reranker-base'),
+        'model_name': reranker_section.get('model_name', 'BAAI/bge-reranker-v2-m3'),
         'top_k': reranker_section.get('top_k', 5),
         'device': reranker_section.get('device', 'cpu'),
         'metadata_boost': reranker_section.get('metadata_boost', 0.1),
@@ -616,6 +616,36 @@ def get_mcp_defaults(config_path: str | None = None) -> dict[str, Any]:
     return defaults
 
 
+def get_qdrant_config(config_path: str | None = None) -> dict[str, Any]:
+    """
+    Get Qdrant vector store configuration from settings.yaml.
+
+    Args:
+        config_path: Path to settings.yaml file
+
+    Returns:
+        Dictionary with Qdrant configuration:
+        - collection_name: Qdrant collection name
+        - path: Local disk storage path
+        - distance: Similarity metric ("Cosine", "Euclid", "Dot")
+    """
+    config = load_settings(config_path)
+
+    qdrant_section = config.get("qdrant", {})
+
+    qdrant_config = {
+        "collection_name": qdrant_section.get("collection_name", "vx_rag_collection"),
+        "path": qdrant_section.get("path", "./data/index/qdrant"),
+        "distance": qdrant_section.get("distance", "Cosine"),
+    }
+
+    logger.info(
+        f"Loaded Qdrant config: collection={qdrant_config['collection_name']}, "
+        f"path={qdrant_config['path']}, distance={qdrant_config['distance']}"
+    )
+    return qdrant_config
+
+
 def get_faiss_config(config_path: str | None = None) -> dict[str, Any]:
     """
     Get FAISS index configuration from settings.yaml.
@@ -720,7 +750,7 @@ def get_ingestion_config(config_path: str | None = None) -> dict[str, Any]:
         'enable_persistence': ingestion_section.get('enable_persistence', True),
         'enable_embedding': ingestion_section.get('enable_embedding', False),
         'enable_vector_store': ingestion_section.get('enable_vector_store', False),
-        'embedding_model': config.get('embedding_model', 'BAAI/bge-small-en-v1.5'),
+        'embedding_model': config.get('embedding_model', 'BAAI/bge-m3'),
         'faiss_index': ingestion_section.get('faiss_index'),
         'vector_store_kwargs': ingestion_section.get('vector_store_kwargs', {})
     }
