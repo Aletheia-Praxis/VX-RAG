@@ -134,7 +134,7 @@ class TestLoadSettings:
         config = load_settings(str(config_file))
         
         # Verify defaults are applied
-        assert config["embedding_model"] == "BAAI/bge-small-en-v1.5"
+        assert config["embedding_model"] == "BAAI/bge-m3"
         assert config["chunk_size"] == 1024
         assert config["chunk_overlap"] == 200
     
@@ -321,5 +321,5 @@ class TestConfigValidationIntegration:
         assert config["mcp"]["port"] == 30000
         
         # Verify defaults
-        assert config["embedding_model"] == "BAAI/bge-small-en-v1.5"
+        assert config["embedding_model"] == "BAAI/bge-m3"
         assert config["mcp"]["host"] == "127.0.0.1"

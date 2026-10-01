@@ -274,8 +274,10 @@ class TestMCPServerPersistDirWiring:
         """Verify cli serve with stdio transport in a fresh subprocess never pollutes stdout."""
         script = (
             "import sys\n"
-            "from unittest.mock import patch\n"
-            "with patch('src.mcp.server.mcp.run'):\n"
+            "from unittest.mock import patch, MagicMock\n"
+            "mock_orch = MagicMock()\n"
+            "mock_orch.get_health_status.return_value = {'overall_status': 'healthy', 'initialized': True, 'indexes_loaded': True}\n"
+            "with patch('src.mcp.server.mcp.run'), patch('src.mcp.server.configure_server', return_value=mock_orch):\n"
             "    from src.cli import main\n"
             "    sys.argv = ['cli.py', 'serve', '--transport', 'stdio', '--persist-dir', 'data/index']\n"
             "    main()\n"
@@ -295,8 +297,10 @@ class TestMCPServerPersistDirWiring:
         """Verify direct module execution (python -m src.mcp.server) never pollutes stdout."""
         script = (
             "import sys\n"
-            "from unittest.mock import patch\n"
-            "with patch('src.mcp.server.mcp.run'):\n"
+            "from unittest.mock import patch, MagicMock\n"
+            "mock_orch = MagicMock()\n"
+            "mock_orch.get_health_status.return_value = {'overall_status': 'healthy', 'initialized': True, 'indexes_loaded': True}\n"
+            "with patch('src.mcp.server.mcp.run'), patch('src.mcp.server.configure_server', return_value=mock_orch):\n"
             "    import runpy\n"
             "    runpy.run_module('src.mcp.server', run_name='__main__')\n"
         )
