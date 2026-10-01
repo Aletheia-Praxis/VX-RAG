@@ -101,18 +101,23 @@ class TestFeatures13To16CLICommands:
         assert res.exit_code == 0
         assert "--transport" in res.stdout
         assert "stdio" in res.stdout
+        assert "http" in res.stdout
+        assert "sse" not in res.stdout
         assert "--persist-dir" in res.stdout
 
     def test_cli_serve_transport_options(self, run_cli_command: Callable[[list[str]], Any]) -> None:
         """Verify cli serve accepts valid transport options."""
-        for transport in ["stdio", "sse", "http"]:
+        for transport in ["stdio", "http"]:
             res = run_cli_command(["serve", "--transport", transport, "--help"])
             assert res.exit_code == 0
 
     def test_cli_serve_invalid_transport_rejected(self, run_cli_command: Callable[[list[str]], Any]) -> None:
-        """Verify cli serve rejects invalid transport values."""
-        res = run_cli_command(["serve", "--transport", "websocket_invalid"])
-        assert res.exit_code != 0
+        """Verify cli serve rejects invalid transport values including deprecated sse."""
+        res_invalid = run_cli_command(["serve", "--transport", "websocket_invalid"])
+        assert res_invalid.exit_code != 0
+
+        res_sse = run_cli_command(["serve", "--transport", "sse"])
+        assert res_sse.exit_code != 0
 
     def test_cli_serve_persist_dir_forwarding(self, run_cli_command: Callable[[list[str]], Any]) -> None:
         """Verify cli serve forwards custom --persist-dir to server runtime."""
@@ -144,7 +149,7 @@ class TestFeatures13To16CLICommands:
             assert "Starting MCP server with transport: stdio" not in res.stdout
             assert res.stdout.strip() == ""
 
-    def test_cli_serve_sse_banner_to_stdout(self, run_cli_command: Callable[[list[str]], Any]) -> None:
+    def test_cli_serve_http_banner_to_stdout(self, run_cli_command: Callable[[list[str]], Any]) -> None:
         """Verify non-stdio transports output startup banners to stdout."""
         def _dummy_run(coro: Any) -> None:
             coro.close()
@@ -153,9 +158,9 @@ class TestFeatures13To16CLICommands:
             patch("asyncio.run", side_effect=_dummy_run),
             patch("src.mcp.server.configure_server"),
         ):
-            res = run_cli_command(["serve", "--transport", "sse"])
+            res = run_cli_command(["serve", "--transport", "http"])
             assert res.exit_code == 0
-            assert "Starting MCP server with transport: sse" in res.stdout
+            assert "Starting MCP server with transport: http" in res.stdout
 
     def test_cli_serve_stdio_keyboard_interrupt_to_stderr(self, run_cli_command: Callable[[list[str]], Any]) -> None:
         """Verify KeyboardInterrupt banner in stdio mode goes to stderr."""

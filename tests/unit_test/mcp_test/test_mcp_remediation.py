@@ -24,6 +24,7 @@ from src.mcp.server import (
     configure_server,
     health_status,
     query_knowledge_base,
+    run_http,
     run_stdio,
     search_documents,
 )
@@ -227,6 +228,34 @@ class TestMCPServerPersistDirWiring:
                 persist_dir="data/index_test_1000",
             )
             mock_mcp_run.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_run_http_initializes_and_serves(self) -> None:
+        """Verify run_http initializes the orchestrator with persist_dir and starts uvicorn."""
+        mock_server = MagicMock()
+        mock_server.serve = AsyncMock()
+
+        with (
+            patch("src.mcp.server.start_server", new_callable=AsyncMock) as mock_start,
+            patch("uvicorn.Server", return_value=mock_server),
+        ):
+            await run_http(
+                host="127.0.0.1",
+                port=8080,
+                config_path="config/settings.yaml",
+                persist_dir="data/index_test_http",
+            )
+            mock_start.assert_awaited_once_with(
+                config_path="config/settings.yaml",
+                persist_dir="data/index_test_http",
+            )
+            mock_server.serve.assert_awaited_once()
+
+    def test_run_sse_removed_from_mcp_server(self) -> None:
+        """Verify run_sse is completely removed from src.mcp.server."""
+        import src.mcp.server as mcp_srv
+
+        assert not hasattr(mcp_srv, "run_sse")
 
     def test_configure_server_updates_defaults_and_timeouts(self) -> None:
         """Verify configure_server reloads mcp_defaults and mcp_timeouts."""
