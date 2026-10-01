@@ -3,7 +3,7 @@ RAG Orchestrator - High-level coordinator for RAG pipeline operations.
 
 This module provides a clean, high-level interface for coordinating all RAG services.
 It uses native LlamaIndex abstractions: RetrieverQueryEngine, ReciprocalRankFusionRetriever,
-BM25Retriever, FAISS HNSW vector store, and node post-processors.
+BM25Retriever, Qdrant vector store, and node post-processors.
 """
 
 from __future__ import annotations
@@ -14,12 +14,13 @@ import hashlib
 import json
 import shutil
 import time
+import uuid
 from collections.abc import Sequence
 from pathlib import Path
 from typing import Any, cast
 
 import duckdb
-import faiss
+import qdrant_client
 from llama_index.core import (
     QueryBundle,
     Settings,
@@ -36,10 +37,14 @@ from llama_index.core.response_synthesizers import ResponseMode
 from llama_index.core.schema import BaseNode, NodeWithScore, TextNode
 from llama_index.core.storage.docstore import BaseDocumentStore, SimpleDocumentStore
 from llama_index.core.storage.docstore.keyval_docstore import KVDocumentStore
+from llama_index.core.vector_stores.types import (
+    VectorStoreQuery,
+    VectorStoreQueryResult,
+)
 from llama_index.embeddings.huggingface import HuggingFaceEmbedding
 from llama_index.retrievers.bm25 import BM25Retriever
 from llama_index.storage.kvstore.duckdb import DuckDBKVStore
-from llama_index.vector_stores.faiss import FaissVectorStore
+from llama_index.vector_stores.qdrant import QdrantVectorStore
 
 from src.rag.exceptions import ServiceInitializationError
 from src.rag.ingestion import DoclingPipeline
@@ -57,7 +62,7 @@ from src.utils.config_loader import (
     get_bm25_config,
     get_docstore_config,
     get_embedding_config,
-    get_faiss_config,
+    get_qdrant_config,
     get_reranker_config,
 )
 from src.utils.logging_config import get_logger
@@ -65,6 +70,9 @@ from src.utils.logging_config import get_logger
 logger = get_logger("rag_orchestrator")
 
 _EMBEDDING_DIMENSION_BY_MODEL: dict[str, int] = {
+    "BAAI/bge-m3": 1024,
+    "BAAI/bge-large-en-v1.5": 1024,
+    "BAAI/bge-base-en-v1.5": 768,
     "BAAI/bge-small-en-v1.5": 384,
     "BAAI/bge-small-en": 384,
     "all-MiniLM-L6-v2": 384,
@@ -73,7 +81,151 @@ _EMBEDDING_DIMENSION_BY_MODEL: dict[str, int] = {
     "nomic-embed-text-v1": 768,
     "nomic-embed-text-v1.5": 768,
 }
-_FALLBACK_EMBEDDING_DIMENSION = 384
+_FALLBACK_EMBEDDING_DIMENSION = 1024
+
+
+def _to_qdrant_id(raw_id: str | int) -> str | int:
+    """Ensure point ID conforms to Qdrant requirements (valid UUID or integer).
+
+    Args:
+        raw_id: Original string or integer ID.
+
+    Returns:
+        A valid UUID string or integer acceptable by Qdrant.
+    """
+    if isinstance(raw_id, int):
+        return raw_id
+    raw_str = str(raw_id)
+    try:
+        uuid.UUID(raw_str)
+        return raw_str
+    except (ValueError, AttributeError):
+        return str(uuid.uuid5(uuid.NAMESPACE_DNS, raw_str))
+
+
+class RobustQdrantVectorStore(QdrantVectorStore):
+    """Qdrant vector store with robust ID translation and safe local lifecycle.
+
+    Ensures arbitrary string node IDs (e.g. from tests or legacy sources) are
+    deterministically converted to valid UUIDs for Qdrant point IDs, while
+    preserving the original node_id in payloads for exact round-trip deserialization.
+    """
+
+    def __init__(
+        self,
+        collection_name: str,
+        client: Any | None = None,
+        **kwargs: Any,
+    ) -> None:
+        """Initialize RobustQdrantVectorStore."""
+        super().__init__(collection_name=collection_name, client=client, **kwargs)
+
+    def _build_points(
+        self, nodes: Sequence[BaseNode], sparse_vector_name: str
+    ) -> tuple[list[Any], list[str]]:
+        """Build Qdrant points with translated UUID-compatible point IDs."""
+        points, ids = super()._build_points(list(nodes), sparse_vector_name)
+        for p in points:
+            p.id = _to_qdrant_id(p.id)
+        return points, ids
+
+    def delete_nodes(
+        self,
+        node_ids: Sequence[str] | None = None,
+        filters: Any | None = None,
+        shard_identifier: Any | None = None,
+        **delete_kwargs: Any,
+    ) -> None:
+        """Delete nodes with mapped point IDs."""
+        translated_ids = (
+            [str(_to_qdrant_id(nid)) for nid in node_ids]
+            if node_ids is not None
+            else None
+        )
+        super().delete_nodes(
+            node_ids=translated_ids,
+            filters=filters,
+            shard_identifier=shard_identifier,
+            **delete_kwargs,
+        )
+
+    async def aquery(
+        self,
+        query: VectorStoreQuery,
+        **kwargs: Any,
+    ) -> VectorStoreQueryResult:
+        """Asynchronously query the vector store, falling back to thread executor if aclient is not set."""
+        if getattr(self, "_aclient", None) is not None:
+            return await super().aquery(query, **kwargs)
+        return await asyncio.to_thread(self.query, query, **kwargs)
+
+    async def async_add(
+        self,
+        nodes: Sequence[BaseNode],
+        shard_identifier: Any | None = None,
+        **kwargs: Any,
+    ) -> list[str]:
+        """Asynchronously add nodes to vector store, falling back to thread executor if aclient is not set."""
+        node_list = list(nodes)
+        if getattr(self, "_aclient", None) is not None:
+            return await super().async_add(node_list, shard_identifier=shard_identifier, **kwargs)
+        return await asyncio.to_thread(self.add, node_list, shard_identifier=shard_identifier, **kwargs)
+
+    async def adelete_nodes(
+        self,
+        node_ids: list[str] | None = None,
+        filters: Any | None = None,
+        shard_identifier: Any | None = None,
+        **delete_kwargs: Any,
+    ) -> None:
+        """Asynchronously delete nodes, falling back to thread executor if aclient is not set."""
+        if getattr(self, "_aclient", None) is not None:
+            await super().adelete_nodes(
+                node_ids=node_ids,
+                filters=filters,
+                shard_identifier=shard_identifier,
+                **delete_kwargs,
+            )
+            return
+        await asyncio.to_thread(
+            self.delete_nodes,
+            node_ids=node_ids,
+            filters=filters,
+            shard_identifier=shard_identifier,
+            **delete_kwargs,
+        )
+
+
+def _get_embedding_dimension(
+    embedding_model_name: str, embed_model: Any | None = None
+) -> int:
+    """Resolve embedding dimension dynamically from model or name mapping.
+
+    Args:
+        embedding_model_name: Name of the embedding model.
+        embed_model: Optional instantiated embedding model instance.
+
+    Returns:
+        Embedding vector dimension.
+    """
+    if embed_model is not None:
+        if hasattr(embed_model, "_model"):
+            model = embed_model._model
+            for method_name in ("get_embedding_dimension", "get_sentence_embedding_dimension"):
+                if hasattr(model, method_name):
+                    try:
+                        dim = getattr(model, method_name)()
+                        if isinstance(dim, int) and dim > 0:
+                            return dim
+                    except (AttributeError, TypeError, ValueError, RuntimeError) as e:
+                        logger.debug(f"Could not retrieve sentence embedding dimension from model: {e}")
+        if hasattr(embed_model, "embed_dim") and isinstance(embed_model.embed_dim, int):
+            return embed_model.embed_dim
+
+    return _EMBEDDING_DIMENSION_BY_MODEL.get(
+        embedding_model_name, _FALLBACK_EMBEDDING_DIMENSION
+    )
+
 
 DEFAULT_DOCSTORE_DB_NAME: str = "docstore.duckdb"
 DEFAULT_DOCSTORE_TABLE_NAME: str = "docstore"
@@ -385,9 +537,9 @@ class RAGOrchestrator:
     """
     High-level orchestrator for RAG pipeline operations using LlamaIndex native components.
 
-    Coordinates document ingestion via Docling, embedding generation with BAAI/bge-small-en-v1.5,
-    incremental FAISS HNSW vector indexing, BM25 indexing, cross-encoder reranking
-    with BAAI/bge-reranker-base, snapshot persistence, and query execution.
+    Coordinates document ingestion via Docling, embedding generation with BAAI/bge-m3,
+    incremental Qdrant vector indexing, BM25 indexing, cross-encoder reranking
+    with BAAI/bge-reranker-v2-m3, snapshot persistence, and query execution.
     """
 
     @staticmethod
@@ -420,7 +572,7 @@ class RAGOrchestrator:
 
         Args:
             config_path: Path to configuration YAML file.
-            persist_dir: Directory path for persisting FAISS and BM25 indexes.
+            persist_dir: Directory path for persisting Qdrant and BM25 indexes.
             auto_load: Whether to automatically initialize services on instantiation.
             docstore_path: Optional explicit path to docstore DuckDB database.
         """
@@ -428,7 +580,8 @@ class RAGOrchestrator:
         self.persist_dir = Path(persist_dir)
         self.docstore_path = Path(docstore_path) if docstore_path else None
 
-        self._vector_store: FaissVectorStore | None = None
+        self._vector_store: QdrantVectorStore | None = None
+        self._qdrant_client: qdrant_client.QdrantClient | None = None
         self._storage_context: StorageContext | None = None
         self._docstore: BaseDocumentStore | None = None
         self._kvstore: DuckDBKVStore | None = None
@@ -465,8 +618,14 @@ class RAGOrchestrator:
             _close_duckdb_kvstore(self._kvstore)
 
     def close(self) -> None:
-        """Close any open storage resources, DuckDB connections, and release file locks."""
+        """Close any open storage resources, Qdrant client, DuckDB connections, and release file locks."""
         self._checkpoint_and_flush_docstore()
+        if self._qdrant_client is not None:
+            try:
+                self._qdrant_client.close()
+            except (OSError, RuntimeError) as e:
+                logger.debug(f"Error closing Qdrant client: {e}")
+            self._qdrant_client = None
 
     def __del__(self) -> None:
         """Destructor to clean up resources."""
@@ -485,7 +644,16 @@ class RAGOrchestrator:
             Settings.llm = MockLLM()
 
             embed_config = get_embedding_config(self.config_path)
-            embedding_model_name: str = embed_config.get("embedding_model", "BAAI/bge-small-en-v1.5")
+            embedding_model_name: str = str(embed_config.get("embedding_model", "BAAI/bge-m3"))
+            manifest_path = self.persist_dir / "manifest.json"
+            if manifest_path.exists():
+                try:
+                    manifest_data = json.loads(manifest_path.read_text(encoding="utf-8"))
+                    manifest_model = manifest_data.get("model_name")
+                    if manifest_model and isinstance(manifest_model, str):
+                        embedding_model_name = manifest_model
+                except (OSError, ValueError, KeyError):
+                    pass
             embedding_device: str = embed_config.get("embedding_device", "cpu")
             Settings.embed_model = HuggingFaceEmbedding(
                 model_name=embedding_model_name,
@@ -496,7 +664,7 @@ class RAGOrchestrator:
             )
 
             reranker_config = get_reranker_config(self.config_path)
-            reranker_model = reranker_config.get("model_name", "BAAI/bge-reranker-base")
+            reranker_model = reranker_config.get("model_name", "BAAI/bge-reranker-v2-m3")
             reranker_device = reranker_config.get("device", "cpu")
             reranker_top_k = int(reranker_config.get("top_k", 5))
             self._reranker = BGECrossEncoderReranker(
@@ -505,9 +673,9 @@ class RAGOrchestrator:
                 device=reranker_device,
             )
 
-            faiss_index_path = self.persist_dir / "faiss_index"
+            qdrant_index_path = self.persist_dir / "qdrant"
             self._vector_store, self._storage_context, self._index, self._indexes_loaded = (
-                self._load_vector_store(faiss_index_path, embedding_model_name)
+                self._load_vector_store(qdrant_index_path, embedding_model_name)
             )
 
             bm25_index_path = self.persist_dir / "bm25_index"
@@ -520,12 +688,12 @@ class RAGOrchestrator:
 
     def _get_docstore_and_kvstore(
         self,
-        faiss_index_path: Path,
+        storage_path: Path | str,
     ) -> tuple[BaseDocumentStore, DuckDBKVStore | None]:
         """Initialize or load DuckDBKVStore and KVDocumentStore with legacy JSON migration.
 
         Args:
-            faiss_index_path: Path to FAISS index directory.
+            storage_path: Path to index storage directory.
 
         Returns:
             Tuple of (docstore, kvstore).
@@ -535,17 +703,19 @@ class RAGOrchestrator:
         db_name = str(docstore_config.get("db_name", DEFAULT_DOCSTORE_DB_NAME))
         table_name = str(docstore_config.get("table_name", DEFAULT_DOCSTORE_TABLE_NAME))
 
+        target_dir = Path(storage_path) if str(storage_path) != ":memory:" else self.persist_dir
+
         if store_type == "simple":
-            if (faiss_index_path / "docstore.json").exists():
-                return SimpleDocumentStore.from_persist_dir(str(faiss_index_path)), None
+            if (target_dir / "docstore.json").exists():
+                return SimpleDocumentStore.from_persist_dir(str(target_dir)), None
             return SimpleDocumentStore(), None
 
         if self.docstore_path is not None:
             docstore_dir = self.docstore_path.parent
             db_name = self.docstore_path.name
         else:
-            if (faiss_index_path / db_name).exists() and not (self.persist_dir / db_name).exists():
-                docstore_dir = faiss_index_path
+            if (target_dir / db_name).exists() and not (self.persist_dir / db_name).exists():
+                docstore_dir = target_dir
             else:
                 docstore_dir = self.persist_dir
 
@@ -570,8 +740,9 @@ class RAGOrchestrator:
         # Legacy JSON migration if DuckDB docstore is currently empty
         if is_empty:
             legacy_candidates = [
-                faiss_index_path / "docstore.json",
+                target_dir / "docstore.json",
                 self.persist_dir / "docstore.json",
+                self.persist_dir / "faiss_index" / "docstore.json",
             ]
             for legacy_json in legacy_candidates:
                 if legacy_json.exists():
@@ -594,58 +765,105 @@ class RAGOrchestrator:
 
     def _load_vector_store(
         self,
-        faiss_index_path: Path,
+        storage_path: Path | str,
         embedding_model_name: str,
-    ) -> tuple[FaissVectorStore | None, StorageContext | None, VectorStoreIndex | None, bool]:
-        """
-        Load an existing FAISS vector store or initialize an empty HNSW index.
+    ) -> tuple[QdrantVectorStore | None, StorageContext | None, VectorStoreIndex | None, bool]:
+        """Load an existing Qdrant vector store or initialize a new collection.
 
         Args:
-            faiss_index_path: Path to directory containing persisted FAISS index files.
+            storage_path: Path to directory containing Qdrant files or ':memory:'.
             embedding_model_name: Name of the embedding model to resolve vector dimension.
 
         Returns:
             Tuple of (vector_store, storage_context, index, indexes_loaded).
         """
-        faiss_config = get_faiss_config(self.config_path)
-        hnsw_m = int(faiss_config.get("hnsw_m", 32))
+        qdrant_config = get_qdrant_config(self.config_path)
+        collection_name = str(qdrant_config.get("collection_name", "vx_rag_collection"))
+        cfg_distance = str(qdrant_config.get("distance", "Cosine"))
+        cfg_path = str(qdrant_config.get("path", "./data/index/qdrant"))
 
-        self._docstore, self._kvstore = self._get_docstore_and_kvstore(faiss_index_path)
+        self._docstore, self._kvstore = self._get_docstore_and_kvstore(storage_path)
 
+        is_memory = (
+            str(storage_path) == ":memory:"
+            or str(self.persist_dir) == ":memory:"
+            or cfg_path == ":memory:"
+        )
+
+        if is_memory:
+            if self._qdrant_client is None:
+                self._qdrant_client = qdrant_client.QdrantClient(":memory:")
+            logger.info("Initialized in-memory Qdrant client")
+        else:
+            qdrant_dir = Path(storage_path)
+            qdrant_dir.mkdir(parents=True, exist_ok=True)
+            if self._qdrant_client is None:
+                self._qdrant_client = qdrant_client.QdrantClient(path=str(qdrant_dir))
+            logger.info(f"Initialized local disk Qdrant client at {qdrant_dir}")
+
+        embedding_dimension = _get_embedding_dimension(
+            embedding_model_name, getattr(Settings, "embed_model", None)
+        )
+
+        distance_mapping = {
+            "cosine": qdrant_client.http.models.Distance.COSINE,
+            "euclid": qdrant_client.http.models.Distance.EUCLID,
+            "dot": qdrant_client.http.models.Distance.DOT,
+        }
+        distance = distance_mapping.get(
+            cfg_distance.lower(), qdrant_client.http.models.Distance.COSINE
+        )
+
+        existing_collections = [
+            c.name for c in self._qdrant_client.get_collections().collections
+        ]
+        collection_exists = collection_name in existing_collections
+
+        if not collection_exists:
+            self._qdrant_client.create_collection(
+                collection_name=collection_name,
+                vectors_config=qdrant_client.http.models.VectorParams(
+                    size=embedding_dimension,
+                    distance=distance,
+                ),
+            )
+            logger.info(
+                f"Created Qdrant collection '{collection_name}' "
+                f"(dim={embedding_dimension}, distance={cfg_distance})"
+            )
+
+        vector_store = RobustQdrantVectorStore(
+            client=self._qdrant_client,
+            collection_name=collection_name,
+        )
+
+        storage_context = StorageContext.from_defaults(
+            docstore=self._docstore,
+            vector_store=vector_store,
+        )
+
+        index = VectorStoreIndex(
+            nodes=[],
+            storage_context=storage_context,
+        )
+
+        point_count = 0
         try:
-            from llama_index.core import load_index_from_storage
+            point_count = self._qdrant_client.count(collection_name).count
+        except (OSError, ValueError, RuntimeError) as e:
+            logger.debug(f"Could not get point count for {collection_name}: {e}")
 
-            if not (faiss_index_path / "default__vector_store.json").exists():
-                raise FileNotFoundError(f"FAISS index not found at {faiss_index_path}")
+        indexes_loaded = point_count > 0
+        if indexes_loaded:
+            logger.info(
+                f"Loaded existing Qdrant vector store collection '{collection_name}' with {point_count} points"
+            )
+        else:
+            logger.info(
+                f"Initialized empty Qdrant vector store collection '{collection_name}'"
+            )
 
-            vector_store = FaissVectorStore.from_persist_dir(str(faiss_index_path))
-            storage_context = StorageContext.from_defaults(
-                docstore=self._docstore,
-                vector_store=vector_store,
-                persist_dir=str(faiss_index_path),
-            )
-            index = cast(VectorStoreIndex, load_index_from_storage(storage_context=storage_context))
-            logger.info(f"Loaded existing FAISS vector store from {faiss_index_path}")
-            return vector_store, storage_context, index, True
-
-        except (ValueError, FileNotFoundError, OSError, RuntimeError) as e:
-            logger.info(f"Initializing new empty FAISS HNSW vector store ({e})")
-            embedding_dimension = _EMBEDDING_DIMENSION_BY_MODEL.get(
-                embedding_model_name, _FALLBACK_EMBEDDING_DIMENSION
-            )
-            faiss_index = faiss.IndexHNSWFlat(
-                embedding_dimension, hnsw_m, faiss.METRIC_INNER_PRODUCT
-            )
-            vector_store = FaissVectorStore(faiss_index=faiss_index)
-            storage_context = StorageContext.from_defaults(
-                docstore=self._docstore,
-                vector_store=vector_store,
-            )
-            index = VectorStoreIndex(
-                nodes=[],
-                storage_context=storage_context,
-            )
-            return vector_store, storage_context, index, False
+        return vector_store, storage_context, index, indexes_loaded
 
     def _load_bm25_retriever(self, bm25_index_path: Path) -> BM25Retriever | None:
         """
@@ -798,8 +1016,8 @@ class RAGOrchestrator:
             Manifest dictionary conforming to Tech Spec §5.2.
         """
         embed_config = get_embedding_config(self.config_path)
-        model_name = str(embed_config.get("embedding_model", "BAAI/bge-small-en-v1.5"))
-        dim = _EMBEDDING_DIMENSION_BY_MODEL.get(model_name, _FALLBACK_EMBEDDING_DIMENSION)
+        model_name = str(embed_config.get("embedding_model", "BAAI/bge-m3"))
+        dim = _get_embedding_dimension(model_name, getattr(Settings, "embed_model", None))
 
         total_nodes = 0
         indexed_hashes: set[str] = set()
@@ -832,7 +1050,12 @@ class RAGOrchestrator:
         files_map: dict[str, str] = {}
         if directory.exists():
             for p in directory.rglob("*"):
-                if p.is_file() and p.name != "manifest.json":
+                if (
+                    p.is_file()
+                    and p.name != "manifest.json"
+                    and not p.name.endswith(".lock")
+                    and p.name != ".lock"
+                ):
                     rel_path = p.relative_to(directory).as_posix()
                     try:
                         file_bytes = p.read_bytes()
@@ -879,8 +1102,18 @@ class RAGOrchestrator:
         if self.persist_dir.exists():
             for item in self.persist_dir.iterdir():
                 if item.is_dir():
-                    shutil.copytree(item, target_dir / item.name, dirs_exist_ok=True)
-                elif item.is_file() and item.name != "manifest.json":
+                    shutil.copytree(
+                        item,
+                        target_dir / item.name,
+                        dirs_exist_ok=True,
+                        ignore=shutil.ignore_patterns("*.lock", ".lock"),
+                    )
+                elif (
+                    item.is_file()
+                    and item.name != "manifest.json"
+                    and not item.name.endswith(".lock")
+                    and item.name != ".lock"
+                ):
                     shutil.copy2(item, target_dir / item.name)
 
         if self.docstore_path and self.docstore_path.exists():
@@ -904,10 +1137,10 @@ class RAGOrchestrator:
 
     def index_nodes(self, nodes: Sequence[BaseNode]) -> None:
         """
-        Incrementally append nodes to FAISS HNSW and BM25 indexes with duplicate prevention.
+        Incrementally append nodes to Qdrant and BM25 indexes with duplicate prevention.
 
         Filters out nodes from files that are already indexed or nodes with matching node_ids.
-        Appends new vector embeddings to the FAISS HNSW graph without rebuilding.
+        Appends new vector embeddings to the Qdrant collection without rebuilding.
         Updates BM25 using cumulative nodes from docstore so prior documents are preserved.
         Persists updated indexes and writes manifest.json.
 
@@ -958,15 +1191,26 @@ class RAGOrchestrator:
             return
 
         self.persist_dir.mkdir(parents=True, exist_ok=True)
-        faiss_index_path = self.persist_dir / "faiss_index"
         bm25_index_path = self.persist_dir / "bm25_index"
 
-        # Incrementally append nodes to FAISS HNSW index and docstore
+        # Incrementally append nodes to Qdrant index and docstore
         self._index.insert_nodes(nodes_to_insert)
-        self._index.storage_context.persist(persist_dir=str(faiss_index_path))
+        if self._docstore is not None:
+            self._docstore.add_documents(nodes_to_insert)
+        elif self._index.docstore is not None:
+            self._index.docstore.add_documents(nodes_to_insert)
+
+        self._index.storage_context.persist(persist_dir=str(self.persist_dir))
 
         # Re-index BM25 using cumulative nodes from docstore to ensure no docs are lost
-        cumulative_nodes = list(self._index.docstore.docs.values())
+        active_docstore = self._docstore or (self._index.docstore if self._index else None)
+        cumulative_nodes = (
+            list(active_docstore.docs.values())
+            if active_docstore is not None and active_docstore.docs
+            else list(nodes_to_insert)
+        )
+        if not cumulative_nodes:
+            cumulative_nodes = list(nodes_to_insert)
         bm25_config = get_bm25_config(self.config_path)
         similarity_top_k = int(bm25_config.get("similarity_top_k", 20))
 
