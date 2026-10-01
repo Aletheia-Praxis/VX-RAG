@@ -349,31 +349,6 @@ def run_stdio(
     mcp.run()
 
 
-async def run_sse(
-    host: str = "localhost",
-    port: int = 8000,
-    config_path: str = "config/settings.yaml",
-    persist_dir: str = "data/index",
-) -> None:
-    """Run MCP server in SSE mode.
-
-    Args:
-        host: Host interface to bind.
-        port: TCP port to listen on.
-        config_path: Path to configuration YAML file.
-        persist_dir: Path to directory containing persisted FAISS and BM25 indices.
-    """
-    import uvicorn
-
-    await start_server(config_path=config_path, persist_dir=persist_dir)
-    app = mcp.sse_app()
-    config = uvicorn.Config(
-        app, host=host, port=port, log_level="info", access_log=True
-    )
-    server = uvicorn.Server(config)
-    await server.serve()
-
-
 async def run_http(
     host: str = "localhost",
     port: int = 8000,
