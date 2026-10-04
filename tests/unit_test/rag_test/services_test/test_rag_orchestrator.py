@@ -4,7 +4,7 @@ Unit tests for RAGOrchestrator and Phase M3 RAG Core components.
 Verifies:
 - BGE Embedding configuration (BAAI/bge-small-en-v1.5, 384-dim, CPU, normalize=True)
 - BGECrossEncoderReranker (BAAI/bge-reranker-base, sigmoid normalization, fallback on error)
-- FAISS HNSW vector store fallback and incremental appends without rebuild
+- Incremental vector store appends without rebuild
 - BM25 synchronization retaining cumulative nodes from docstore
 - Ingestion with DoclingPipeline and strict 5-field metadata
 - Two-tier duplicate detection skipping indexed file hashes
@@ -26,6 +26,8 @@ from unittest.mock import MagicMock, patch
 import pytest
 from llama_index.core.base.embeddings.base import BaseEmbedding
 from llama_index.core.schema import NodeWithScore, TextNode
+from llama_index.core.vector_stores.types import VectorStoreQuery, VectorStoreQueryMode
+from qdrant_client import QdrantClient, models
 
 os.environ["IS_TESTING"] = "1"
 
@@ -35,7 +37,9 @@ from src.rag.orchestrator import (
     _EMBEDDING_DIMENSION_BY_MODEL,
     _FALLBACK_EMBEDDING_DIMENSION,
     RAGOrchestrator,
+    RobustQdrantVectorStore,
     get_orchestrator,
+    reset_orchestrator,
 )
 
 if TYPE_CHECKING:
@@ -68,9 +72,11 @@ def temp_config_file(tmp_path: Path) -> Generator[str, None, None]:
             "embedding_device": "cpu",
         },
         "embedding_device": "cpu",
-        "faiss": {
-            "hnsw_m": 32,
-            "metric": "inner_product",
+        "vector_store": "qdrant",
+        "qdrant": {
+            "collection_name": "test_orchestrator",
+            "path": str(tmp_path / "qdrant"),
+            "distance": "Cosine",
         },
         "bm25": {
             "index_dir": str(tmp_path / "bm25"),
@@ -208,6 +214,7 @@ class TestQdrantVectorStoreInitialization:
             collections = orchestrator._qdrant_client.get_collections().collections
             assert any(c.name == "vx_rag_collection" for c in collections)
             collection_info = orchestrator._qdrant_client.get_collection("vx_rag_collection")
+            assert isinstance(collection_info.config.params.vectors, models.VectorParams)
             assert collection_info.config.params.vectors.size == 1024
         finally:
             orchestrator.close()
@@ -313,20 +320,17 @@ class TestIndexedFileHashesAndDuplicateDetection:
         assert ingested_nodes[0].metadata["file_hash"] == hash2
 
 
-class TestIncrementalAppendsAndBM25Sync:
-    """Test suite for incremental FAISS appends and BM25 synchronization."""
+class TestIncrementalAppendsAndNativeHybridSync:
+    """Test suite for incremental Qdrant vector store appends without BM25 disk dependency."""
 
-    @patch("src.rag.orchestrator.BM25Retriever")
-    def test_index_nodes_incremental_append_and_bm25_cumulative(
+    def test_index_nodes_incremental_append_without_bm25_disk(
         self,
-        mock_bm25_cls: MagicMock,
         temp_config_file: str,
         tmp_path: Path,
     ) -> None:
-        """Verify index_nodes incrementally appends to FAISS and uses cumulative docstore nodes for BM25.
+        """Verify index_nodes incrementally appends to vector store and does not persist bm25_index.
 
         Args:
-            mock_bm25_cls: Mocked BM25Retriever class.
             temp_config_file: Path to temporary config YAML.
             tmp_path: Temporary directory fixture.
         """
@@ -368,23 +372,15 @@ class TestIncrementalAppendsAndBM25Sync:
         orchestrator._storage_context = mock_storage
         orchestrator.get_indexed_file_hashes = MagicMock(return_value={"hash_1"})  # type: ignore[method-assign]
 
-        mock_bm25_instance = MagicMock()
-        mock_bm25_cls.from_defaults.return_value = mock_bm25_instance
-
         # Call index_nodes with both node1 (duplicate hash) and node2 (new)
         orchestrator.index_nodes([node1, node2])
 
-        # Verify only node2 was inserted into FAISS index
+        # Verify only node2 was inserted into index
         mock_index.insert_nodes.assert_called_once_with([node2])
         mock_storage.persist.assert_called_once()
 
-        # Verify BM25 was rebuilt with cumulative nodes (both n1 and n2)
-        mock_bm25_cls.from_defaults.assert_called_once()
-        call_kwargs = mock_bm25_cls.from_defaults.call_args[1]
-        cumulative_passed = call_kwargs["nodes"]
-        assert len(cumulative_passed) == 2
-        assert {n.id_ for n in cumulative_passed} == {"n1", "n2"}
-        mock_bm25_instance.persist.assert_called_once()
+        # Verify no standalone bm25_index directory was created on disk
+        assert not (persist_dir / "bm25_index").exists()
 
 
 class TestManifestAndSnapshotPersistence:
@@ -402,9 +398,9 @@ class TestManifestAndSnapshotPersistence:
             tmp_path: Temporary directory fixture.
         """
         persist_dir = tmp_path / "persist"
-        faiss_dir = persist_dir / "faiss_index"
-        faiss_dir.mkdir(parents=True, exist_ok=True)
-        dummy_file = faiss_dir / "default__vector_store.json"
+        qdrant_dir = persist_dir / "qdrant"
+        qdrant_dir.mkdir(parents=True, exist_ok=True)
+        dummy_file = qdrant_dir / "default__vector_store.json"
         content = b'{"test": "data"}'
         dummy_file.write_bytes(content)
         expected_checksum = hashlib.sha256(content).hexdigest()
@@ -428,8 +424,8 @@ class TestManifestAndSnapshotPersistence:
         assert manifest["embedding_dimension"] == 384
         assert manifest["total_nodes"] == 1
         assert "abc123hash" in manifest["indexed_file_hashes"]
-        assert f"faiss_index/{dummy_file.name}" in manifest["files"]
-        assert manifest["files"][f"faiss_index/{dummy_file.name}"] == expected_checksum
+        assert f"qdrant/{dummy_file.name}" in manifest["files"]
+        assert manifest["files"][f"qdrant/{dummy_file.name}"] == expected_checksum
 
     def test_create_snapshot_persists_isolated_version(
         self,
@@ -443,8 +439,8 @@ class TestManifestAndSnapshotPersistence:
             tmp_path: Temporary directory fixture.
         """
         persist_dir = tmp_path / "persist"
-        (persist_dir / "faiss_index").mkdir(parents=True, exist_ok=True)
-        (persist_dir / "faiss_index" / "store.bin").write_text("vector_data", encoding="utf-8")
+        (persist_dir / "qdrant").mkdir(parents=True, exist_ok=True)
+        (persist_dir / "qdrant" / "store.bin").write_text("vector_data", encoding="utf-8")
         (persist_dir / "bm25_index").mkdir(parents=True, exist_ok=True)
         (persist_dir / "bm25_index" / "bm25.json").write_text("bm25_data", encoding="utf-8")
 
@@ -461,7 +457,7 @@ class TestManifestAndSnapshotPersistence:
 
         assert result_dir.exists()
         assert (result_dir / "manifest.json").exists()
-        assert (result_dir / "faiss_index" / "store.bin").exists()
+        assert (result_dir / "qdrant" / "store.bin").exists()
         assert (result_dir / "bm25_index" / "bm25.json").exists()
 
 
@@ -668,6 +664,225 @@ class TestQuerySearchAndHealthStatus:
         import src.rag.orchestrator as orch_module
 
         orch_module._orchestrator_instance = None
-        instance1 = get_orchestrator(config_path=temp_config_file, persist_dir=str(tmp_path / "singleton"))
-        instance2 = get_orchestrator(config_path=temp_config_file, persist_dir=str(tmp_path / "singleton"))
-        assert instance1 is instance2
+        try:
+            instance1 = get_orchestrator(config_path=temp_config_file, persist_dir=str(tmp_path / "singleton"))
+            instance2 = get_orchestrator(config_path=temp_config_file, persist_dir=str(tmp_path / "singleton"))
+            assert instance1 is instance2
+        finally:
+            reset_orchestrator()
+
+    def test_native_hybrid_and_sparse_retrieval_routing(
+        self,
+        temp_config_file: str,
+        tmp_path: Path,
+    ) -> None:
+        """Verify orchestrator routes hybrid and keyword searches to VectorStoreQueryMode."""
+        orchestrator = RAGOrchestrator(
+            config_path=temp_config_file,
+            persist_dir=str(tmp_path / "persist"),
+            auto_load=False,
+        )
+        orchestrator._initialized = True
+        orchestrator._indexes_loaded = True
+        orchestrator._bm25_retriever = None
+
+        mock_vector_store = MagicMock()
+        mock_vector_store.enable_hybrid = True
+        orchestrator._vector_store = mock_vector_store
+
+        mock_index = MagicMock()
+        mock_index.docstore.docs = {f"k{i}": f"v{i}" for i in range(50)}
+        orchestrator._index = mock_index
+        mock_retriever = MagicMock()
+        mock_index.as_retriever.return_value = mock_retriever
+        mock_retriever.retrieve.return_value = []
+
+        # 1. Hybrid search modality
+        orchestrator.search_documents("test query", top_k=3, search_type="hybrid")
+        mock_index.as_retriever.assert_called_with(
+            similarity_top_k=20,
+            vector_store_query_mode=VectorStoreQueryMode.HYBRID,
+        )
+
+        # 2. Keyword search modality
+        orchestrator.search_documents("test query", top_k=3, search_type="keyword")
+        mock_index.as_retriever.assert_called_with(
+            similarity_top_k=20,
+            vector_store_query_mode=VectorStoreQueryMode.SPARSE,
+        )
+
+        # 3. Semantic search modality
+        orchestrator.search_documents("test query", top_k=3, search_type="semantic")
+        mock_index.as_retriever.assert_called_with(
+            similarity_top_k=20,
+            vector_store_query_mode=VectorStoreQueryMode.DEFAULT,
+        )
+
+
+class TestRobustQdrantVectorStoreNativeRRF:
+    """Test suite verifying 100% native Qdrant Fusion.RRF execution in RobustQdrantVectorStore."""
+
+    def test_query_hybrid_mode_executes_native_fusion_rrf(self) -> None:
+        """Verify that query in HYBRID mode invokes client.query_points with models.Fusion.RRF."""
+        mock_client = MagicMock()
+        mock_response = MagicMock()
+        mock_response.points = []
+        mock_client.query_points.return_value = mock_response
+
+        store = RobustQdrantVectorStore(
+            collection_name="test_col",
+            client=mock_client,
+            enable_hybrid=True,
+            sparse_query_fn=lambda texts: ([[1, 2]], [[0.5, 0.8]]),
+            sparse_doc_fn=lambda texts: ([[1, 2]], [[0.5, 0.8]]),
+        )
+
+        query = VectorStoreQuery(
+            query_str="test hybrid query",
+            query_embedding=[0.1] * 1024,
+            mode=VectorStoreQueryMode.HYBRID,
+            similarity_top_k=5,
+        )
+
+        res = store.query(query)
+        assert res is not None
+        assert mock_client.query_points.called
+        kwargs = mock_client.query_points.call_args.kwargs
+        assert kwargs["collection_name"] == "test_col"
+        assert kwargs["limit"] == 5
+        assert kwargs["with_payload"] is True
+        assert isinstance(kwargs["query"], models.FusionQuery)
+        assert kwargs["query"].fusion == models.Fusion.RRF
+
+        prefetch = kwargs["prefetch"]
+        assert len(prefetch) == 2
+        # Dense prefetch
+        assert prefetch[0].query == [0.1] * 1024
+        # Sparse prefetch
+        assert isinstance(prefetch[1].query, models.SparseVector)
+        assert prefetch[1].query.indices == [1, 2]
+        assert prefetch[1].query.values == [0.5, 0.8]
+        assert prefetch[1].using == "sparse"
+
+    def test_query_default_dense_delegates_to_super(self) -> None:
+        """Verify that non-hybrid queries delegate to QdrantVectorStore super().query()."""
+        mock_client = MagicMock()
+        mock_response = MagicMock()
+        mock_response.points = []
+        mock_client.query_points.return_value = mock_response
+
+        store = RobustQdrantVectorStore(
+            collection_name="test_col",
+            client=mock_client,
+            enable_hybrid=True,
+            sparse_query_fn=lambda texts: ([[1]], [[0.5]]),
+            sparse_doc_fn=lambda texts: ([[1]], [[0.5]]),
+        )
+
+        query = VectorStoreQuery(
+            query_str="test dense query",
+            query_embedding=[0.2] * 1024,
+            mode=VectorStoreQueryMode.DEFAULT,
+            similarity_top_k=3,
+        )
+
+        with patch("llama_index.vector_stores.qdrant.base.QdrantVectorStore.query") as mock_super_query:
+            mock_super_query.return_value = MagicMock()
+            store.query(query)
+            mock_super_query.assert_called_once_with(query)
+
+    @pytest.mark.asyncio
+    async def test_aquery_hybrid_mode_executes_native_rrf(self) -> None:
+        """Verify asynchronous aquery executes native RRF via thread or async client."""
+        mock_client = MagicMock()
+        mock_response = MagicMock()
+        mock_response.points = []
+        mock_client.query_points.return_value = mock_response
+
+        store = RobustQdrantVectorStore(
+            collection_name="test_col",
+            client=mock_client,
+            enable_hybrid=True,
+            sparse_query_fn=lambda texts: ([[3, 4]], [[0.3, 0.7]]),
+            sparse_doc_fn=lambda texts: ([[3, 4]], [[0.3, 0.7]]),
+        )
+
+        query = VectorStoreQuery(
+            query_str="async hybrid test",
+            query_embedding=[0.3] * 1024,
+            mode=VectorStoreQueryMode.HYBRID,
+            similarity_top_k=4,
+        )
+
+        res = await store.aquery(query)
+        assert res is not None
+        assert mock_client.query_points.called
+        kwargs = mock_client.query_points.call_args.kwargs
+        assert kwargs["query"].fusion == models.Fusion.RRF
+
+    def test_live_in_memory_qdrant_native_rrf_round_trip(self) -> None:
+        """Live verification: genuine in-memory Qdrant instance executing native Fusion.RRF."""
+        client = QdrantClient(":memory:")
+        dim = 4
+        client.create_collection(
+            collection_name="live_rrf_test",
+            vectors_config=models.VectorParams(size=dim, distance=models.Distance.COSINE),
+            sparse_vectors_config={"sparse": models.SparseVectorParams()},
+        )
+
+        def mock_sparse_fn(texts: list[str]) -> tuple[list[list[int]], list[list[float]]]:
+            indices: list[list[int]] = []
+            values: list[list[float]] = []
+            for t in texts:
+                if "apple" in t.lower():
+                    indices.append([101])
+                    values.append([1.0])
+                elif "banana" in t.lower():
+                    indices.append([202])
+                    values.append([1.0])
+                else:
+                    indices.append([303])
+                    values.append([0.5])
+            return indices, values
+
+        store = RobustQdrantVectorStore(
+            collection_name="live_rrf_test",
+            client=client,
+            enable_hybrid=True,
+            sparse_query_fn=mock_sparse_fn,
+            sparse_doc_fn=mock_sparse_fn,
+            sparse_vector_name="sparse",
+        )
+
+        node1 = TextNode(
+            text="Fresh red apple from the orchard",
+            id_="node-apple-1",
+            metadata={"file_name": "apple.txt", "file_type": "text/plain"},
+            embedding=[1.0, 0.0, 0.0, 0.0],
+        )
+        node2 = TextNode(
+            text="Ripe sweet banana from tropical trees",
+            id_="node-banana-2",
+            metadata={"file_name": "banana.txt", "file_type": "text/plain"},
+            embedding=[0.0, 1.0, 0.0, 0.0],
+        )
+
+        store.add([node1, node2])
+
+        query = VectorStoreQuery(
+            query_str="apple fruit",
+            query_embedding=[1.0, 0.0, 0.0, 0.0],
+            mode=VectorStoreQueryMode.HYBRID,
+            similarity_top_k=2,
+        )
+
+        result = store.query(query)
+        assert result.nodes is not None
+        assert len(result.nodes) == 2
+        # Node 1 should be ranked #1 because it matches both dense and sparse
+        assert result.nodes[0].get_content() == "Fresh red apple from the orchard"
+        assert result.similarities is not None
+        assert len(result.similarities) == 2
+        assert result.similarities[0] >= result.similarities[1]
+
+

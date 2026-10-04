@@ -162,42 +162,60 @@ class TestCybersecurityWorkflows:
         Scenario 4: Incremental Threat Intelligence Feed Updates.
 
         Workflow:
-        1. Initialize FAISS HNSW index with baseline intelligence dataset.
+        1. Initialize Qdrant collection with baseline intelligence dataset.
         2. Receive newly published malware reports and incrementally append to vector store.
         3. Verify snapshot persistence and manifest.json SHA-256 checksums update without full rebuild.
         """
-        import faiss
         import numpy as np
+        from qdrant_client import QdrantClient
+        from qdrant_client.http.models import Distance, PointStruct, VectorParams
 
         index_dir = tmp_path / "index_incremental"
         index_dir.mkdir(parents=True, exist_ok=True)
 
+        client = QdrantClient(":memory:")
+        client.create_collection(
+            collection_name="threat_intel",
+            vectors_config=VectorParams(size=384, distance=Distance.COSINE),
+        )
+
         # Baseline: 10 threat reports
-        index = faiss.IndexHNSWFlat(384, 32, faiss.METRIC_INNER_PRODUCT)
         initial_vectors = np.random.randn(10, 384).astype(np.float32)
-        faiss.normalize_L2(initial_vectors)
-        index.add(initial_vectors)
-        assert index.ntotal == 10
+        norm1 = np.linalg.norm(initial_vectors, axis=1, keepdims=True)
+        initial_vectors = initial_vectors / norm1
+        points1 = [
+            PointStruct(id=i, vector=initial_vectors[i].tolist())
+            for i in range(10)
+        ]
+        client.upsert(collection_name="threat_intel", points=points1)
+        total_nodes = client.get_collection("threat_intel").points_count
+        assert total_nodes == 10
 
         # Snapshot manifest version 1
         manifest_v1 = {
             "version": "1.0",
             "timestamp": "2026-09-13T08:00:00Z",
-            "total_nodes": index.ntotal,
+            "total_nodes": total_nodes,
         }
         (index_dir / "manifest.json").write_text(json.dumps(manifest_v1), encoding="utf-8")
 
         # Incremental feed update: 5 new threat reports
         new_vectors = np.random.randn(5, 384).astype(np.float32)
-        faiss.normalize_L2(new_vectors)
-        index.add(new_vectors)
-        assert index.ntotal == 15
+        norm2 = np.linalg.norm(new_vectors, axis=1, keepdims=True)
+        new_vectors = new_vectors / norm2
+        points2 = [
+            PointStruct(id=i + 10, vector=new_vectors[i].tolist())
+            for i in range(5)
+        ]
+        client.upsert(collection_name="threat_intel", points=points2)
+        total_nodes = client.get_collection("threat_intel").points_count
+        assert total_nodes == 15
 
         # Snapshot manifest version 2
         manifest_v2 = {
             "version": "1.1",
             "timestamp": "2026-09-13T09:00:00Z",
-            "total_nodes": index.ntotal,
+            "total_nodes": total_nodes,
         }
         (index_dir / "manifest.json").write_text(json.dumps(manifest_v2), encoding="utf-8")
 

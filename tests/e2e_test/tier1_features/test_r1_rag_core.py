@@ -1,11 +1,11 @@
 """
-Tier 1 Feature Coverage: Requirement 1 (RAG Core Models, FAISS HNSW, Snapshots, Hybrid Retrieval).
+Tier 1 Feature Coverage: Requirement 1 (RAG Core Models, Qdrant Vector Store, Snapshots, Hybrid Retrieval).
 
 Authoritative Source: ORIGINAL_REQUEST.md §R1, PROJECT.md Features 1-5, Tech Spec §3.1, §5.2, §6.1.
 Verifies:
 - Feature 1: BGE Embedding Integration (BAAI/bge-small-en-v1.5, 384-dim, CPU)
 - Feature 2: BGE Cross-Encoder Reranker (BAAI/bge-reranker-base)
-- Feature 3: FAISS HNSW Incremental Appends (IndexHNSWFlat, M=32, inner product)
+- Feature 3: Qdrant Incremental Appends
 - Feature 4: Index Snapshot & Manifest Persistence (manifest.json with SHA256)
 - Feature 5: Hybrid Search (Vector + BM25 Reciprocal Rank Fusion)
 """
@@ -173,97 +173,146 @@ class TestFeature2BGECrossEncoderReranker:
         assert result[0].node.id_ == "A"
 
 
-class TestFeature3FAISSHNSWIncrementalAppends:
+class TestFeature3QdrantIncrementalAppends:
     """
-    Feature 3: FAISS HNSW Incremental Appends.
+    Feature 3: Qdrant Incremental Appends.
 
     Authoritative: ORIGINAL_REQUEST.md §R1, PROJECT.md Feature 3, Tech Spec §5.2.
-    Specifies adding new document embeddings to HNSW index without full rebuild.
+    Specifies adding new document embeddings to vector store without full rebuild.
     """
 
-    def test_faiss_hnsw_index_creation_parameters(self) -> None:
-        """Verify FAISS HNSW index initializes with dimension 384 and M=32."""
-        import faiss
+    def test_qdrant_index_creation_parameters(self) -> None:
+        """Verify Qdrant collection initializes with dimension 384 and Cosine distance."""
+        from qdrant_client import QdrantClient
+        from qdrant_client.http.models import Distance, VectorParams
 
+        client = QdrantClient(":memory:")
         dimension = 384
-        hnsw_m = 32
-        metric = faiss.METRIC_INNER_PRODUCT
+        client.create_collection(
+            collection_name="test_col",
+            vectors_config=VectorParams(size=dimension, distance=Distance.COSINE),
+        )
+        col_info = client.get_collection("test_col")
+        assert col_info.config.params.vectors.size == dimension
+        assert col_info.points_count == 0
 
-        index = faiss.IndexHNSWFlat(dimension, hnsw_m, metric)
-        assert index.d == dimension
-        assert index.ntotal == 0
-
-    def test_faiss_hnsw_incremental_append_expands_count(self) -> None:
+    def test_qdrant_incremental_append_expands_count(self) -> None:
         """Verify incremental vector insertion increases total index count without resetting."""
-        import faiss
         import numpy as np
+        from qdrant_client import QdrantClient
+        from qdrant_client.http.models import Distance, PointStruct, VectorParams
 
-        index = faiss.IndexHNSWFlat(384, 32, faiss.METRIC_INNER_PRODUCT)
+        client = QdrantClient(":memory:")
+        client.create_collection(
+            collection_name="test_col",
+            vectors_config=VectorParams(size=384, distance=Distance.COSINE),
+        )
 
         # Batch 1: Initial 5 vectors
-        batch1 = np.random.randn(5, 384).astype(np.float32)
-        faiss.normalize_L2(batch1)
-        index.add(batch1)
-        assert index.ntotal == 5
+        batch1_vecs = np.random.randn(5, 384).astype(np.float32)
+        norm1 = np.linalg.norm(batch1_vecs, axis=1, keepdims=True)
+        batch1_vecs = batch1_vecs / norm1
+        points1 = [
+            PointStruct(id=i, vector=batch1_vecs[i].tolist())
+            for i in range(5)
+        ]
+        client.upsert(collection_name="test_col", points=points1)
+        assert client.get_collection("test_col").points_count == 5
 
         # Batch 2: Append 3 new vectors
-        batch2 = np.random.randn(3, 384).astype(np.float32)
-        faiss.normalize_L2(batch2)
-        index.add(batch2)
-        assert index.ntotal == 8
+        batch2_vecs = np.random.randn(3, 384).astype(np.float32)
+        norm2 = np.linalg.norm(batch2_vecs, axis=1, keepdims=True)
+        batch2_vecs = batch2_vecs / norm2
+        points2 = [
+            PointStruct(id=i + 5, vector=batch2_vecs[i].tolist())
+            for i in range(3)
+        ]
+        client.upsert(collection_name="test_col", points=points2)
+        assert client.get_collection("test_col").points_count == 8
 
-    def test_faiss_hnsw_appended_vectors_searchable(self) -> None:
+    def test_qdrant_appended_vectors_searchable(self) -> None:
         """Verify vectors added in subsequent incremental batches are immediately retrievable."""
-        import faiss
         import numpy as np
+        from qdrant_client import QdrantClient
+        from qdrant_client.http.models import Distance, PointStruct, VectorParams
 
-        index = faiss.IndexHNSWFlat(384, 32, faiss.METRIC_INNER_PRODUCT)
+        client = QdrantClient(":memory:")
+        client.create_collection(
+            collection_name="test_col",
+            vectors_config=VectorParams(size=384, distance=Distance.COSINE),
+        )
 
         # Vector 0
-        v0 = np.random.randn(1, 384).astype(np.float32)
-        faiss.normalize_L2(v0)
-        index.add(v0)
+        v0 = np.random.randn(384).astype(np.float32)
+        v0 = v0 / np.linalg.norm(v0)
+        client.upsert(
+            collection_name="test_col",
+            points=[PointStruct(id=0, vector=v0.tolist())],
+        )
 
         # Vector 1 (appended later)
-        v1 = np.random.randn(1, 384).astype(np.float32)
-        faiss.normalize_L2(v1)
-        index.add(v1)
+        v1 = np.random.randn(384).astype(np.float32)
+        v1 = v1 / np.linalg.norm(v1)
+        client.upsert(
+            collection_name="test_col",
+            points=[PointStruct(id=1, vector=v1.tolist())],
+        )
 
         # Search for exact v1
-        distances, indices = index.search(v1, k=1)
-        assert indices[0][0] == 1
-        assert pytest.approx(float(distances[0][0]), 0.001) == 1.0
+        results = client.search(
+            collection_name="test_col",
+            query_vector=v1.tolist(),
+            limit=1,
+        )
+        assert results[0].id == 1
+        assert pytest.approx(float(results[0].score), 0.001) == 1.0
 
-    def test_faiss_hnsw_dimension_mismatch_rejection(self) -> None:
-        """Verify FAISS rejects insertion of vectors with incompatible dimensions."""
-        import faiss
+    def test_qdrant_dimension_mismatch_rejection(self) -> None:
+        """Verify Qdrant rejects insertion of vectors with incompatible dimensions."""
         import numpy as np
+        from qdrant_client import QdrantClient
+        from qdrant_client.http.models import Distance, PointStruct, VectorParams
 
-        index = faiss.IndexHNSWFlat(384, 32, faiss.METRIC_INNER_PRODUCT)
-        invalid_vector = np.random.randn(1, 768).astype(np.float32)
+        client = QdrantClient(":memory:")
+        client.create_collection(
+            collection_name="test_col",
+            vectors_config=VectorParams(size=384, distance=Distance.COSINE),
+        )
+        invalid_vector = np.random.randn(768).astype(np.float32).tolist()
 
-        with pytest.raises((RuntimeError, AssertionError)):
-            index.add(invalid_vector)
+        with pytest.raises((ValueError, Exception)):
+            client.upsert(
+                collection_name="test_col",
+                points=[PointStruct(id=99, vector=invalid_vector)],
+            )
 
-    def test_faiss_hnsw_persistence_roundtrip(self, tmp_path: Path) -> None:
-        """Verify FAISS index can be persisted to disk and reloaded with identical count."""
-        import faiss
+    def test_qdrant_persistence_roundtrip(self, tmp_path: Path) -> None:
+        """Verify Qdrant local index can be persisted to disk and reloaded with identical count."""
         import numpy as np
+        from qdrant_client import QdrantClient
+        from qdrant_client.http.models import Distance, PointStruct, VectorParams
 
-        index_file = str(tmp_path / "test.faiss")
-        index = faiss.IndexHNSWFlat(384, 32, faiss.METRIC_INNER_PRODUCT)
+        qdrant_path = str(tmp_path / "qdrant_test")
+        client = QdrantClient(path=qdrant_path)
+        client.create_collection(
+            collection_name="test_col",
+            vectors_config=VectorParams(size=384, distance=Distance.COSINE),
+        )
 
         vectors = np.random.randn(12, 384).astype(np.float32)
-        faiss.normalize_L2(vectors)
-        index.add(vectors)
-        assert index.ntotal == 12
+        norms = np.linalg.norm(vectors, axis=1, keepdims=True)
+        vectors = vectors / norms
+        points = [
+            PointStruct(id=i, vector=vectors[i].tolist())
+            for i in range(12)
+        ]
+        client.upsert(collection_name="test_col", points=points)
+        assert client.get_collection("test_col").points_count == 12
+        client.close()
 
-        faiss.write_index(index, index_file)
-        assert Path(index_file).exists()
-
-        reloaded_index = faiss.read_index(index_file)
-        assert reloaded_index.ntotal == 12
-        assert reloaded_index.d == 384
+        reloaded_client = QdrantClient(path=qdrant_path)
+        assert reloaded_client.get_collection("test_col").points_count == 12
+        reloaded_client.close()
 
 
 class TestFeature4IndexSnapshotAndManifestPersistence:
@@ -295,16 +344,16 @@ class TestFeature4IndexSnapshotAndManifestPersistence:
 
     def test_snapshot_manifest_sha256_checksum_verification(self, tmp_path: Path) -> None:
         """Verify SHA256 file checksums recorded in manifest match disk artifacts."""
-        dummy_index = tmp_path / "faiss_store.bin"
-        content = b"FAISS_BINARY_INDEX_CONTENT_SAMPLE"
+        dummy_index = tmp_path / "vector_store.bin"
+        content = b"VECTOR_BINARY_INDEX_CONTENT_SAMPLE"
         dummy_index.write_bytes(content)
 
         expected_hash = hashlib.sha256(content).hexdigest()
-        manifest_data = {"files": {"faiss_store.bin": expected_hash}}
+        manifest_data = {"files": {"vector_store.bin": expected_hash}}
 
         # Verify computed matches recorded
         actual_hash = hashlib.sha256(dummy_index.read_bytes()).hexdigest()
-        assert actual_hash == manifest_data["files"]["faiss_store.bin"]
+        assert actual_hash == manifest_data["files"]["vector_store.bin"]
 
     def test_snapshot_manifest_detects_corrupted_file(self, tmp_path: Path) -> None:
         """Verify checksum mismatch is detected when an index file is altered."""

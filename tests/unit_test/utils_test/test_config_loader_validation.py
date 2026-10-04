@@ -26,14 +26,15 @@ def temp_config_file(tmp_path: Path) -> Path:
         "embedding_batch_size": 10,
         "chunk_size": 1024,
         "chunk_overlap": 200,
-        "vector_store": "faiss",
+        "vector_store": "qdrant",
         "similarity_top_k": 5,
         "query_temperature": 0.1,
         "metrics_enabled": True,
         "metrics_log_interval": 300,
-        "faiss": {
-            "hnsw_m": 32,
-            "metric": "inner_product"
+        "qdrant": {
+            "collection_name": "test_col",
+            "path": "./data/index/qdrant",
+            "distance": "Cosine"
         },
         "mcp": {
             "host": "127.0.0.1",
@@ -91,8 +92,8 @@ class TestLoadSettings:
         config = load_settings(str(temp_config_file))
         
         # Verify nested configs are properly validated
-        assert "faiss" in config
-        assert config["faiss"]["hnsw_m"] == 32
+        assert "qdrant" in config
+        assert config["qdrant"]["collection_name"] == "test_col"
         assert "mcp" in config
         assert config["mcp"]["port"] == 25191
     
@@ -223,15 +224,16 @@ class TestConfigValidationIntegration:
             "embedding_trust_remote_code": False,
             "chunk_size": 1024,
             "chunk_overlap": 200,
-            "vector_store": "faiss",
+            "vector_store": "qdrant",
             "similarity_top_k": 5,
             "query_temperature": 0.1,
             "metrics_enabled": True,
             "metrics_log_interval": 300,
             "metrics_file": "metrics.log",
-            "faiss": {
-                "hnsw_m": 32,
-                "metric": "inner_product"
+            "qdrant": {
+                "collection_name": "test_complete",
+                "path": "./data/index/qdrant",
+                "distance": "Cosine"
             },
             "adaptive_chunking": {
                 "enabled": True,
@@ -296,7 +298,7 @@ class TestConfigValidationIntegration:
         
         # Verify all sections loaded
         assert config["embedding_model"] == "all-MiniLM-L6-v2"
-        assert config["faiss"]["hnsw_m"] == 32
+        assert config["qdrant"]["collection_name"] == "test_complete"
         assert config["mcp"]["port"] == 25191
         assert config["retriever"]["hybrid_alpha"] == 0.5
     

@@ -220,12 +220,12 @@ class TestMCPServerPersistDirWiring:
         ):
             run_stdio(
                 config_path="config/settings.yaml",
-                persist_dir="data/index_test_1000",
+                persist_dir="data/index",
             )
             mock_cfg_stream.assert_called_once_with(sys.stderr)
             mock_cfg.assert_called_once_with(
                 config_path="config/settings.yaml",
-                persist_dir="data/index_test_1000",
+                persist_dir="data/index",
             )
             mock_mcp_run.assert_called_once()
 

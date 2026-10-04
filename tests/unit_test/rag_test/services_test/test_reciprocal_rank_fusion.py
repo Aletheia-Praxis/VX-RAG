@@ -63,9 +63,11 @@ def temp_config_file(tmp_path: Path) -> Generator[str, None, None]:
             "embedding_device": "cpu",
         },
         "embedding_device": "cpu",
-        "faiss": {
-            "hnsw_m": 32,
-            "metric": "inner_product",
+        "vector_store": "qdrant",
+        "qdrant": {
+            "collection_name": "test_rrf",
+            "path": str(tmp_path / "qdrant"),
+            "distance": "Cosine",
         },
         "bm25": {
             "index_dir": str(tmp_path / "bm25"),

@@ -12,8 +12,8 @@ from src.utils.config_schemas import (
     ChunkingConfig,
     DuplicateDetectionConfig,
     EmbeddingConfig,
-    FAISSConfig,
     MCPConfig,
+    QdrantConfig,
     RateLimitConfig,
     RerankerConfig,
     RetrieverConfig,
@@ -100,30 +100,32 @@ class TestAdaptiveChunkingProfile:
         assert "chunk_overlap" in str(exc_info.value).lower()
 
 
-class TestFAISSConfig:
-    """Tests for FAISSConfig validation."""
-    
-    def test_valid_config(self) -> None:
-        """Test valid FAISS configuration."""
-        config = FAISSConfig(hnsw_m=32, metric="inner_product")
-        assert config.hnsw_m == 32
-        assert config.metric == "inner_product"
-    
-    def test_hnsw_m_bounds(self) -> None:
-        """Test HNSW M parameter bounds."""
-        with pytest.raises(ValidationError) as exc_info:
-            FAISSConfig(hnsw_m=2)  # Too small
-        assert "hnsw_m" in str(exc_info.value)
-        
-        with pytest.raises(ValidationError) as exc_info:
-            FAISSConfig(hnsw_m=200)  # Too large
-        assert "hnsw_m" in str(exc_info.value)
-    
-    def test_metric_validation(self) -> None:
-        """Test metric must be valid."""
-        with pytest.raises(ValidationError) as exc_info:
-            FAISSConfig(metric="cosine")  # type: ignore
-        assert "metric" in str(exc_info.value)
+class TestQdrantConfig:
+    """Tests for QdrantConfig validation."""
+
+    def test_valid_default_config(self) -> None:
+        """Test default Qdrant configuration."""
+        config = QdrantConfig()
+        assert config.collection_name == "vx_rag_collection"
+        assert config.distance == "Cosine"
+        assert config.enable_hybrid is True
+        assert config.sparse_model == "BAAI/bge-m3"
+
+    def test_custom_config(self) -> None:
+        """Test custom Qdrant configuration."""
+        config = QdrantConfig(
+            collection_name="custom_col",
+            path="./custom/path",
+            distance="Dot",
+            enable_hybrid=False,
+            sparse_model="prithivida/Splade_PP_en_v1",
+        )
+        assert config.collection_name == "custom_col"
+        assert config.path == "./custom/path"
+        assert config.distance == "Dot"
+        assert config.enable_hybrid is False
+        assert config.sparse_model == "prithivida/Splade_PP_en_v1"
+
 
 
 class TestRetrieverConfig:
@@ -272,10 +274,10 @@ class TestVXRAGSettings:
             embedding_device="cpu",
             chunk_size=1024,
             chunk_overlap=200,
-            vector_store="faiss"
+            vector_store="qdrant"
         )
         assert config.data_dir == "./data"
-        assert config.vector_store == "faiss"
+        assert config.vector_store == "qdrant"
     
     def test_chunk_overlap_validation(self) -> None:
         """Test root-level chunk overlap validation."""
@@ -286,19 +288,19 @@ class TestVXRAGSettings:
     def test_nested_config_validation(self) -> None:
         """Test nested configuration validation."""
         config = VXRAGSettings(
-            faiss=FAISSConfig(hnsw_m=32, metric="inner_product"),
+            qdrant=QdrantConfig(collection_name="test_col"),
             mcp=MCPConfig(host="127.0.0.1", port=25191)
         )
-        assert config.faiss.hnsw_m == 32
+        assert config.qdrant.collection_name == "test_col"
         assert config.mcp.port == 25191
     
     def test_invalid_nested_config(self) -> None:
         """Test invalid nested configuration is caught."""
         with pytest.raises(ValidationError) as exc_info:
             VXRAGSettings(
-                faiss=FAISSConfig(hnsw_m=2)  # Too small
+                retriever=RetrieverConfig(semantic_top_k=0)  # Invalid: ge=1
             )
-        assert "hnsw_m" in str(exc_info.value)
+        assert "semantic_top_k" in str(exc_info.value)
     
     def test_extra_fields_allowed(self) -> None:
         """Test extra fields are allowed for forward compatibility."""

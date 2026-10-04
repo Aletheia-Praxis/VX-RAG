@@ -90,9 +90,11 @@ def storage_temp_config(tmp_path: Path) -> Generator[str, None, None]:
             "embedding_device": "cpu",
         },
         "embedding_device": "cpu",
-        "faiss": {
-            "hnsw_m": 32,
-            "metric": "inner_product",
+        "vector_store": "qdrant",
+        "qdrant": {
+            "collection_name": "test_duckdb_docstore",
+            "path": str(tmp_path / "qdrant"),
+            "distance": "Cosine",
         },
         "bm25": {
             "index_dir": str(tmp_path / "bm25"),
@@ -403,7 +405,7 @@ class TestDuckDBKVStoreOrchestratorIntegration:
 
         # Verify NO docstore.json exists anywhere
         assert not (persist_dir / "docstore.json").exists()
-        assert not (persist_dir / "faiss_index" / "docstore.json").exists()
+        assert not (persist_dir / "qdrant" / "docstore.json").exists()
 
         # Check health status
         health = orchestrator.get_health_status()
@@ -477,10 +479,9 @@ class TestDuckDBKVStoreOrchestratorIntegration:
             tmp_path: Temporary directory fixture.
         """
         persist_dir = tmp_path / "persist"
-        faiss_dir = persist_dir / "faiss_index"
-        faiss_dir.mkdir(parents=True, exist_ok=True)
+        persist_dir.mkdir(parents=True, exist_ok=True)
 
-        # Pre-populate a legacy SimpleDocumentStore at faiss_index/docstore.json
+        # Pre-populate a legacy SimpleDocumentStore at docstore.json
         legacy_ds = SimpleDocumentStore()
         legacy_nodes = [
             TextNode(
@@ -495,8 +496,8 @@ class TestDuckDBKVStoreOrchestratorIntegration:
             ),
         ]
         legacy_ds.add_documents(legacy_nodes)
-        legacy_ds.persist(str(faiss_dir / "docstore.json"))
-        assert (faiss_dir / "docstore.json").exists()
+        legacy_ds.persist(str(persist_dir / "docstore.json"))
+        assert (persist_dir / "docstore.json").exists()
 
         # Initialize RAGOrchestrator with DuckDB config
         orchestrator = RAGOrchestrator(

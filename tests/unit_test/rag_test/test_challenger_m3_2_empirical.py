@@ -77,9 +77,11 @@ def temp_orchestrator_config(tmp_path: Path) -> Generator[str, None, None]:
             "embedding_device": "cpu",
         },
         "embedding_device": "cpu",
-        "faiss": {
-            "hnsw_m": 32,
-            "metric": "inner_product",
+        "vector_store": "qdrant",
+        "qdrant": {
+            "collection_name": "test_m3_2",
+            "path": str(tmp_path / "qdrant"),
+            "distance": "Cosine",
         },
         "bm25": {
             "index_dir": str(tmp_path / "bm25"),
@@ -381,7 +383,7 @@ class TestDuplicateDetectionEmpirical:
         temp_orchestrator_config: str,
         tmp_path: Path,
     ) -> None:
-        """Verify ingest_documents skips files whose SHA-256 hashes are already indexed in FAISS/manifest."""
+        """Verify ingest_documents skips files whose SHA-256 hashes are already indexed."""
         docs_dir = tmp_path / "mixed_docs"
         docs_dir.mkdir(parents=True, exist_ok=True)
 

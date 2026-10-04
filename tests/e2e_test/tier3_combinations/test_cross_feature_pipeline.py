@@ -4,7 +4,7 @@ Tier 3 Cross-Feature Combination: End-to-End Pipeline Integration.
 Authoritative Source: ORIGINAL_REQUEST.md §R1-R4, PROJECT.md §Interface Contracts.
 Verifies pairwise and multi-feature combinations across:
 - Ingestion + Strict Metadata Schema + Duplicate Detection
-- Ingestion + Markdown Chunking + FAISS HNSW Incremental Indexing
+- Ingestion + Markdown Chunking + Vector Incremental Indexing
 - Hybrid Retrieval (Vector + BM25) + Cross-Encoder Reranking
 - Reranked Retrieval + Sensitive Data Redaction + MCP Context Assembly
 - Full Pipeline: Ingest -> Index -> Serve -> Sequential MCP Queries
@@ -59,29 +59,48 @@ class TestCrossFeaturePipeline:
         is_duplicate = calculated_hash in processed_hashes
         assert is_duplicate is True, "Second ingestion attempt must be flagged as duplicate"
 
-    def test_pairwise_chunking_and_incremental_faiss_indexing(self) -> None:
-        """Verify chunked nodes are incrementally indexed to FAISS HNSW without rebuilding initial nodes."""
-        import faiss
+    def test_pairwise_chunking_and_incremental_vector_indexing(self) -> None:
+        """Verify chunked nodes are incrementally indexed to Qdrant without rebuilding initial nodes."""
         import numpy as np
+        from qdrant_client import QdrantClient
+        from qdrant_client.http.models import Distance, PointStruct, VectorParams
 
-        index = faiss.IndexHNSWFlat(384, 32, faiss.METRIC_INNER_PRODUCT)
+        client = QdrantClient(":memory:")
+        client.create_collection(
+            collection_name="test_col",
+            vectors_config=VectorParams(size=384, distance=Distance.COSINE),
+        )
 
         # Batch 1: Document A (3 chunks)
         batch1_embeddings = np.random.randn(3, 384).astype(np.float32)
-        faiss.normalize_L2(batch1_embeddings)
-        index.add(batch1_embeddings)
-        assert index.ntotal == 3
+        norm1 = np.linalg.norm(batch1_embeddings, axis=1, keepdims=True)
+        batch1_embeddings = batch1_embeddings / norm1
+        points1 = [
+            PointStruct(id=i, vector=batch1_embeddings[i].tolist())
+            for i in range(3)
+        ]
+        client.upsert(collection_name="test_col", points=points1)
+        assert client.get_collection("test_col").points_count == 3
 
         # Batch 2: Document B (2 chunks) incrementally appended
         batch2_embeddings = np.random.randn(2, 384).astype(np.float32)
-        faiss.normalize_L2(batch2_embeddings)
-        index.add(batch2_embeddings)
-        assert index.ntotal == 5
+        norm2 = np.linalg.norm(batch2_embeddings, axis=1, keepdims=True)
+        batch2_embeddings = batch2_embeddings / norm2
+        points2 = [
+            PointStruct(id=i + 3, vector=batch2_embeddings[i].tolist())
+            for i in range(2)
+        ]
+        client.upsert(collection_name="test_col", points=points2)
+        assert client.get_collection("test_col").points_count == 5
 
         # Query for Document B's first vector
-        dists, idxs = index.search(batch2_embeddings[0:1], k=1)
-        assert idxs[0][0] == 3
-        assert pytest.approx(float(dists[0][0]), 0.001) == 1.0
+        res = client.search(
+            collection_name="test_col",
+            query_vector=batch2_embeddings[0].tolist(),
+            limit=1,
+        )
+        assert res[0].id == 3
+        assert pytest.approx(float(res[0].score), 0.001) == 1.0
 
     def test_pairwise_hybrid_retrieval_and_cross_encoder_rerank(self) -> None:
         """Verify hybrid search candidates are reranked by cross-encoder, updating ranking order."""
