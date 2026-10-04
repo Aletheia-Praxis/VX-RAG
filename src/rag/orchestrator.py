@@ -39,12 +39,19 @@ from llama_index.core.storage.docstore import BaseDocumentStore, SimpleDocumentS
 from llama_index.core.storage.docstore.keyval_docstore import KVDocumentStore
 from llama_index.core.vector_stores.types import (
     VectorStoreQuery,
+    VectorStoreQueryMode,
     VectorStoreQueryResult,
 )
 from llama_index.embeddings.huggingface import HuggingFaceEmbedding
 from llama_index.retrievers.bm25 import BM25Retriever
 from llama_index.storage.kvstore.duckdb import DuckDBKVStore
 from llama_index.vector_stores.qdrant import QdrantVectorStore
+from llama_index.vector_stores.qdrant.utils import (
+    BatchSparseEncoding,
+    SparseEncoderCallable,
+    fastembed_sparse_encoder,
+)
+from qdrant_client import models
 
 from src.rag.exceptions import ServiceInitializationError
 from src.rag.ingestion import DoclingPipeline
@@ -59,7 +66,6 @@ from src.rag.metadata import (
     sanitize_node_metadata,
 )
 from src.utils.config_loader import (
-    get_bm25_config,
     get_docstore_config,
     get_embedding_config,
     get_qdrant_config,
@@ -103,6 +109,92 @@ def _to_qdrant_id(raw_id: str | int) -> str | int:
         return str(uuid.uuid5(uuid.NAMESPACE_DNS, raw_str))
 
 
+def _create_bge_m3_sparse_encoder(
+    model_name: str = "BAAI/bge-m3",
+) -> SparseEncoderCallable:
+    """Create a sparse encoder for BAAI/bge-m3 generating lexical token weights.
+
+    Args:
+        model_name: Embedding or sparse model identifier.
+
+    Returns:
+        SparseEncoderCallable taking a list of text strings and returning (indices, values).
+    """
+    try:
+        from transformers import AutoTokenizer
+
+        tokenizer = AutoTokenizer.from_pretrained(model_name)
+    except (ImportError, OSError, ValueError, RuntimeError) as e:
+        logger.warning(
+            f"Could not load tokenizer for {model_name}, falling back to fastembed BM25: {e}"
+        )
+        try:
+            return fastembed_sparse_encoder("Qdrant/bm25")
+        except (ImportError, OSError, ValueError, RuntimeError):
+            def _dummy_encoder(texts: list[str]) -> BatchSparseEncoding:
+                return [[] for _ in texts], [[] for _ in texts]
+
+            return _dummy_encoder
+
+    def compute_vectors(texts: list[str]) -> BatchSparseEncoding:
+        """Compute sparse token frequency and importance vectors."""
+        all_indices: list[list[int]] = []
+        all_values: list[list[float]] = []
+
+        if not texts:
+            return all_indices, all_values
+
+        try:
+            encoded = tokenizer(
+                texts,
+                add_special_tokens=False,
+                truncation=True,
+                max_length=8192,
+            )
+            for input_ids in encoded["input_ids"]:
+                freqs: dict[int, int] = {}
+                for tid in input_ids:
+                    freqs[tid] = freqs.get(tid, 0) + 1
+                indices = list(freqs.keys())
+                values = [float(freqs[tid]) for tid in indices]
+                all_indices.append(indices)
+                all_values.append(values)
+        except (OSError, ValueError, TypeError, RuntimeError) as err:
+            logger.warning(f"Error computing sparse vectors for batch: {err}")
+            for _ in texts:
+                all_indices.append([])
+                all_values.append([])
+
+        return all_indices, all_values
+
+    return compute_vectors
+
+
+def _get_sparse_encoder(model_name: str | None = None) -> SparseEncoderCallable:
+    """Resolve sparse document/query encoder function based on model name.
+
+    Args:
+        model_name: Sparse model name or None for default.
+
+    Returns:
+        SparseEncoderCallable suitable for QdrantVectorStore.
+    """
+    selected_model = model_name or "BAAI/bge-m3"
+
+    try:
+        from fastembed.sparse.sparse_text_embedding import SparseTextEmbedding
+
+        supported_models = [
+            m["model"].lower() for m in SparseTextEmbedding.list_supported_models()
+        ]
+        if selected_model.lower() in supported_models:
+            return fastembed_sparse_encoder(model_name=selected_model)
+    except (ImportError, OSError, ValueError, AttributeError) as e:
+        logger.debug(f"Fastembed sparse model check notice: {e}")
+
+    return _create_bge_m3_sparse_encoder(selected_model)
+
+
 class RobustQdrantVectorStore(QdrantVectorStore):
     """Qdrant vector store with robust ID translation and safe local lifecycle.
 
@@ -115,10 +207,29 @@ class RobustQdrantVectorStore(QdrantVectorStore):
         self,
         collection_name: str,
         client: Any | None = None,
+        enable_hybrid: bool = False,
+        fastembed_sparse_model: str | None = None,
+        sparse_doc_fn: Any | None = None,
+        sparse_query_fn: Any | None = None,
+        sparse_vector_name: str = "sparse",
         **kwargs: Any,
     ) -> None:
         """Initialize RobustQdrantVectorStore."""
-        super().__init__(collection_name=collection_name, client=client, **kwargs)
+        if enable_hybrid and (sparse_doc_fn is None or sparse_query_fn is None):
+            encoder = _get_sparse_encoder(fastembed_sparse_model)
+            sparse_doc_fn = sparse_doc_fn or encoder
+            sparse_query_fn = sparse_query_fn or encoder
+
+        super().__init__(
+            collection_name=collection_name,
+            client=client,
+            enable_hybrid=enable_hybrid,
+            fastembed_sparse_model=fastembed_sparse_model,
+            sparse_doc_fn=sparse_doc_fn,
+            sparse_query_fn=sparse_query_fn,
+            sparse_vector_name=sparse_vector_name,
+            **kwargs,
+        )
 
     def _build_points(
         self, nodes: Sequence[BaseNode], sparse_vector_name: str
@@ -149,12 +260,148 @@ class RobustQdrantVectorStore(QdrantVectorStore):
             **delete_kwargs,
         )
 
+    def _build_hybrid_rrf_prefetch(
+        self,
+        query: VectorStoreQuery,
+        **kwargs: Any,
+    ) -> tuple[list[models.Prefetch], int, models.Filter | None, Any, models.SearchParams | None]:
+        """Construct Prefetch requests and parameters for native Qdrant Fusion.RRF hybrid retrieval.
+
+        Args:
+            query: VectorStoreQuery specifying mode, embedding, and similarity limits.
+            **kwargs: Extra query options such as qdrant_filters or search_params.
+
+        Returns:
+            Tuple of (prefetch_list, top_k, query_filter, shard_key, search_params).
+        """
+        query_embedding = cast(list[float], query.query_embedding)
+        assert self._sparse_query_fn is not None
+        assert query.query_str is not None
+        sparse_indices, sparse_values = self._sparse_query_fn([query.query_str])
+
+        qdrant_filters = kwargs.get("qdrant_filters")
+        if qdrant_filters is not None:
+            query_filter = cast(models.Filter | None, qdrant_filters)
+        else:
+            query_filter = cast(models.Filter | None, self._build_query_filter(query))
+
+        shard_identifier = kwargs.get("shard_identifier")
+        shard_key = (
+            self._generate_shard_key_selector(shard_identifier)
+            if shard_identifier is not None and hasattr(self, "_generate_shard_key_selector")
+            else None
+        )
+
+        search_params = kwargs.get("search_params")
+        if search_params is not None and isinstance(search_params, dict):
+            search_params = models.SearchParams(**search_params)
+        search_params = cast(models.SearchParams | None, search_params)
+
+        top_k = query.hybrid_top_k or query.similarity_top_k
+        candidate_k = kwargs.get("candidate_k") or query.similarity_top_k
+        sparse_top_k = query.sparse_top_k or candidate_k
+
+        sparse_idx_0: list[int] = sparse_indices[0] if sparse_indices else []
+        sparse_val_0: list[float] = sparse_values[0] if sparse_values else []
+
+        dense_prefetch = models.Prefetch(
+            query=query_embedding,
+            using=self.dense_vector_name or None,
+            limit=candidate_k,
+            filter=query_filter,
+            params=search_params,
+        )
+        sparse_prefetch = models.Prefetch(
+            query=models.SparseVector(
+                indices=sparse_idx_0,
+                values=sparse_val_0,
+            ),
+            using=self.sparse_vector_name,
+            limit=sparse_top_k,
+            filter=query_filter,
+            params=search_params,
+        )
+        prefetch = [dense_prefetch, sparse_prefetch]
+        return prefetch, top_k, query_filter, shard_key, search_params
+
+    def query(
+        self,
+        query: VectorStoreQuery,
+        **kwargs: Any,
+    ) -> VectorStoreQueryResult:
+        """Query index for top k most similar nodes using native Qdrant RRF for hybrid search.
+
+        Args:
+            query: VectorStoreQuery containing embedding, mode, and parameters.
+            **kwargs: Additional parameters passed to Qdrant query.
+
+        Returns:
+            VectorStoreQueryResult parsed from Qdrant scored points.
+        """
+        if (
+            query.mode == VectorStoreQueryMode.HYBRID
+            and self.enable_hybrid
+            and self._sparse_query_fn is not None
+            and query.query_str is not None
+            and query.query_embedding is not None
+        ):
+            prefetch, top_k, query_filter, shard_key, search_params = (
+                self._build_hybrid_rrf_prefetch(query, **kwargs)
+            )
+            response = self._client.query_points(
+                collection_name=self.collection_name,
+                prefetch=prefetch,
+                query=models.FusionQuery(fusion=models.Fusion.RRF),
+                limit=top_k,
+                query_filter=query_filter,
+                shard_key_selector=shard_key,
+                search_params=search_params,
+                with_payload=True,
+            )
+            return self.parse_to_query_result(response.points)
+
+        return super().query(query, **kwargs)
+
     async def aquery(
         self,
         query: VectorStoreQuery,
         **kwargs: Any,
     ) -> VectorStoreQueryResult:
-        """Asynchronously query the vector store, falling back to thread executor if aclient is not set."""
+        """Asynchronously query the vector store using native Qdrant RRF for hybrid search.
+
+        Falls back to thread executor if asynchronous client is not available.
+
+        Args:
+            query: VectorStoreQuery containing embedding, mode, and parameters.
+            **kwargs: Additional parameters passed to Qdrant query.
+
+        Returns:
+            VectorStoreQueryResult parsed from Qdrant scored points.
+        """
+        if (
+            query.mode == VectorStoreQueryMode.HYBRID
+            and self.enable_hybrid
+            and self._sparse_query_fn is not None
+            and query.query_str is not None
+            and query.query_embedding is not None
+        ):
+            if getattr(self, "_aclient", None) is not None:
+                prefetch, top_k, query_filter, shard_key, search_params = (
+                    self._build_hybrid_rrf_prefetch(query, **kwargs)
+                )
+                response = await self._aclient.query_points(
+                    collection_name=self.collection_name,
+                    prefetch=prefetch,
+                    query=models.FusionQuery(fusion=models.Fusion.RRF),
+                    limit=top_k,
+                    query_filter=query_filter,
+                    shard_key_selector=shard_key,
+                    search_params=search_params,
+                    with_payload=True,
+                )
+                return self.parse_to_query_result(response.points)
+            return await asyncio.to_thread(self.query, query, **kwargs)
+
         if getattr(self, "_aclient", None) is not None:
             return await super().aquery(query, **kwargs)
         return await asyncio.to_thread(self.query, query, **kwargs)
@@ -742,7 +989,6 @@ class RAGOrchestrator:
             legacy_candidates = [
                 target_dir / "docstore.json",
                 self.persist_dir / "docstore.json",
-                self.persist_dir / "faiss_index" / "docstore.json",
             ]
             for legacy_json in legacy_candidates:
                 if legacy_json.exists():
@@ -781,6 +1027,8 @@ class RAGOrchestrator:
         collection_name = str(qdrant_config.get("collection_name", "vx_rag_collection"))
         cfg_distance = str(qdrant_config.get("distance", "Cosine"))
         cfg_path = str(qdrant_config.get("path", "./data/index/qdrant"))
+        enable_hybrid = bool(qdrant_config.get("enable_hybrid", True))
+        sparse_model = str(qdrant_config.get("sparse_model", "BAAI/bge-m3"))
 
         self._docstore, self._kvstore = self._get_docstore_and_kvstore(storage_path)
 
@@ -820,21 +1068,48 @@ class RAGOrchestrator:
         collection_exists = collection_name in existing_collections
 
         if not collection_exists:
+            sparse_vectors_config = (
+                {"sparse": qdrant_client.http.models.SparseVectorParams()}
+                if enable_hybrid
+                else None
+            )
             self._qdrant_client.create_collection(
                 collection_name=collection_name,
                 vectors_config=qdrant_client.http.models.VectorParams(
                     size=embedding_dimension,
                     distance=distance,
                 ),
+                sparse_vectors_config=sparse_vectors_config,
             )
             logger.info(
                 f"Created Qdrant collection '{collection_name}' "
-                f"(dim={embedding_dimension}, distance={cfg_distance})"
+                f"(dim={embedding_dimension}, distance={cfg_distance}, enable_hybrid={enable_hybrid})"
             )
+        elif enable_hybrid:
+            try:
+                col_info = self._qdrant_client.get_collection(collection_name)
+                sparse_cfg = getattr(getattr(col_info, "config", None), "params", None)
+                sparse_vectors = getattr(sparse_cfg, "sparse_vectors", None)
+                if not sparse_vectors or "sparse" not in sparse_vectors:
+                    self._qdrant_client.create_vector_name(
+                        collection_name=collection_name,
+                        vector_name="sparse",
+                        vector_name_config=qdrant_client.http.models.SparseVectorNameConfig(
+                            sparse=qdrant_client.http.models.SparseVectorConfig()
+                        ),
+                    )
+                    logger.info(
+                        f"Added sparse vector configuration to existing collection '{collection_name}'"
+                    )
+            except (OSError, ValueError, KeyError, RuntimeError, AttributeError) as e:
+                logger.debug(f"Notice ensuring sparse vector in existing collection: {e}")
 
         vector_store = RobustQdrantVectorStore(
             client=self._qdrant_client,
             collection_name=collection_name,
+            enable_hybrid=enable_hybrid,
+            fastembed_sparse_model=sparse_model,
+            sparse_vector_name="sparse",
         )
 
         storage_context = StorageContext.from_defaults(
@@ -1191,7 +1466,6 @@ class RAGOrchestrator:
             return
 
         self.persist_dir.mkdir(parents=True, exist_ok=True)
-        bm25_index_path = self.persist_dir / "bm25_index"
 
         # Incrementally append nodes to Qdrant index and docstore
         self._index.insert_nodes(nodes_to_insert)
@@ -1201,26 +1475,6 @@ class RAGOrchestrator:
             self._index.docstore.add_documents(nodes_to_insert)
 
         self._index.storage_context.persist(persist_dir=str(self.persist_dir))
-
-        # Re-index BM25 using cumulative nodes from docstore to ensure no docs are lost
-        active_docstore = self._docstore or (self._index.docstore if self._index else None)
-        cumulative_nodes = (
-            list(active_docstore.docs.values())
-            if active_docstore is not None and active_docstore.docs
-            else list(nodes_to_insert)
-        )
-        if not cumulative_nodes:
-            cumulative_nodes = list(nodes_to_insert)
-        bm25_config = get_bm25_config(self.config_path)
-        similarity_top_k = int(bm25_config.get("similarity_top_k", 20))
-
-        self._bm25_retriever = BM25Retriever.from_defaults(
-            nodes=cumulative_nodes,
-            similarity_top_k=similarity_top_k,
-            verbose=False,
-        )
-        bm25_index_path.mkdir(parents=True, exist_ok=True)
-        self._bm25_retriever.persist(str(bm25_index_path))
         self._indexes_loaded = True
 
         # Checkpoint and flush DuckDB docstore before manifest calculation on Windows
@@ -1231,8 +1485,13 @@ class RAGOrchestrator:
         (self.persist_dir / "manifest.json").write_text(
             json.dumps(manifest_data, indent=2), encoding="utf-8"
         )
+        active_docstore = self._docstore or (self._index.docstore if self._index else None)
+        total_count = len(nodes_to_insert)
+        if active_docstore is not None and active_docstore.docs:
+            total_count = len(active_docstore.docs)
+
         logger.info(
-            f"Successfully indexed {len(nodes_to_insert)} nodes. Total nodes: {len(cumulative_nodes)}"
+            f"Successfully indexed {len(nodes_to_insert)} nodes. Total nodes: {total_count}"
         )
 
     async def query_async(
@@ -1277,21 +1536,30 @@ class RAGOrchestrator:
             except (TypeError, AttributeError):
                 total_docs = top_k
         candidate_k = max(1, min(total_docs, max(top_k * 2, 20)))
-        vector_retriever = self._index.as_retriever(similarity_top_k=candidate_k)
 
         retriever: BaseRetriever
-        if search_type == "hybrid" and self._bm25_retriever:
+        if search_type == "hybrid" and self._bm25_retriever is not None:
             self._bm25_retriever.similarity_top_k = candidate_k
+            vector_retriever = self._index.as_retriever(similarity_top_k=candidate_k)
             retriever = ReciprocalRankFusionRetriever(
                 retrievers=[vector_retriever, self._bm25_retriever],
                 similarity_top_k=candidate_k,
                 k=DEFAULT_RRF_K,
             )
-        elif search_type == "keyword" and self._bm25_retriever:
+        elif search_type == "keyword" and self._bm25_retriever is not None:
             self._bm25_retriever.similarity_top_k = candidate_k
             retriever = self._bm25_retriever
         else:
-            retriever = vector_retriever
+            is_hybrid = getattr(self._vector_store, "enable_hybrid", False)
+            query_mode = VectorStoreQueryMode.DEFAULT
+            if search_type == "hybrid" and is_hybrid:
+                query_mode = VectorStoreQueryMode.HYBRID
+            elif search_type == "keyword" and is_hybrid:
+                query_mode = VectorStoreQueryMode.SPARSE
+            retriever = self._index.as_retriever(
+                similarity_top_k=candidate_k,
+                vector_store_query_mode=query_mode,
+            )
 
         node_postprocessors: list[BaseNodePostprocessor] = []
         if self._reranker is not None:
@@ -1391,20 +1659,29 @@ class RAGOrchestrator:
             except (TypeError, AttributeError):
                 total_docs = top_k
         candidate_k = max(1, min(total_docs, max(top_k * 3, 20)))
-        vector_retriever = self._index.as_retriever(similarity_top_k=candidate_k)
         retriever: BaseRetriever
-        if search_type == "hybrid" and self._bm25_retriever:
+        if search_type == "hybrid" and self._bm25_retriever is not None:
+            vector_retriever = self._index.as_retriever(similarity_top_k=candidate_k)
             self._bm25_retriever.similarity_top_k = candidate_k
             retriever = ReciprocalRankFusionRetriever(
                 retrievers=[vector_retriever, self._bm25_retriever],
                 similarity_top_k=candidate_k,
                 k=DEFAULT_RRF_K,
             )
-        elif search_type == "keyword" and self._bm25_retriever:
+        elif search_type == "keyword" and self._bm25_retriever is not None:
             self._bm25_retriever.similarity_top_k = candidate_k
             retriever = self._bm25_retriever
         else:
-            retriever = vector_retriever
+            is_hybrid = getattr(self._vector_store, "enable_hybrid", False)
+            query_mode = VectorStoreQueryMode.DEFAULT
+            if search_type == "hybrid" and is_hybrid:
+                query_mode = VectorStoreQueryMode.HYBRID
+            elif search_type == "keyword" and is_hybrid:
+                query_mode = VectorStoreQueryMode.SPARSE
+            retriever = self._index.as_retriever(
+                similarity_top_k=candidate_k,
+                vector_store_query_mode=query_mode,
+            )
 
         query_bundle = QueryBundle(query)
         nodes = retriever.retrieve(query_bundle)
