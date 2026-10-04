@@ -2,7 +2,7 @@
 # LlamaIndex: RAG framework
 llama-index-core>=0.14.25
 llama-index-cli>=0.5.7
-llama-index-vector-stores-faiss>=0.7.0
+llama-index-vector-stores-qdrant>=0.10.0
 llama-index-retrievers-bm25>=0.8.0
 llama-index-embeddings-huggingface>=0.8.0
 llama-index-readers-file>=0.7.0
@@ -35,8 +35,9 @@ playwright
 pyyaml>=6.0.3
 python-dotenv>=1.2.3
 
-# Vector storage: FAISS for efficient similarity search
-faiss-cpu~=1.15.1
+# Vector storage: Qdrant for efficient similarity search
+qdrant-client>=1.19.0
+fastembed>=0.8.1
 
 # Development: Testing and language detection
 pytest~=9.1.1
