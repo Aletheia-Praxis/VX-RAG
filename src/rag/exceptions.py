@@ -34,7 +34,7 @@ class IndexNotFoundError(RAGException):
         Initialize index not found error.
         
         Args:
-            index_type: Type of index (e.g., "FAISS", "BM25")
+            index_type: Type of index (e.g., "Qdrant", "BM25")
             index_path: Path where index was expected
         """
         self.index_type = index_type
@@ -50,7 +50,7 @@ class IndexLoadError(RAGException):
         Initialize index load error.
         
         Args:
-            index_type: Type of index (e.g., "FAISS", "BM25")
+            index_type: Type of index (e.g., "Qdrant", "BM25")
             reason: Reason for load failure
         """
         self.index_type = index_type
