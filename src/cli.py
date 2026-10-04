@@ -32,13 +32,14 @@ def main() -> None:
 
     # Ingest command
     ingest_parser = subparsers.add_parser("ingest", help="Run full ingestion pipeline")
-    ingest_parser.add_argument("--data-dir", type=str, default="data/raw")
-    ingest_parser.add_argument("--persist-dir", type=str, default="data/index")
+    ingest_parser.add_argument("--data-dir", "--input-dir", dest="data_dir", type=str, default="data/raw")
+    ingest_parser.add_argument("--persist-dir", "--output-dir", dest="persist_dir", type=str, default="data/index")
     ingest_parser.add_argument("--config", type=str, default="config/settings.yaml")
 
     # Index command
     index_parser = subparsers.add_parser("index", help="Create index")
-    index_parser.add_argument("--data-dir", type=str, default="data/raw")
+    index_parser.add_argument("--data-dir", "--input-dir", dest="data_dir", type=str, default="data/raw")
+    index_parser.add_argument("--nodes-dir", dest="nodes_dir", type=str, default=None, help="Directory containing nodes file")
     index_parser.add_argument("--persist-dir", type=str, default="data/index")
     index_parser.add_argument("--config", type=str, default="config/settings.yaml")
 
@@ -101,10 +102,14 @@ def handle_ingest(args: argparse.Namespace) -> None:
         nodes = orchestrator.ingest(args.data_dir)
 
         # Save nodes to DuckDB in processed directory to avoid Windows Defender file locking on plaintext JSON
-        processed_dir = data_dir.parent / "processed"
-        processed_dir.mkdir(parents=True, exist_ok=True)
+        output_dir = Path(args.persist_dir) if args.persist_dir else (data_dir.parent / "processed")
+        output_dir.mkdir(parents=True, exist_ok=True)
         try:
-            nodes_file = persist_intermediate_nodes(nodes=list(nodes), directory=processed_dir)
+            nodes_file = persist_intermediate_nodes(nodes=list(nodes), directory=output_dir)
+            default_processed = data_dir.parent / "processed"
+            if default_processed.resolve() != output_dir.resolve():
+                default_processed.mkdir(parents=True, exist_ok=True)
+                persist_intermediate_nodes(nodes=list(nodes), directory=default_processed)
         except (duckdb.Error, OSError) as err:
             print(f"Storage error persisting intermediate nodes: {err}", file=sys.stderr)
             sys.exit(1)
@@ -118,7 +123,14 @@ def handle_index(args: argparse.Namespace) -> None:
     """Handle index command."""
     with request_context():
         start_time = time.time()
-        processed_dir = Path(args.data_dir).parent / "processed"
+        if getattr(args, "nodes_dir", None):
+            processed_dir = Path(args.nodes_dir)
+        else:
+            candidate_persist = Path(args.persist_dir)
+            if (candidate_persist / "nodes.duckdb").exists() or (candidate_persist / "nodes.json").exists():
+                processed_dir = candidate_persist
+            else:
+                processed_dir = Path(args.data_dir).parent / "processed"
         nodes_db = processed_dir / "nodes.duckdb"
         nodes_json = processed_dir / "nodes.json"
 
