@@ -76,13 +76,12 @@ class QdrantConfig(BaseModel):
     distance: Literal["Cosine", "Euclid", "Dot"] = Field(
         default="Cosine", description="Vector distance metric"
     )
-
-
-class FAISSConfig(BaseModel):
-    """FAISS index configuration."""
-    
-    hnsw_m: int = Field(default=32, ge=4, le=128, description="HNSW neighbors count")
-    metric: Literal["inner_product", "L2"] = Field(default="inner_product", description="Similarity metric")
+    enable_hybrid: bool = Field(
+        default=True, description="Enable dense and sparse hybrid search"
+    )
+    sparse_model: str = Field(
+        default="BAAI/bge-m3", description="Model identifier for sparse representations"
+    )
 
 
 class DocstoreConfig(BaseModel):
@@ -245,7 +244,6 @@ class VXRAGSettings(BaseModel):
     
     # Configuration sections
     qdrant: QdrantConfig = Field(default_factory=QdrantConfig)
-    faiss: FAISSConfig = Field(default_factory=FAISSConfig)
     docstore: DocstoreConfig = Field(default_factory=DocstoreConfig)
     adaptive_chunking: AdaptiveChunkingConfig = Field(default_factory=AdaptiveChunkingConfig)
     retriever: RetrieverConfig = Field(default_factory=RetrieverConfig)

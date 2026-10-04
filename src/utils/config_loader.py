@@ -292,7 +292,7 @@ def get_vector_store_config(config_path: str | None = None) -> dict[str, Any]:
         
     Returns:
         Dictionary with vector store configuration:
-        - vector_store: Store type (e.g., 'qdrant', 'faiss')
+        - vector_store: Store type (e.g., 'qdrant')
         - Additional vector store settings
     """
     config = load_settings(config_path)
@@ -317,7 +317,7 @@ def get_vector_store_type(config_path: str | None = None) -> str:
         config_path: Path to settings.yaml file
         
     Returns:
-        Vector store type string (e.g., 'qdrant', 'faiss')
+        Vector store type string (e.g., 'qdrant')
     """
     try:
         config = load_settings(config_path)
@@ -628,6 +628,8 @@ def get_qdrant_config(config_path: str | None = None) -> dict[str, Any]:
         - collection_name: Qdrant collection name
         - path: Local disk storage path
         - distance: Similarity metric ("Cosine", "Euclid", "Dot")
+        - enable_hybrid: Enable dense and sparse hybrid search
+        - sparse_model: Model identifier for sparse representations
     """
     config = load_settings(config_path)
 
@@ -637,38 +639,17 @@ def get_qdrant_config(config_path: str | None = None) -> dict[str, Any]:
         "collection_name": qdrant_section.get("collection_name", "vx_rag_collection"),
         "path": qdrant_section.get("path", "./data/index/qdrant"),
         "distance": qdrant_section.get("distance", "Cosine"),
+        "enable_hybrid": bool(qdrant_section.get("enable_hybrid", True)),
+        "sparse_model": str(qdrant_section.get("sparse_model", "BAAI/bge-m3")),
     }
 
     logger.info(
         f"Loaded Qdrant config: collection={qdrant_config['collection_name']}, "
-        f"path={qdrant_config['path']}, distance={qdrant_config['distance']}"
+        f"path={qdrant_config['path']}, distance={qdrant_config['distance']}, "
+        f"enable_hybrid={qdrant_config['enable_hybrid']}, sparse_model={qdrant_config['sparse_model']}"
     )
     return qdrant_config
 
-
-def get_faiss_config(config_path: str | None = None) -> dict[str, Any]:
-    """
-    Get FAISS index configuration from settings.yaml.
-    
-    Args:
-        config_path: Path to settings.yaml file
-        
-    Returns:
-        Dictionary with FAISS configuration:
-        - hnsw_m: Number of neighbors for HNSW graph
-        - metric: Similarity metric (inner_product, L2)
-    """
-    config = load_settings(config_path)
-    
-    faiss_section = config.get('faiss', {})
-    
-    faiss_config = {
-        'hnsw_m': faiss_section.get('hnsw_m', 32),
-        'metric': faiss_section.get('metric', 'inner_product')
-    }
-    
-    logger.info(f"Loaded FAISS config: hnsw_m={faiss_config['hnsw_m']}, metric={faiss_config['metric']}")
-    return faiss_config
 
 
 def get_hierarchical_chunker_config(config_path: str | None = None) -> dict[str, Any]:
@@ -751,7 +732,6 @@ def get_ingestion_config(config_path: str | None = None) -> dict[str, Any]:
         'enable_embedding': ingestion_section.get('enable_embedding', False),
         'enable_vector_store': ingestion_section.get('enable_vector_store', False),
         'embedding_model': config.get('embedding_model', 'BAAI/bge-m3'),
-        'faiss_index': ingestion_section.get('faiss_index'),
         'vector_store_kwargs': ingestion_section.get('vector_store_kwargs', {})
     }
     
