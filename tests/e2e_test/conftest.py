@@ -160,7 +160,7 @@ def isolated_e2e_env(tmp_path: Path) -> dict[str, Any]:
     """
     Provide an isolated filesystem environment and configuration for E2E tests.
 
-    Creates directories for raw documents, processed nodes, FAISS indices,
+    Creates directories for raw documents, processed nodes, indices,
     and a custom settings.yaml file pointing exclusively to temporary paths.
 
     Args:
@@ -192,10 +192,11 @@ def isolated_e2e_env(tmp_path: Path) -> dict[str, Any]:
         "embedding_trust_remote_code": False,
         "chunk_size": 1024,
         "chunk_overlap": 150,
-        "vector_store": "faiss",
-        "faiss": {
-            "hnsw_m": 32,
-            "metric": "inner_product",
+        "vector_store": "qdrant",
+        "qdrant": {
+            "collection_name": "test_e2e_collection",
+            "path": str(index_dir / "qdrant"),
+            "distance": "Cosine",
         },
         "retriever": {
             "semantic_top_k": 10,
