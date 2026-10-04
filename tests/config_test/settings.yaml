@@ -25,11 +25,6 @@ qdrant:
   path: "./tests/test_data/index/qdrant"
   distance: "Cosine"
 
-# FAISS Index configuration (legacy)
-faiss:
-  hnsw_m: 32
-  metric: "inner_product"
-
 # Document store configuration
 docstore:
   store_type: "duckdb"

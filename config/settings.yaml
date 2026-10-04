@@ -25,11 +25,8 @@ qdrant:
   collection_name: "vx_rag_collection"
   path: "./data/index/qdrant"
   distance: "Cosine"
-
-# FAISS Index configuration
-faiss:
-  hnsw_m: 32               # Number of neighbors for HNSW graph (higher = better recall, more memory)
-  metric: "inner_product"  # Similarity metric: inner_product (cosine), L2
+  enable_hybrid: true
+  sparse_model: "BAAI/bge-m3"
 
 # Document store configuration
 docstore:
@@ -174,7 +171,6 @@ ingestion:
   enable_metadata_extraction: false       # Enable title/metadata extraction
   enable_embedding: true                  # Enable embedding generation
   enable_vector_store: true               # Enable vector store integration
-  faiss_index: null                       # FAISS index path (null = in-memory)
   vector_store_kwargs: {}                 # Additional vector store parameters
 
 # Boilerplate removal configuration
