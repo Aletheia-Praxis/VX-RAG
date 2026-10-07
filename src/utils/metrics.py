@@ -10,6 +10,8 @@ from __future__ import annotations
 import threading
 from typing import Any
 
+from src.utils.config_loader import get_metrics_config
+
 from .logging_config import StructuredLogger, get_logger
 
 
@@ -23,7 +25,7 @@ class MetricsCollector:
         Args:
             config: Optional configuration dictionary containing metrics settings.
         """
-        self.config: dict[str, Any] = config or {}
+        self.config: dict[str, Any] = config if config is not None else get_metrics_config()
         if config is not None:
             self.logger: StructuredLogger = StructuredLogger("metrics", self.config)
         else:
