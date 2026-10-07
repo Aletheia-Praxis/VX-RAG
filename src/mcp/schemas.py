@@ -37,7 +37,7 @@ class QueryKnowledgeBaseRequest(BaseModel):
         description="Search strategy: 'semantic' (vector), 'keyword' (BM25), or 'hybrid' (both)",
     )
     token_budget: int = Field(
-        4000,
+        4096,
         ge=500,
         le=16000,
         description="Maximum token budget for assembled context (500-16000)",
@@ -157,7 +157,7 @@ class RetrievalStats(BaseModel):
         description="Total number of results returned",
     )
     token_budget: int = Field(
-        4000,
+        4096,
         description="Maximum token budget configured for retrieval",
     )
     total_tokens: int = Field(
