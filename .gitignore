@@ -228,38 +228,10 @@ __marimo__/
 # Internal chaos files
 *-SEC.md
 .github/instructions/*.md
-
-# Local binary files
-bin/
-
-# Local JSON index files
-*_index.json
-
-# Local debug log files
-debug_logs/
-
-# PDFs
-downloaded_pdfs/
-data/raw/pdf/*.pdf
-
-# Image files
+.agents
+logs
+data/*
 *.png
 
 # VSCode JSON settings
 .vscode/*.json
-
-# Snapshot files
-data/snapshots/*/*.json
-
-# Processed data files
-data/processed/*.txt
-data/processed/*.json
-
-# Document store files
-data/index/*.json
-
-# Raw markdown files
-data/raw/md/*.md
-
-# BM25 index files
-data/index/bm25/*.pkl
