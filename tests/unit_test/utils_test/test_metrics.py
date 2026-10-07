@@ -76,7 +76,7 @@ def test_gauge_emits_structured_log_event() -> None:
     collector = MetricsCollector(config={"metrics_enabled": True, "log_metrics": True})
 
     with patch.object(collector.logger.logger, "info") as mock_info:
-        collector.gauge("query_duration_ms", 123.45, tags={"model": "bge-small"})
+        collector.gauge("query_duration_ms", 123.45, tags={"model": "bge-m3"})
         mock_info.assert_called_once()
         _, kwargs = mock_info.call_args
         extra: dict[str, Any] = kwargs["extra"]
@@ -84,7 +84,7 @@ def test_gauge_emits_structured_log_event() -> None:
         assert extra["metric_name"] == "query_duration_ms"
         assert extra["value"] == 123.45
         assert extra["metric_type"] == "gauge"
-        assert extra["model"] == "bge-small"
+        assert extra["model"] == "bge-m3"
 
 
 def test_histogram_emits_structured_log_event() -> None:
