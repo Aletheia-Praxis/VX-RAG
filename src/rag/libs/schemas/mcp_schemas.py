@@ -36,7 +36,7 @@ class MCPContextPayload(BaseModel):
     schema_version: str = Field("1.0", description="MCP schema version")
     context: list[ContextItem] = Field(..., description="List of context items")
     query: str = Field(..., description="Original user query")
-    token_budget: int = Field(2048, description="Maximum token budget for context")
+    token_budget: int = Field(4096, description="Maximum token budget for context")
     timestamp: datetime | None = Field(
         default_factory=lambda: datetime.now(timezone.utc),
         description="Payload creation timestamp (timezone-aware UTC)",
@@ -76,7 +76,7 @@ class ContextAssemblyRequest(BaseModel):
     
     query: str = Field(..., description="User query")
     documents: list[dict[str, Any]] = Field(..., description="Retrieved documents with metadata")
-    token_budget: int | None = Field(2048, description="Token budget")
+    token_budget: int | None = Field(4096, description="Token budget")
     max_items: int | None = Field(10, description="Maximum number of context items")
     min_score: float | None = Field(0.0, description="Minimum relevance score to include")
 
