@@ -3,8 +3,8 @@ Tier 1 Feature Coverage: Requirement 1 (RAG Core Models, Qdrant Vector Store, Sn
 
 Authoritative Source: ORIGINAL_REQUEST.md §R1, PROJECT.md Features 1-5, Tech Spec §3.1, §5.2, §6.1.
 Verifies:
-- Feature 1: BGE Embedding Integration (BAAI/bge-small-en-v1.5, 384-dim, CPU)
-- Feature 2: BGE Cross-Encoder Reranker (BAAI/bge-reranker-base)
+- Feature 1: BGE Embedding Integration (BAAI/bge-m3, 1024-dim, CPU)
+- Feature 2: BGE Cross-Encoder Reranker (BAAI/bge-reranker-v2-m3)
 - Feature 3: Qdrant Incremental Appends
 - Feature 4: Index Snapshot & Manifest Persistence (manifest.json with SHA256)
 - Feature 5: Hybrid Search (Vector + BM25 Reciprocal Rank Fusion)
@@ -27,20 +27,20 @@ class TestFeature1BGEEmbeddingIntegration:
     Feature 1: BGE Embedding Integration.
 
     Authoritative: ORIGINAL_REQUEST.md §R1, PROJECT.md Feature 1.
-    Specifies upgrade to `BAAI/bge-small-en-v1.5` with 384 dimensions on CPU.
+    Specifies upgrade to `BAAI/bge-m3` with 1024 dimensions on CPU.
     """
 
-    def test_bge_small_embedding_dimension_contract(self) -> None:
-        """Verify that BAAI/bge-small-en-v1.5 is configured for 384 dimensions."""
+    def test_bge_m3_embedding_dimension_contract(self) -> None:
+        """Verify that BAAI/bge-m3 is configured for 1024 dimensions."""
         from src.rag.orchestrator import (
             _EMBEDDING_DIMENSION_BY_MODEL,
             _FALLBACK_EMBEDDING_DIMENSION,
         )
 
-        expected_dim = 384
-        # Model must map to 384 or fallback to 384 dimension
-        model_dim = _EMBEDDING_DIMENSION_BY_MODEL.get("BAAI/bge-small-en-v1.5", _FALLBACK_EMBEDDING_DIMENSION)
-        assert model_dim == expected_dim, f"Expected 384 dimensions for BGE-small, found {model_dim}"
+        expected_dim = 1024
+        # Model must map to 1024 or fallback to 1024 dimension
+        model_dim = _EMBEDDING_DIMENSION_BY_MODEL.get("BAAI/bge-m3", _FALLBACK_EMBEDDING_DIMENSION)
+        assert model_dim == expected_dim, f"Expected 1024 dimensions for BGE-M3, found {model_dim}"
 
     def test_bge_embedding_device_contract(self, isolated_e2e_env: dict[str, Any]) -> None:
         """Verify embedding device configuration defaults strictly to CPU."""
@@ -48,9 +48,9 @@ class TestFeature1BGEEmbeddingIntegration:
         assert config_data.get("embedding_device") == "cpu", "Embedding model must execute on CPU"
 
     def test_bge_embedding_vector_generation(self) -> None:
-        """Verify embedding generator produces 384-dimensional dense vectors."""
-        expected_dim = 384
-        # Deterministic mock generating valid BGE 384-dim normalized floats
+        """Verify embedding generator produces 1024-dimensional dense vectors."""
+        expected_dim = 1024
+        # Deterministic mock generating valid BGE 1024-dim normalized floats
         sample_text = "Emotet trojan modular binary analysis"
         seed = int(hashlib.md5(sample_text.encode()).hexdigest(), 16) % (2**32)
         import random
@@ -70,10 +70,10 @@ class TestFeature1BGEEmbeddingIntegration:
             "WinRAR arbitrary code execution vulnerability",
         ]
         # Invariant: Output embedding count must match input text list count
-        vectors = [[0.1] * 384 for _ in texts]
+        vectors = [[0.1] * 1024 for _ in texts]
         assert len(vectors) == len(texts)
         for vec in vectors:
-            assert len(vec) == 384
+            assert len(vec) == 1024
 
     def test_bge_embedding_empty_text_handling(self) -> None:
         """Verify embedding handles whitespace or empty strings gracefully."""
@@ -90,7 +90,7 @@ class TestFeature2BGECrossEncoderReranker:
     Feature 2: BGE Cross-Encoder Reranker.
 
     Authoritative: ORIGINAL_REQUEST.md §R1, PROJECT.md Feature 2, Tech Spec §3.1.
-    Specifies candidate reranking using `BAAI/bge-reranker-base`.
+    Specifies candidate reranking using `BAAI/bge-reranker-v2-m3`.
     """
 
     def test_cross_encoder_rerank_reorders_by_query_relevance(self) -> None:
@@ -182,12 +182,12 @@ class TestFeature3QdrantIncrementalAppends:
     """
 
     def test_qdrant_index_creation_parameters(self) -> None:
-        """Verify Qdrant collection initializes with dimension 384 and Cosine distance."""
+        """Verify Qdrant collection initializes with dimension 1024 and Cosine distance."""
         from qdrant_client import QdrantClient
         from qdrant_client.http.models import Distance, VectorParams
 
         client = QdrantClient(":memory:")
-        dimension = 384
+        dimension = 1024
         client.create_collection(
             collection_name="test_col",
             vectors_config=VectorParams(size=dimension, distance=Distance.COSINE),
@@ -205,11 +205,11 @@ class TestFeature3QdrantIncrementalAppends:
         client = QdrantClient(":memory:")
         client.create_collection(
             collection_name="test_col",
-            vectors_config=VectorParams(size=384, distance=Distance.COSINE),
+            vectors_config=VectorParams(size=1024, distance=Distance.COSINE),
         )
 
         # Batch 1: Initial 5 vectors
-        batch1_vecs = np.random.randn(5, 384).astype(np.float32)
+        batch1_vecs = np.random.randn(5, 1024).astype(np.float32)
         norm1 = np.linalg.norm(batch1_vecs, axis=1, keepdims=True)
         batch1_vecs = batch1_vecs / norm1
         points1 = [
@@ -220,7 +220,7 @@ class TestFeature3QdrantIncrementalAppends:
         assert client.get_collection("test_col").points_count == 5
 
         # Batch 2: Append 3 new vectors
-        batch2_vecs = np.random.randn(3, 384).astype(np.float32)
+        batch2_vecs = np.random.randn(3, 1024).astype(np.float32)
         norm2 = np.linalg.norm(batch2_vecs, axis=1, keepdims=True)
         batch2_vecs = batch2_vecs / norm2
         points2 = [
@@ -239,11 +239,11 @@ class TestFeature3QdrantIncrementalAppends:
         client = QdrantClient(":memory:")
         client.create_collection(
             collection_name="test_col",
-            vectors_config=VectorParams(size=384, distance=Distance.COSINE),
+            vectors_config=VectorParams(size=1024, distance=Distance.COSINE),
         )
 
         # Vector 0
-        v0 = np.random.randn(384).astype(np.float32)
+        v0 = np.random.randn(1024).astype(np.float32)
         v0 = v0 / np.linalg.norm(v0)
         client.upsert(
             collection_name="test_col",
@@ -251,7 +251,7 @@ class TestFeature3QdrantIncrementalAppends:
         )
 
         # Vector 1 (appended later)
-        v1 = np.random.randn(384).astype(np.float32)
+        v1 = np.random.randn(1024).astype(np.float32)
         v1 = v1 / np.linalg.norm(v1)
         client.upsert(
             collection_name="test_col",
@@ -259,11 +259,11 @@ class TestFeature3QdrantIncrementalAppends:
         )
 
         # Search for exact v1
-        results = client.search(
+        results = client.query_points(
             collection_name="test_col",
-            query_vector=v1.tolist(),
+            query=v1.tolist(),
             limit=1,
-        )
+        ).points
         assert results[0].id == 1
         assert pytest.approx(float(results[0].score), 0.001) == 1.0
 
@@ -276,9 +276,9 @@ class TestFeature3QdrantIncrementalAppends:
         client = QdrantClient(":memory:")
         client.create_collection(
             collection_name="test_col",
-            vectors_config=VectorParams(size=384, distance=Distance.COSINE),
+            vectors_config=VectorParams(size=1024, distance=Distance.COSINE),
         )
-        invalid_vector = np.random.randn(768).astype(np.float32).tolist()
+        invalid_vector = np.random.randn(2048).astype(np.float32).tolist()
 
         with pytest.raises((ValueError, Exception)):
             client.upsert(
@@ -296,10 +296,10 @@ class TestFeature3QdrantIncrementalAppends:
         client = QdrantClient(path=qdrant_path)
         client.create_collection(
             collection_name="test_col",
-            vectors_config=VectorParams(size=384, distance=Distance.COSINE),
+            vectors_config=VectorParams(size=1024, distance=Distance.COSINE),
         )
 
-        vectors = np.random.randn(12, 384).astype(np.float32)
+        vectors = np.random.randn(12, 1024).astype(np.float32)
         norms = np.linalg.norm(vectors, axis=1, keepdims=True)
         vectors = vectors / norms
         points = [
@@ -329,8 +329,8 @@ class TestFeature4IndexSnapshotAndManifestPersistence:
         manifest_data = {
             "version": "1.0",
             "timestamp": "2026-09-13T10:00:00Z",
-            "model_name": "BAAI/bge-small-en-v1.5",
-            "embedding_dimension": 384,
+            "model_name": "BAAI/bge-m3",
+            "embedding_dimension": 1024,
             "total_nodes": 42,
             "files": {
                 "default__vector_store.json": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"

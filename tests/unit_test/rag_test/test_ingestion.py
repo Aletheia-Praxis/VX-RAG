@@ -212,11 +212,11 @@ class TestConditionalOCRFallback:
         assert extracted == "", "Failed OCR must return empty string gracefully"
 
 
-class TestBoilerplateRemoval:
-    """Tests for aggressive boilerplate removal while preserving structural markdown."""
+class TestDocumentContentPreservation:
+    """Tests confirming raw text and structural markdown are preserved intact without modification."""
 
-    def test_boilerplate_strips_page_numbers(self) -> None:
-        """Verify standalone and formatted page numbers are stripped."""
+    def test_content_preserves_page_numbers_and_text(self) -> None:
+        """Verify page numbers and content are preserved intact without stripping."""
         text = (
             "Critical vulnerability analysis.\n\n"
             "Page 3 of 15\n\n"
@@ -225,16 +225,17 @@ class TestBoilerplateRemoval:
             "Final notes."
         )
         pipeline = DoclingPipeline()
-        cleaned = pipeline.clean_boilerplate(text)
+        nodes = pipeline.chunk_markdown(text)
+        combined = " ".join(node.text for node in nodes)
 
-        assert "Page 3 of 15" not in cleaned
-        assert "- 4 -" not in cleaned
-        assert "Critical vulnerability analysis." in cleaned
-        assert "Secondary vulnerability analysis." in cleaned
-        assert "Final notes." in cleaned
+        assert "Page 3 of 15" in combined
+        assert "- 4 -" in combined
+        assert "Critical vulnerability analysis." in combined
+        assert "Secondary vulnerability analysis." in combined
+        assert "Final notes." in combined
 
-    def test_boilerplate_strips_recurring_banners(self) -> None:
-        """Verify recurring confidentiality and classification banners are removed."""
+    def test_content_preserves_recurring_banners(self) -> None:
+        """Verify banners are preserved intact without stripping."""
         text = (
             "CONFIDENTIAL - DO NOT DISTRIBUTE\n\n"
             "Operational threat intel.\n\n"
@@ -242,14 +243,15 @@ class TestBoilerplateRemoval:
             "Additional telemetry."
         )
         pipeline = DoclingPipeline()
-        cleaned = pipeline.clean_boilerplate(text)
+        nodes = pipeline.chunk_markdown(text)
+        combined = " ".join(node.text for node in nodes)
 
-        assert "CONFIDENTIAL - DO NOT DISTRIBUTE" not in cleaned
-        assert "TOP SECRET - DO NOT DISTRIBUTE" not in cleaned
-        assert "Operational threat intel." in cleaned
-        assert "Additional telemetry." in cleaned
+        assert "CONFIDENTIAL - DO NOT DISTRIBUTE" in combined
+        assert "TOP SECRET - DO NOT DISTRIBUTE" in combined
+        assert "Operational threat intel." in combined
+        assert "Additional telemetry." in combined
 
-    def test_boilerplate_preserves_markdown_headers(self) -> None:
+    def test_content_preserves_markdown_headers(self) -> None:
         """Verify markdown headers (#, ##, ###) are strictly preserved."""
         text = (
             "# Main Incident Response Plan\n\n"
@@ -258,13 +260,14 @@ class TestBoilerplateRemoval:
             "Details regarding network isolation."
         )
         pipeline = DoclingPipeline()
-        cleaned = pipeline.clean_boilerplate(text)
+        nodes = pipeline.chunk_markdown(text)
+        combined = " ".join(node.text for node in nodes)
 
-        assert "# Main Incident Response Plan" in cleaned
-        assert "## Phase 1: Containment" in cleaned
-        assert "### Step 1.1: Isolate Endpoints" in cleaned
+        assert "# Main Incident Response Plan" in combined
+        assert "## Phase 1: Containment" in combined
+        assert "### Step 1.1: Isolate Endpoints" in combined
 
-    def test_boilerplate_preserves_code_blocks(self) -> None:
+    def test_content_preserves_code_blocks(self) -> None:
         """Verify code blocks and indentation are 100% preserved."""
         code_text = (
             "Script:\n"
@@ -275,13 +278,14 @@ class TestBoilerplateRemoval:
             "```\n"
         )
         pipeline = DoclingPipeline()
-        cleaned = pipeline.clean_boilerplate(code_text)
+        nodes = pipeline.chunk_markdown(code_text)
+        combined = " ".join(node.text for node in nodes)
 
-        assert "```python" in cleaned
-        assert "def inject_dll(pid: int, path: str) -> bool:" in cleaned
-        assert "    # 12 is a number inside code" in cleaned
+        assert "```python" in combined
+        assert "def inject_dll(pid: int, path: str) -> bool:" in combined
+        assert "    # 12 is a number inside code" in combined
 
-    def test_boilerplate_preserves_markdown_tables(self) -> None:
+    def test_content_preserves_markdown_tables(self) -> None:
         """Verify markdown tables are preserved intact."""
         table = (
             "| CVE ID | Severity | Vector |\n"
@@ -290,10 +294,11 @@ class TestBoilerplateRemoval:
             "| CVE-2026-0002 | High | Local |\n"
         )
         pipeline = DoclingPipeline()
-        cleaned = pipeline.clean_boilerplate(table)
+        nodes = pipeline.chunk_markdown(table)
+        combined = " ".join(node.text for node in nodes)
 
-        assert "| CVE ID | Severity | Vector |" in cleaned
-        assert "| CVE-2026-0001 | Critical | Network |" in cleaned
+        assert "| CVE ID | Severity | Vector |" in combined
+        assert "| CVE-2026-0001 | Critical | Network |" in combined
 
 
 class TestMarkdownAwareChunking:

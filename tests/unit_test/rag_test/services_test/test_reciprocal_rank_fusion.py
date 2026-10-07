@@ -1,13 +1,9 @@
 """
-Unit test suite for Standalone Reciprocal Rank Fusion (RRF) and CLI search type support.
+Unit test suite for Qdrant Native RRF Hybrid Retrieval and CLI search type support.
 
 Tests cover:
-- RRF score formula correctness (1 / (k + rank)) with default k=60 and 1-based ranks.
-- Merging of vector and BM25 candidate streams, including dual-match score accumulation.
-- Boundary conditions: empty streams, disjoint candidates, deduplication within a run.
-- Truncation to top_k.
-- ReciprocalRankFusionRetriever synchronous and asynchronous retrieve execution.
-- RAGOrchestrator.reciprocal_rank_fusion static method parity.
+- Native Qdrant Fusion.RRF hybrid prefetch construction (dense and sparse).
+- Native Qdrant query() and aquery() executing models.FusionQuery(fusion=models.Fusion.RRF).
 - Orchestrator search_documents and query execution across hybrid, semantic, and keyword modes.
 - CLI argument parsing for --search-type (hybrid, semantic, keyword, invalid choices).
 """
@@ -20,17 +16,18 @@ from typing import TYPE_CHECKING, Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-from llama_index.core import QueryBundle
-from llama_index.core.base.base_retriever import BaseRetriever
 from llama_index.core.schema import NodeWithScore, TextNode
+from llama_index.core.vector_stores.types import (
+    VectorStoreQuery,
+    VectorStoreQueryMode,
+)
+from qdrant_client import models
 
 from src.cli import main
 from src.rag.libs.schemas.mcp_schemas import MCPContextPayload
 from src.rag.orchestrator import (
-    DEFAULT_RRF_K,
     RAGOrchestrator,
-    ReciprocalRankFusionRetriever,
-    reciprocal_rank_fusion,
+    RobustQdrantVectorStore,
     reset_orchestrator,
 )
 
@@ -57,7 +54,7 @@ def temp_config_file(tmp_path: Path) -> Generator[str, None, None]:
             "enable_hybrid": True,
         },
         "embedder": {
-            "embedding_model": "BAAI/bge-small-en-v1.5",
+            "embedding_model": "BAAI/bge-m3",
             "embedding_batch_size": 32,
             "embedding_trust_remote_code": False,
             "embedding_device": "cpu",
@@ -75,7 +72,7 @@ def temp_config_file(tmp_path: Path) -> Generator[str, None, None]:
         },
         "reranker": {
             "enable_metadata_prioritization": True,
-            "model_name": "BAAI/bge-reranker-base",
+            "model_name": "BAAI/bge-reranker-v2-m3",
             "top_k": 5,
             "device": "cpu",
             "metadata_boost": 0.1,
@@ -91,198 +88,94 @@ def temp_config_file(tmp_path: Path) -> Generator[str, None, None]:
     yield str(config_path)
 
 
-class TestReciprocalRankFusionFormula:
-    """Test suite for the pure reciprocal_rank_fusion algorithm."""
+class TestQdrantNativeRRFRetrieval:
+    """Test suite for native Qdrant engine-level Fusion.RRF hybrid retrieval."""
 
-    def test_rrf_single_stream_ranking(self) -> None:
-        """Verify RRF calculates scores as 1.0 / (k + rank) with rank 1..N."""
-        node_1 = TextNode(text="first doc", id_="node_1")
-        node_2 = TextNode(text="second doc", id_="node_2")
-        stream = [
-            NodeWithScore(node=node_1, score=0.9),
-            NodeWithScore(node=node_2, score=0.5),
-        ]
-
-        fused = reciprocal_rank_fusion([stream], k=60)
-
-        assert len(fused) == 2
-        assert fused[0].node.node_id == "node_1"
-        assert fused[1].node.node_id == "node_2"
-        # rank 1: 1 / (60 + 1) = 1/61
-        assert fused[0].score == pytest.approx(1.0 / 61.0)
-        # rank 2: 1 / (60 + 2) = 1/62
-        assert fused[1].score == pytest.approx(1.0 / 62.0)
-
-    def test_rrf_dual_stream_overlap_accumulates_scores(self) -> None:
-        """Verify candidate appearing in both streams receives sum of reciprocal rank scores."""
-        node_common = TextNode(text="appears in both", id_="common_node")
-        node_vec_only = TextNode(text="only vector", id_="vec_node")
-        node_bm25_only = TextNode(text="only bm25", id_="bm25_node")
-
-        # Vector stream: common is rank 1, vec_only is rank 2
-        vector_stream = [
-            NodeWithScore(node=node_common, score=0.95),
-            NodeWithScore(node=node_vec_only, score=0.80),
-        ]
-        # BM25 stream: common is rank 1, bm25_only is rank 2
-        bm25_stream = [
-            NodeWithScore(node=node_common, score=15.2),
-            NodeWithScore(node=node_bm25_only, score=12.1),
-        ]
-
-        fused = reciprocal_rank_fusion([vector_stream, bm25_stream], k=60)
-
-        assert len(fused) == 3
-        # Common node must rank first with accumulated score: 1/61 + 1/61
-        assert fused[0].node.node_id == "common_node"
-        expected_common_score = (1.0 / 61.0) + (1.0 / 61.0)
-        assert fused[0].score == pytest.approx(expected_common_score)
-
-        # Single stream nodes each have 1/62
-        assert fused[1].score == pytest.approx(1.0 / 62.0)
-        assert fused[2].score == pytest.approx(1.0 / 62.0)
-
-    def test_rrf_custom_k_parameter(self) -> None:
-        """Verify custom smoothing constant k alters the scoring properly."""
-        node_a = TextNode(text="doc a", id_="node_a")
-        stream = [NodeWithScore(node=node_a, score=1.0)]
-
-        fused = reciprocal_rank_fusion([stream], k=20)
-        assert len(fused) == 1
-        assert fused[0].score == pytest.approx(1.0 / (20.0 + 1.0))
-
-    def test_rrf_top_k_truncation(self) -> None:
-        """Verify top_k parameter truncates returned fused candidates."""
-        nodes = [
-            NodeWithScore(node=TextNode(text=f"item {i}", id_=f"n_{i}"), score=float(10 - i))
-            for i in range(10)
-        ]
-        fused = reciprocal_rank_fusion([nodes], k=DEFAULT_RRF_K, top_k=3)
-        assert len(fused) == 3
-        assert [item.node.node_id for item in fused] == ["n_0", "n_1", "n_2"]
-
-    def test_rrf_empty_inputs_handling(self) -> None:
-        """Verify empty input streams gracefully return empty list."""
-        assert reciprocal_rank_fusion([]) == []
-        assert reciprocal_rank_fusion([[], []]) == []
-
-    def test_rrf_duplicate_node_ids_within_single_stream_deduplicated(self) -> None:
-        """Verify that duplicate occurrences of the same node_id in one run do not double count."""
-        node_dup = TextNode(text="duplicate doc", id_="dup_id")
-        stream = [
-            NodeWithScore(node=node_dup, score=0.9),
-            NodeWithScore(node=node_dup, score=0.7),
-        ]
-        fused = reciprocal_rank_fusion([stream], k=60)
-        assert len(fused) == 1
-        assert fused[0].score == pytest.approx(1.0 / 61.0)
-
-    def test_orchestrator_static_method_parity(self) -> None:
-        """Verify RAGOrchestrator.reciprocal_rank_fusion forwards identically to standalone function."""
-        node = TextNode(text="sample", id_="s1")
-        stream = [NodeWithScore(node=node, score=0.5)]
-
-        fused_static = RAGOrchestrator.reciprocal_rank_fusion([stream], k=60, top_k=1)
-        fused_func = reciprocal_rank_fusion([stream], k=60, top_k=1)
-
-        assert len(fused_static) == len(fused_func)
-        assert fused_static[0].node.node_id == fused_func[0].node.node_id
-        assert fused_static[0].score == fused_func[0].score
-
-    def test_rrf_one_stream_empty_other_populated(self) -> None:
-        """Verify RRF when one stream is empty and one has candidates."""
-        node_1 = TextNode(text="doc 1", id_="node_1")
-        stream = [NodeWithScore(node=node_1, score=0.8)]
-
-        # Vector has candidate, BM25 empty
-        fused_1 = reciprocal_rank_fusion([stream, []], k=60)
-        assert len(fused_1) == 1
-        assert fused_1[0].node.node_id == "node_1"
-        assert fused_1[0].score == pytest.approx(1.0 / 61.0)
-
-        # BM25 has candidate, Vector empty
-        fused_2 = reciprocal_rank_fusion([[], stream], k=60)
-        assert len(fused_2) == 1
-        assert fused_2[0].node.node_id == "node_1"
-        assert fused_2[0].score == pytest.approx(1.0 / 61.0)
-
-    def test_rrf_negative_k_raises_value_error(self) -> None:
-        """Verify negative smoothing constant k raises ValueError."""
-        with pytest.raises(ValueError, match="non-negative"):
-            reciprocal_rank_fusion([], k=-1)
-
-    def test_rrf_negative_top_k_returns_empty_list(self) -> None:
-        """Verify negative top_k safely returns empty list without negative slice corruption."""
-        node = TextNode(text="doc", id_="n1")
-        stream = [NodeWithScore(node=node, score=0.5)]
-        assert reciprocal_rank_fusion([stream], top_k=-1) == []
-        assert reciprocal_rank_fusion([stream], top_k=0) == []
-
-    def test_rrf_negative_and_none_score_ordering(self) -> None:
-        """Verify nodes with explicit scores rank above nodes with None scores."""
-        node_neg = TextNode(text="negative score doc", id_="neg_doc")
-        node_none = TextNode(text="none score doc", id_="none_doc")
-        stream = [
-            NodeWithScore(node=node_none, score=None),
-            NodeWithScore(node=node_neg, score=-0.5),
-        ]
-        fused = reciprocal_rank_fusion([stream], k=60)
-        assert len(fused) == 2
-        assert fused[0].node.node_id == "neg_doc"
-        assert fused[1].node.node_id == "none_doc"
-
-
-class TestReciprocalRankFusionRetriever:
-    """Test suite for the ReciprocalRankFusionRetriever BaseRetriever class."""
-
-    def test_sync_retrieve(self) -> None:
-        """Verify synchronous _retrieve calls all sub-retrievers and fuses results."""
-        retriever_1 = MagicMock(spec=BaseRetriever)
-        retriever_2 = MagicMock(spec=BaseRetriever)
-
-        node_a = TextNode(text="Content A", id_="doc_a")
-        node_b = TextNode(text="Content B", id_="doc_b")
-
-        retriever_1.retrieve.return_value = [NodeWithScore(node=node_a, score=0.8)]
-        retriever_2.retrieve.return_value = [NodeWithScore(node=node_b, score=0.9)]
-
-        rrf_retriever = ReciprocalRankFusionRetriever(
-            retrievers=[retriever_1, retriever_2],
-            similarity_top_k=5,
-            k=60,
+    def test_build_hybrid_rrf_prefetch(self) -> None:
+        """Verify _build_hybrid_rrf_prefetch constructs dense and sparse Prefetch objects."""
+        sparse_encoder = MagicMock(return_value=([[1, 2]], [[0.5, 0.8]]))
+        vector_store = RobustQdrantVectorStore(
+            collection_name="test_collection",
+            client=MagicMock(),
+            enable_hybrid=True,
+            sparse_query_fn=sparse_encoder,
+            sparse_doc_fn=sparse_encoder,
+            sparse_vector_name="sparse",
         )
+        query = VectorStoreQuery(
+            query_str="test hybrid query",
+            query_embedding=[0.1] * 1024,
+            mode=VectorStoreQueryMode.HYBRID,
+            similarity_top_k=5,
+            sparse_top_k=5,
+        )
+        prefetch, top_k, _query_filter, _shard_key, _search_params = (
+            vector_store._build_hybrid_rrf_prefetch(query)
+        )
+        assert len(prefetch) == 2
+        assert prefetch[0].query == [0.1] * 1024
+        assert prefetch[1].using == "sparse"
+        assert top_k == 5
 
-        query_bundle = QueryBundle("search query")
-        results = rrf_retriever.retrieve(query_bundle)
+    def test_hybrid_query_executes_fusion_rrf(self) -> None:
+        """Verify query() calls client.query_points with models.FusionQuery(fusion=models.Fusion.RRF)."""
+        mock_client = MagicMock()
+        mock_response = MagicMock()
+        mock_response.points = []
+        mock_client.query_points.return_value = mock_response
 
-        assert len(results) == 2
-        retriever_1.retrieve.assert_called_once_with(query_bundle)
-        retriever_2.retrieve.assert_called_once_with(query_bundle)
+        sparse_encoder = MagicMock(return_value=([[1, 2]], [[0.5, 0.8]]))
+        vector_store = RobustQdrantVectorStore(
+            collection_name="test_collection",
+            client=mock_client,
+            enable_hybrid=True,
+            sparse_query_fn=sparse_encoder,
+            sparse_doc_fn=sparse_encoder,
+            sparse_vector_name="sparse",
+        )
+        query = VectorStoreQuery(
+            query_str="test query",
+            query_embedding=[0.2] * 1024,
+            mode=VectorStoreQueryMode.HYBRID,
+            similarity_top_k=3,
+        )
+        res = vector_store.query(query)
+        assert res.nodes == []
+        mock_client.query_points.assert_called_once()
+        call_kwargs = mock_client.query_points.call_args[1]
+        assert isinstance(call_kwargs["query"], models.FusionQuery)
+        assert call_kwargs["query"].fusion == models.Fusion.RRF
 
     @pytest.mark.asyncio
-    async def test_async_retrieve(self) -> None:
-        """Verify asynchronous aretrieve calls sub-retrievers in parallel and fuses results."""
-        retriever_1 = MagicMock(spec=BaseRetriever)
-        retriever_2 = MagicMock(spec=BaseRetriever)
+    async def test_hybrid_aquery_executes_fusion_rrf(self) -> None:
+        """Verify aquery() calls aclient.query_points with models.FusionQuery(fusion=models.Fusion.RRF)."""
+        mock_aclient = MagicMock()
+        mock_response = MagicMock()
+        mock_response.points = []
+        mock_aclient.query_points = AsyncMock(return_value=mock_response)
 
-        node_a = TextNode(text="Content A", id_="doc_a")
-        node_b = TextNode(text="Content B", id_="doc_b")
-
-        retriever_1.aretrieve = AsyncMock(return_value=[NodeWithScore(node=node_a, score=0.8)])
-        retriever_2.aretrieve = AsyncMock(return_value=[NodeWithScore(node=node_b, score=0.9)])
-
-        rrf_retriever = ReciprocalRankFusionRetriever(
-            retrievers=[retriever_1, retriever_2],
-            similarity_top_k=5,
-            k=60,
+        sparse_encoder = MagicMock(return_value=([[1, 2]], [[0.5, 0.8]]))
+        vector_store = RobustQdrantVectorStore(
+            collection_name="test_collection",
+            client=MagicMock(),
+            enable_hybrid=True,
+            sparse_query_fn=sparse_encoder,
+            sparse_doc_fn=sparse_encoder,
+            sparse_vector_name="sparse",
         )
-
-        query_bundle = QueryBundle("async query")
-        results = await rrf_retriever.aretrieve(query_bundle)
-
-        assert len(results) == 2
-        retriever_1.aretrieve.assert_awaited_once_with(query_bundle)
-        retriever_2.aretrieve.assert_awaited_once_with(query_bundle)
+        vector_store._aclient = mock_aclient
+        query = VectorStoreQuery(
+            query_str="async query",
+            query_embedding=[0.3] * 1024,
+            mode=VectorStoreQueryMode.HYBRID,
+            similarity_top_k=4,
+        )
+        res = await vector_store.aquery(query)
+        assert res.nodes == []
+        mock_aclient.query_points.assert_awaited_once()
+        call_kwargs = mock_aclient.query_points.call_args[1]
+        assert isinstance(call_kwargs["query"], models.FusionQuery)
+        assert call_kwargs["query"].fusion == models.Fusion.RRF
 
 
 class TestCLISearchTypeArgument:

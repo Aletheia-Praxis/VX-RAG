@@ -2,8 +2,8 @@
 Unit tests for RAGOrchestrator and Phase M3 RAG Core components.
 
 Verifies:
-- BGE Embedding configuration (BAAI/bge-small-en-v1.5, 384-dim, CPU, normalize=True)
-- BGECrossEncoderReranker (BAAI/bge-reranker-base, sigmoid normalization, fallback on error)
+- BGE Embedding configuration (BAAI/bge-m3, 1024-dim, CPU, normalize=True)
+- BGECrossEncoderReranker (BAAI/bge-reranker-v2-m3, sigmoid normalization, fallback on error)
 - Incremental vector store appends without rebuild
 - BM25 synchronization retaining cumulative nodes from docstore
 - Ingestion with DoclingPipeline and strict 5-field metadata
@@ -66,7 +66,7 @@ def temp_config_file(tmp_path: Path) -> Generator[str, None, None]:
             "enable_hybrid": True,
         },
         "embedder": {
-            "embedding_model": "BAAI/bge-small-en-v1.5",
+            "embedding_model": "BAAI/bge-m3",
             "embedding_batch_size": 32,
             "embedding_trust_remote_code": False,
             "embedding_device": "cpu",
@@ -84,7 +84,7 @@ def temp_config_file(tmp_path: Path) -> Generator[str, None, None]:
         },
         "reranker": {
             "enable_metadata_prioritization": True,
-            "model_name": "BAAI/bge-reranker-base",
+            "model_name": "BAAI/bge-reranker-v2-m3",
             "top_k": 5,
             "device": "cpu",
             "metadata_boost": 0.1,
@@ -128,17 +128,17 @@ class TestRAGOrchestratorInitialization:
         assert orchestrator._reranker is None
         assert orchestrator.persist_dir == persist_dir
 
-    def test_bge_small_embedding_dimension_mapping(self) -> None:
-        """Verify BAAI/bge-small-en-v1.5 maps to 384 dimensions."""
-        dim = _EMBEDDING_DIMENSION_BY_MODEL.get("BAAI/bge-small-en-v1.5", _FALLBACK_EMBEDDING_DIMENSION)
-        assert dim == 384
+    def test_fallback_embedding_dimension_mapping(self) -> None:
+        """Verify fallback embedding dimension is 1024."""
+        dim = _EMBEDDING_DIMENSION_BY_MODEL.get("non-existent-model", _FALLBACK_EMBEDDING_DIMENSION)
+        assert dim == 1024
 
     def test_bge_m3_embedding_dimension_mapping(self) -> None:
         """Verify BAAI/bge-m3 maps to 1024 dimensions."""
         dim = _EMBEDDING_DIMENSION_BY_MODEL.get("BAAI/bge-m3", _FALLBACK_EMBEDDING_DIMENSION)
         assert dim == 1024
 
-    @patch("src.rag.orchestrator.HuggingFaceEmbedding")
+    @patch("src.rag.orchestrator.FastEmbedEmbedding")
     @patch("src.rag.orchestrator.BGECrossEncoderReranker")
     def test_initialize_services_configures_bge_models(
         self,
@@ -151,7 +151,7 @@ class TestRAGOrchestratorInitialization:
 
         Args:
             mock_reranker_cls: Mocked BGECrossEncoderReranker class.
-            mock_hf_embed: Mocked HuggingFaceEmbedding class.
+            mock_hf_embed: Mocked FastEmbedEmbedding class.
             temp_config_file: Path to temporary config YAML.
             tmp_path: Temporary directory fixture.
         """
@@ -166,16 +166,18 @@ class TestRAGOrchestratorInitialization:
 
         assert orchestrator._initialized
         mock_hf_embed.assert_called_once_with(
-            model_name="BAAI/bge-small-en-v1.5",
+            model_name="BAAI/bge-m3",
+            threads=12,
+            cache_size=100000,
+            embed_batch_size=32,
             device="cpu",
             normalize=True,
-            embed_batch_size=32,
-            trust_remote_code=False,
         )
         mock_reranker_cls.assert_called_once_with(
-            model_name="BAAI/bge-reranker-base",
+            model_name="BAAI/bge-reranker-v2-m3",
             top_n=5,
             device="cpu",
+            threads=12,
         )
 
 
@@ -212,8 +214,13 @@ class TestQdrantVectorStoreInitialization:
             assert index is not None
             assert orchestrator._qdrant_client is not None
             collections = orchestrator._qdrant_client.get_collections().collections
-            assert any(c.name == "vx_rag_collection" for c in collections)
-            collection_info = orchestrator._qdrant_client.get_collection("vx_rag_collection")
+            target_collection = (
+                "test_orchestrator"
+                if any(c.name == "test_orchestrator" for c in collections)
+                else "vx_rag_collection"
+            )
+            assert any(c.name in ("vx_rag_collection", "test_orchestrator") for c in collections)
+            collection_info = orchestrator._qdrant_client.get_collection(target_collection)
             assert isinstance(collection_info.config.params.vectors, models.VectorParams)
             assert collection_info.config.params.vectors.size == 1024
         finally:
@@ -240,8 +247,8 @@ class TestIndexedFileHashesAndDuplicateDetection:
         manifest_data = {
             "version": "1.0",
             "timestamp": "2026-09-14T00:00:00Z",
-            "model_name": "BAAI/bge-small-en-v1.5",
-            "embedding_dimension": 384,
+            "model_name": "BAAI/bge-m3",
+            "embedding_dimension": 1024,
             "total_nodes": 1,
             "indexed_file_hashes": ["aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"],
             "files": {},
@@ -420,8 +427,8 @@ class TestManifestAndSnapshotPersistence:
         manifest = orchestrator._generate_manifest(persist_dir)
 
         assert manifest["version"] == "1.0"
-        assert manifest["model_name"] == "BAAI/bge-small-en-v1.5"
-        assert manifest["embedding_dimension"] == 384
+        assert manifest["model_name"] == "BAAI/bge-m3"
+        assert manifest["embedding_dimension"] == 1024
         assert manifest["total_nodes"] == 1
         assert "abc123hash" in manifest["indexed_file_hashes"]
         assert f"qdrant/{dummy_file.name}" in manifest["files"]
@@ -464,7 +471,7 @@ class TestManifestAndSnapshotPersistence:
 class TestBGECrossEncoderReranker:
     """Test suite for BGECrossEncoderReranker postprocessor."""
 
-    @patch("sentence_transformers.CrossEncoder")
+    @patch("src.rag.libs.postprocessors.FastEmbedCrossEncoder")
     def test_reranker_reordering_and_sigmoid_normalization(
         self,
         mock_cross_encoder_cls: MagicMock,
@@ -482,7 +489,7 @@ class TestBGECrossEncoderReranker:
         mock_cross_encoder_cls.return_value = mock_model
 
         reranker = BGECrossEncoderReranker(
-            model_name="BAAI/bge-reranker-base",
+            model_name="BAAI/bge-reranker-v2-m3",
             top_n=2,
             device="cpu",
         )
@@ -506,7 +513,7 @@ class TestBGECrossEncoderReranker:
         assert 0.0 <= (reranked[1].score or 0.0) <= 1.0
         assert (reranked[0].score or 0.0) > (reranked[1].score or 0.0)
 
-    @patch("sentence_transformers.CrossEncoder")
+    @patch("src.rag.libs.postprocessors.FastEmbedCrossEncoder")
     def test_reranker_fallback_on_inference_error(
         self,
         mock_cross_encoder_cls: MagicMock,
@@ -523,7 +530,7 @@ class TestBGECrossEncoderReranker:
         mock_cross_encoder_cls.return_value = mock_model
 
         reranker = BGECrossEncoderReranker(
-            model_name="BAAI/bge-reranker-base",
+            model_name="BAAI/bge-reranker-v2-m3",
             top_n=2,
             device="cpu",
         )

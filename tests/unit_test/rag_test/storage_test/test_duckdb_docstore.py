@@ -45,18 +45,18 @@ if TYPE_CHECKING:
 class MockDeterministicEmbedding(BaseEmbedding):
     """Deterministic mock embedding for unit tests."""
 
-    dimension: int = 384
+    dimension: int = 1024
 
     def __init__(self, **kwargs: Any) -> None:
         """Initialize mock embedding model."""
         super().__init__(model_name="mock-deterministic", **kwargs)
 
     def _get_query_embedding(self, query: str) -> list[float]:
-        """Generate deterministic 384-dimensional query embedding."""
+        """Generate deterministic 1024-dimensional query embedding."""
         return [0.05] * self.dimension
 
     def _get_text_embedding(self, text: str) -> list[float]:
-        """Generate deterministic 384-dimensional text embedding."""
+        """Generate deterministic 1024-dimensional text embedding."""
         return [0.05] * self.dimension
 
     async def _aget_query_embedding(self, query: str) -> list[float]:
@@ -84,7 +84,7 @@ def storage_temp_config(tmp_path: Path) -> Generator[str, None, None]:
             "enable_hybrid": True,
         },
         "embedder": {
-            "embedding_model": "BAAI/bge-small-en-v1.5",
+            "embedding_model": "BAAI/bge-m3",
             "embedding_batch_size": 10,
             "embedding_trust_remote_code": False,
             "embedding_device": "cpu",
@@ -102,7 +102,7 @@ def storage_temp_config(tmp_path: Path) -> Generator[str, None, None]:
         },
         "reranker": {
             "enable_metadata_prioritization": False,
-            "model_name": "BAAI/bge-reranker-base",
+            "model_name": "BAAI/bge-reranker-v2-m3",
             "top_k": 5,
             "device": "cpu",
         },
@@ -329,7 +329,7 @@ os._exit(42)
 class TestDuckDBKVStoreOrchestratorIntegration:
     """Test suite for RAGOrchestrator integration with DuckDBKVStore."""
 
-    @patch("src.rag.orchestrator.HuggingFaceEmbedding", return_value=MockDeterministicEmbedding())
+    @patch("src.rag.orchestrator.FastEmbedEmbedding", return_value=MockDeterministicEmbedding())
     @patch("src.rag.orchestrator.BGECrossEncoderReranker")
     def test_orchestrator_initializes_duckdb_docstore(
         self,
@@ -358,7 +358,7 @@ class TestDuckDBKVStoreOrchestratorIntegration:
         assert (persist_dir / DEFAULT_DOCSTORE_DB_NAME).exists()
         orchestrator.close()
 
-    @patch("src.rag.orchestrator.HuggingFaceEmbedding", return_value=MockDeterministicEmbedding())
+    @patch("src.rag.orchestrator.FastEmbedEmbedding", return_value=MockDeterministicEmbedding())
     @patch("src.rag.orchestrator.BGECrossEncoderReranker")
     def test_orchestrator_indexing_persists_to_duckdb_and_no_docstore_json(
         self,
@@ -416,7 +416,7 @@ class TestDuckDBKVStoreOrchestratorIntegration:
 
         orchestrator.close()
 
-    @patch("src.rag.orchestrator.HuggingFaceEmbedding", return_value=MockDeterministicEmbedding())
+    @patch("src.rag.orchestrator.FastEmbedEmbedding", return_value=MockDeterministicEmbedding())
     @patch("src.rag.orchestrator.BGECrossEncoderReranker")
     def test_orchestrator_reload_from_existing_duckdb_docstore(
         self,
@@ -461,7 +461,7 @@ class TestDuckDBKVStoreOrchestratorIntegration:
         assert orchestrator2._docstore.docs["reload-node-1"].get_content() == "Reload test content"
         orchestrator2.close()
 
-    @patch("src.rag.orchestrator.HuggingFaceEmbedding", return_value=MockDeterministicEmbedding())
+    @patch("src.rag.orchestrator.FastEmbedEmbedding", return_value=MockDeterministicEmbedding())
     @patch("src.rag.orchestrator.BGECrossEncoderReranker")
     def test_orchestrator_migrates_legacy_docstore_json(
         self,
@@ -518,7 +518,7 @@ class TestDuckDBKVStoreOrchestratorIntegration:
 
         orchestrator.close()
 
-    @patch("src.rag.orchestrator.HuggingFaceEmbedding", return_value=MockDeterministicEmbedding())
+    @patch("src.rag.orchestrator.FastEmbedEmbedding", return_value=MockDeterministicEmbedding())
     @patch("src.rag.orchestrator.BGECrossEncoderReranker")
     def test_orchestrator_snapshot_creates_duckdb_in_snapshot_dir(
         self,
@@ -566,7 +566,7 @@ class TestDuckDBKVStoreOrchestratorIntegration:
 
         orchestrator.close()
 
-    @patch("src.rag.orchestrator.HuggingFaceEmbedding", return_value=MockDeterministicEmbedding())
+    @patch("src.rag.orchestrator.FastEmbedEmbedding", return_value=MockDeterministicEmbedding())
     @patch("src.rag.orchestrator.BGECrossEncoderReranker")
     def test_orchestrator_close_releases_duckdb_lock(
         self,
@@ -603,7 +603,7 @@ class TestDuckDBKVStoreOrchestratorIntegration:
         shutil.copy2(db_path, copy_path)
         assert copy_path.exists()
 
-    @patch("src.rag.orchestrator.HuggingFaceEmbedding", return_value=MockDeterministicEmbedding())
+    @patch("src.rag.orchestrator.FastEmbedEmbedding", return_value=MockDeterministicEmbedding())
     @patch("src.rag.orchestrator.BGECrossEncoderReranker")
     def test_orchestrator_queries_and_searches_with_duckdb(
         self,
@@ -658,7 +658,7 @@ class TestDuckDBKVStoreOrchestratorIntegration:
 
         orchestrator.close()
 
-    @patch("src.rag.orchestrator.HuggingFaceEmbedding", return_value=MockDeterministicEmbedding())
+    @patch("src.rag.orchestrator.FastEmbedEmbedding", return_value=MockDeterministicEmbedding())
     @patch("src.rag.orchestrator.BGECrossEncoderReranker")
     def test_create_snapshot_external_docstore_path(
         self,

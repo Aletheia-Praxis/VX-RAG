@@ -176,11 +176,11 @@ class TestCybersecurityWorkflows:
         client = QdrantClient(":memory:")
         client.create_collection(
             collection_name="threat_intel",
-            vectors_config=VectorParams(size=384, distance=Distance.COSINE),
+            vectors_config=VectorParams(size=1024, distance=Distance.COSINE),
         )
 
         # Baseline: 10 threat reports
-        initial_vectors = np.random.randn(10, 384).astype(np.float32)
+        initial_vectors = np.random.randn(10, 1024).astype(np.float32)
         norm1 = np.linalg.norm(initial_vectors, axis=1, keepdims=True)
         initial_vectors = initial_vectors / norm1
         points1 = [
@@ -200,7 +200,7 @@ class TestCybersecurityWorkflows:
         (index_dir / "manifest.json").write_text(json.dumps(manifest_v1), encoding="utf-8")
 
         # Incremental feed update: 5 new threat reports
-        new_vectors = np.random.randn(5, 384).astype(np.float32)
+        new_vectors = np.random.randn(5, 1024).astype(np.float32)
         norm2 = np.linalg.norm(new_vectors, axis=1, keepdims=True)
         new_vectors = new_vectors / norm2
         points2 = [

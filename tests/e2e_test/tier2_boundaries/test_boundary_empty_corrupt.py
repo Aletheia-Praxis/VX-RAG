@@ -67,7 +67,7 @@ class TestBoundaryEmptyAndCorruptFiles:
     def test_truncated_pdf_stream_handling(self, tmp_path: Path) -> None:
         """Verify PDF with valid header but truncated EOF marker is handled safely."""
         truncated_pdf = tmp_path / "truncated.pdf"
-        truncated_pdf.write_bytes(b"%PDF-1.5\n%truncated abruptly without %%EOF")
+        truncated_pdf.write_bytes(b"%PDF-1.5\n%truncated abruptly without EOF marker")
 
         def safe_parse(path: Path) -> dict[str, Any]:
             raw = path.read_bytes()

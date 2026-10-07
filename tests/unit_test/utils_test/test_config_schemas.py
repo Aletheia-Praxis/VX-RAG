@@ -10,13 +10,16 @@ from pydantic import ValidationError
 from src.utils.config_schemas import (
     AdaptiveChunkingProfile,
     ChunkingConfig,
+    ContextAssemblerConfig,
     DuplicateDetectionConfig,
     EmbeddingConfig,
+    IngestionConfig,
     MCPConfig,
     QdrantConfig,
     RateLimitConfig,
     RerankerConfig,
     RetrieverConfig,
+    RouterConfig,
     VXRAGSettings,
 )
 
@@ -27,11 +30,11 @@ class TestEmbeddingConfig:
     def test_valid_config(self) -> None:
         """Test valid embedding configuration."""
         config = EmbeddingConfig(
-            embedding_model="all-MiniLM-L6-v2",
+            embedding_model="BAAI/bge-m3",
             embedding_device="cpu",
             embedding_batch_size=10
         )
-        assert config.embedding_model == "all-MiniLM-L6-v2"
+        assert config.embedding_model == "BAAI/bge-m3"
         assert config.embedding_device == "cpu"
         assert config.embedding_batch_size == 10
     
@@ -50,6 +53,11 @@ class TestEmbeddingConfig:
         with pytest.raises(ValidationError) as exc_info:
             EmbeddingConfig(embedding_device="invalid")  # type: ignore
         assert "embedding_device" in str(exc_info.value)
+
+    def test_embedding_cache_size_config(self) -> None:
+        """Test embedding_cache_size configuration in EmbeddingConfig."""
+        config = EmbeddingConfig(embedding_cache_size=50000)
+        assert config.embedding_cache_size == 50000
 
 
 class TestChunkingConfig:
@@ -159,10 +167,11 @@ class TestRerankerConfig:
     def test_valid_config(self) -> None:
         """Test valid reranker configuration."""
         config = RerankerConfig(
-            model_name="cross-encoder/ms-marco-MiniLM-L-6-v2",
+            model_name="BAAI/bge-reranker-v2-m3",
             top_k=5,
             device="cpu"
         )
+        assert config.model_name == "BAAI/bge-reranker-v2-m3"
         assert config.top_k == 5
         assert config.device == "cpu"
     
@@ -263,6 +272,8 @@ class TestVXRAGSettings:
         """Test valid minimal configuration with defaults."""
         config = VXRAGSettings()
         assert config.embedding_model == "BAAI/bge-m3"
+        assert config.embedding_dimensions == {"BAAI/bge-m3": 1024}
+        assert config.reranker.model_name == "BAAI/bge-reranker-v2-m3"
         assert config.chunk_size == 1024
         assert config.chunk_overlap == 200
     
@@ -270,13 +281,14 @@ class TestVXRAGSettings:
         """Test valid full configuration."""
         config = VXRAGSettings(
             data_dir="./data",
-            embedding_model="all-MiniLM-L6-v2",
+            embedding_model="BAAI/bge-m3",
             embedding_device="cpu",
             chunk_size=1024,
             chunk_overlap=200,
             vector_store="qdrant"
         )
         assert config.data_dir == "./data"
+        assert config.embedding_model == "BAAI/bge-m3"
         assert config.vector_store == "qdrant"
     
     def test_chunk_overlap_validation(self) -> None:
@@ -309,3 +321,62 @@ class TestVXRAGSettings:
         )
         # Should not raise error due to extra="allow"
         assert hasattr(config, "extra_field")
+
+    def test_reranker_threads_inheritance(self) -> None:
+        """Test reranker threads inherits from top-level threads when not explicitly provided."""
+        config = VXRAGSettings(threads=8)
+        assert config.threads == 8
+        assert config.reranker.threads == 8
+
+    def test_new_sections_default_initialization(self) -> None:
+        """Test context_assembler, router, ingestion are initialized by default."""
+        config = VXRAGSettings()
+        assert config.context_assembler.token_budget == 4096
+        assert config.router.selector_type == "pydantic"
+        assert config.ingestion.enable_caching is True
+
+
+class TestContextAssemblerConfig:
+    """Tests for ContextAssemblerConfig validation."""
+
+    def test_default_config(self) -> None:
+        """Test default values for ContextAssemblerConfig."""
+        config = ContextAssemblerConfig()
+        assert config.token_budget == 4096
+        assert config.model_name == "gpt-3.5-turbo"
+        assert config.max_items is None
+        assert config.min_score is None
+
+    def test_invalid_token_budget(self) -> None:
+        """Test token_budget must be positive."""
+        with pytest.raises(ValidationError):
+            ContextAssemblerConfig(token_budget=0)
+
+
+class TestRouterConfig:
+    """Tests for RouterConfig validation."""
+
+    def test_default_config(self) -> None:
+        """Test default values for RouterConfig."""
+        config = RouterConfig()
+        assert config.selector_type == "pydantic"
+        assert config.use_multi_select is False
+        assert config.verbose is False
+
+    def test_invalid_selector_type(self) -> None:
+        """Test selector_type validation."""
+        with pytest.raises(ValidationError):
+            RouterConfig(selector_type="invalid")  # type: ignore
+
+
+class TestIngestionConfig:
+    """Tests for IngestionConfig validation."""
+
+    def test_default_config(self) -> None:
+        """Test default values for IngestionConfig."""
+        config = IngestionConfig()
+        assert config.enable_caching is True
+        assert config.enable_metadata_extraction is False
+        assert config.enable_embedding is True
+        assert config.enable_vector_store is True
+        assert config.enable_persistence is True

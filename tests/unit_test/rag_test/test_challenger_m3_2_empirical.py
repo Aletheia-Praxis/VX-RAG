@@ -71,7 +71,7 @@ def temp_orchestrator_config(tmp_path: Path) -> Generator[str, None, None]:
             "enable_hybrid": True,
         },
         "embedder": {
-            "embedding_model": "BAAI/bge-small-en-v1.5",
+            "embedding_model": "BAAI/bge-m3",
             "embedding_batch_size": 32,
             "embedding_trust_remote_code": False,
             "embedding_device": "cpu",
@@ -89,7 +89,7 @@ def temp_orchestrator_config(tmp_path: Path) -> Generator[str, None, None]:
         },
         "reranker": {
             "enable_metadata_prioritization": True,
-            "model_name": "BAAI/bge-reranker-base",
+            "model_name": "BAAI/bge-reranker-v2-m3",
             "top_k": 5,
             "device": "cpu",
             "metadata_boost": 0.1,
@@ -117,7 +117,7 @@ class TestBGECrossEncoderRerankerEmpirical:
         mock_model.predict.return_value = raw_logits
 
         reranker = BGECrossEncoderReranker(
-            model_name="BAAI/bge-reranker-base",
+            model_name="BAAI/bge-reranker-v2-m3",
             top_n=5,
             device="cpu",
             model=mock_model,
@@ -169,7 +169,7 @@ class TestBGECrossEncoderRerankerEmpirical:
         mock_model.predict.return_value = [raw_score]
 
         reranker = BGECrossEncoderReranker(
-            model_name="BAAI/bge-reranker-base",
+            model_name="BAAI/bge-reranker-v2-m3",
             top_n=5,
             device="cpu",
             model=mock_model,
@@ -192,7 +192,7 @@ class TestBGECrossEncoderRerankerEmpirical:
         mock_model.predict.return_value = [float(i) for i in range(candidate_count)]
 
         reranker = BGECrossEncoderReranker(
-            model_name="BAAI/bge-reranker-base",
+            model_name="BAAI/bge-reranker-v2-m3",
             top_n=top_n,
             device="cpu",
             model=mock_model,
@@ -226,7 +226,7 @@ class TestBGECrossEncoderRerankerEmpirical:
         mock_model.predict.return_value = [3.5]
 
         reranker = BGECrossEncoderReranker(
-            model_name="BAAI/bge-reranker-base",
+            model_name="BAAI/bge-reranker-v2-m3",
             top_n=5,
             device="cpu",
             model=mock_model,
@@ -246,7 +246,7 @@ class TestBGECrossEncoderRerankerEmpirical:
         """Verify empty candidate list returns empty list without calling model."""
         mock_model = MagicMock()
         reranker = BGECrossEncoderReranker(
-            model_name="BAAI/bge-reranker-base",
+            model_name="BAAI/bge-reranker-v2-m3",
             top_n=5,
             device="cpu",
             model=mock_model,
@@ -260,7 +260,7 @@ class TestBGECrossEncoderRerankerEmpirical:
         """Verify None or empty query string returns candidates truncated to top_n without reranking."""
         mock_model = MagicMock()
         reranker = BGECrossEncoderReranker(
-            model_name="BAAI/bge-reranker-base",
+            model_name="BAAI/bge-reranker-v2-m3",
             top_n=2,
             device="cpu",
             model=mock_model,
@@ -303,7 +303,7 @@ class TestBGECrossEncoderRerankerEmpirical:
         mock_model.predict.side_effect = exception_type(exception_msg)
 
         reranker = BGECrossEncoderReranker(
-            model_name="BAAI/bge-reranker-base",
+            model_name="BAAI/bge-reranker-v2-m3",
             top_n=2,
             device="cpu",
             model=mock_model,

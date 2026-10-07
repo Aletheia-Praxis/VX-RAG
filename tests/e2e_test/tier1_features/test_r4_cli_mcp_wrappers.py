@@ -32,6 +32,7 @@ from src.mcp.formatters import (
     redact_sensitive_data,
 )
 from src.rag.libs.schemas.mcp_schemas import ContextItem, MCPContextPayload
+from src.utils.config_loader import get_default_config_path
 
 if TYPE_CHECKING:
     from _pytest.capture import CaptureFixture
@@ -128,11 +129,11 @@ class TestFeatures13To16CLICommands:
             res = run_cli_command(["serve", "--persist-dir", "custom/indices/path"])
             assert res.exit_code == 0
             mock_configure_server.assert_called_once_with(
-                config_path="config/settings.yaml",
+                config_path=get_default_config_path(),
                 persist_dir="custom/indices/path",
             )
             mock_run_stdio.assert_called_once_with(
-                config_path="config/settings.yaml",
+                config_path=get_default_config_path(),
                 persist_dir="custom/indices/path",
             )
 

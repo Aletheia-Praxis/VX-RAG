@@ -186,7 +186,7 @@ def isolated_e2e_env(tmp_path: Path) -> dict[str, Any]:
         "raw_data_dir": str(raw_dir),
         "processed_data_dir": str(processed_dir),
         "index_dir": str(index_dir),
-        "embedding_model": "BAAI/bge-small-en-v1.5",
+        "embedding_model": "BAAI/bge-m3",
         "embedding_device": "cpu",
         "embedding_batch_size": 10,
         "embedding_trust_remote_code": False,
@@ -209,7 +209,7 @@ def isolated_e2e_env(tmp_path: Path) -> dict[str, Any]:
             "enable_persistence": True,
         },
         "reranker": {
-            "model_name": "BAAI/bge-reranker-base",
+            "model_name": "BAAI/bge-reranker-v2-m3",
             "top_k": 5,
             "device": "cpu",
             "metadata_boost": 0.1,

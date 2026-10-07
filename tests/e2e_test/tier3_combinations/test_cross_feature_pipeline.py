@@ -68,11 +68,11 @@ class TestCrossFeaturePipeline:
         client = QdrantClient(":memory:")
         client.create_collection(
             collection_name="test_col",
-            vectors_config=VectorParams(size=384, distance=Distance.COSINE),
+            vectors_config=VectorParams(size=1024, distance=Distance.COSINE),
         )
 
         # Batch 1: Document A (3 chunks)
-        batch1_embeddings = np.random.randn(3, 384).astype(np.float32)
+        batch1_embeddings = np.random.randn(3, 1024).astype(np.float32)
         norm1 = np.linalg.norm(batch1_embeddings, axis=1, keepdims=True)
         batch1_embeddings = batch1_embeddings / norm1
         points1 = [
@@ -83,7 +83,7 @@ class TestCrossFeaturePipeline:
         assert client.get_collection("test_col").points_count == 3
 
         # Batch 2: Document B (2 chunks) incrementally appended
-        batch2_embeddings = np.random.randn(2, 384).astype(np.float32)
+        batch2_embeddings = np.random.randn(2, 1024).astype(np.float32)
         norm2 = np.linalg.norm(batch2_embeddings, axis=1, keepdims=True)
         batch2_embeddings = batch2_embeddings / norm2
         points2 = [
@@ -94,11 +94,11 @@ class TestCrossFeaturePipeline:
         assert client.get_collection("test_col").points_count == 5
 
         # Query for Document B's first vector
-        res = client.search(
+        res = client.query_points(
             collection_name="test_col",
-            query_vector=batch2_embeddings[0].tolist(),
+            query=batch2_embeddings[0].tolist(),
             limit=1,
-        )
+        ).points
         assert res[0].id == 3
         assert pytest.approx(float(res[0].score), 0.001) == 1.0
 

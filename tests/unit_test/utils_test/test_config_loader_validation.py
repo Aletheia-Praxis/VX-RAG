@@ -9,7 +9,15 @@ from pathlib import Path
 import pytest
 import yaml
 
-from src.utils.config_loader import get_validated_settings, load_settings
+from src.utils.config_loader import (
+    get_chunk_overlap,
+    get_chunk_size,
+    get_default_config_path,
+    get_embedding_dimensions,
+    get_onnx_config,
+    get_validated_settings,
+    load_settings,
+)
 from src.utils.config_schemas import VXRAGSettings
 
 
@@ -21,7 +29,7 @@ def temp_config_file(tmp_path: Path) -> Path:
         "raw_data_dir": "./data/raw",
         "processed_data_dir": "./data/processed",
         "index_dir": "./data/index",
-        "embedding_model": "all-MiniLM-L6-v2",
+        "embedding_model": "BAAI/bge-m3",
         "embedding_device": "cpu",
         "embedding_batch_size": 10,
         "chunk_size": 1024,
@@ -83,7 +91,7 @@ class TestLoadSettings:
         config = load_settings(str(temp_config_file))
         
         assert isinstance(config, dict)
-        assert config["embedding_model"] == "all-MiniLM-L6-v2"
+        assert config["embedding_model"] == "BAAI/bge-m3"
         assert config["chunk_size"] == 1024
         assert config["chunk_overlap"] == 200
     
@@ -182,7 +190,7 @@ class TestGetValidatedSettings:
         settings = get_validated_settings()
         
         assert isinstance(settings, VXRAGSettings)
-        assert settings.embedding_model == "all-MiniLM-L6-v2"
+        assert settings.embedding_model == "BAAI/bge-m3"
         assert settings.chunk_size == 1024
     
     def test_get_settings_auto_loads(self) -> None:
@@ -217,7 +225,7 @@ class TestConfigValidationIntegration:
             "raw_data_dir": "./data/raw",
             "processed_data_dir": "./data/processed",
             "index_dir": "./data/index",
-            "embedding_model": "all-MiniLM-L6-v2",
+            "embedding_model": "BAAI/bge-m3",
             "embedding_device": "cpu",
             "embedding_batch_size": 10,
             "embedding_cache_size": 1000,
@@ -255,7 +263,7 @@ class TestConfigValidationIntegration:
                 "enable_persistence": True
             },
             "reranker": {
-                "model_name": "cross-encoder/ms-marco-MiniLM-L-6-v2",
+                "model_name": "BAAI/bge-reranker-v2-m3",
                 "top_k": 5,
                 "device": "cpu",
                 "metadata_boost": 0.1
@@ -278,11 +286,6 @@ class TestConfigValidationIntegration:
                 "similarity_threshold": 0.95,
                 "hash_algorithm": "sha256"
             },
-            "boilerplate_removal": {
-                "enabled": True,
-                "aggressive_mode": True,
-                "position": "after_ocr"
-            },
             "logging": {
                 "log_level": "INFO",
                 "log_file": "logs/vx_rag.log",
@@ -297,7 +300,7 @@ class TestConfigValidationIntegration:
         config = load_settings(str(config_file))
         
         # Verify all sections loaded
-        assert config["embedding_model"] == "all-MiniLM-L6-v2"
+        assert config["embedding_model"] == "BAAI/bge-m3"
         assert config["qdrant"]["collection_name"] == "test_complete"
         assert config["mcp"]["port"] == 25191
         assert config["retriever"]["hybrid_alpha"] == 0.5
@@ -325,3 +328,45 @@ class TestConfigValidationIntegration:
         # Verify defaults
         assert config["embedding_model"] == "BAAI/bge-m3"
         assert config["mcp"]["host"] == "127.0.0.1"
+
+    def test_get_chunk_size_and_overlap(self, tmp_path: Path) -> None:
+        """Test get_chunk_size and get_chunk_overlap retrieve chunking settings."""
+        cfg_data = {"chunk_size": 1500, "chunk_overlap": 150}
+        cfg_file = tmp_path / "chunk_settings.yaml"
+        with open(cfg_file, "w", encoding="utf-8") as f:
+            yaml.dump(cfg_data, f)
+
+        assert get_chunk_size(str(cfg_file)) == 1500
+        assert get_chunk_overlap(str(cfg_file)) == 150
+
+    def test_get_embedding_dimensions(self, tmp_path: Path) -> None:
+        """Test get_embedding_dimensions retrieves model dimensions lookup."""
+        cfg_data = {
+            "embedding_dimensions": {
+                "BAAI/bge-m3": 1024,
+                "custom-model": 512,
+            }
+        }
+        cfg_file = tmp_path / "dim_settings.yaml"
+        with open(cfg_file, "w", encoding="utf-8") as f:
+            yaml.dump(cfg_data, f)
+
+        dims = get_embedding_dimensions(str(cfg_file))
+        assert dims["BAAI/bge-m3"] == 1024
+        assert dims["custom-model"] == 512
+
+    def test_get_onnx_config(self, tmp_path: Path) -> None:
+        """Test get_onnx_config retrieves ONNX configuration."""
+        cfg_data = {"onnx": {"inter_op_threads": 4}}
+        cfg_file = tmp_path / "onnx_settings.yaml"
+        with open(cfg_file, "w", encoding="utf-8") as f:
+            yaml.dump(cfg_data, f)
+
+        onnx_cfg = get_onnx_config(str(cfg_file))
+        assert onnx_cfg["inter_op_threads"] == 4
+
+    def test_get_default_config_path(self) -> None:
+        """Test get_default_config_path returns valid path."""
+        path = get_default_config_path()
+        assert isinstance(path, str)
+        assert len(path) > 0
