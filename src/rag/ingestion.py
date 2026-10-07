@@ -6,8 +6,6 @@ Enforces:
 - Docling programmatic parsing as primary standard extraction (PDF, TXT, MD).
 - Conditional OCR fallback to Tesseract ONLY when text stream is empty or document is
   an image or copy-protected. Searchable text PDFs MUST NOT invoke OCR.
-- Boilerplate removal: aggressive stripping of page numbers, recurring headers, footers,
-  while strictly preserving markdown headers, tables, and code blocks.
 - Markdown-aware chunking: 1024 tokens default with 10-15% overlap, respecting sentence
   boundaries and heading context.
 - Technical adaptive chunking: 256-512 tokens for code blocks, preserving code fences
@@ -31,6 +29,7 @@ from src.rag.metadata import (
     extract_document_metadata,
     sanitize_node_metadata,
 )
+from src.utils.config_loader import get_default_config_path
 from src.utils.logging_config import get_logger
 
 logger = get_logger("ingestion")
@@ -44,19 +43,6 @@ MAX_CODE_CHUNK_SIZE: int = 512
 DEFAULT_OVERLAP_RATIO_MIN: float = 0.10
 DEFAULT_OVERLAP_RATIO_MAX: float = 0.15
 MAX_UNBROKEN_STRING_LENGTH: int = 1000
-
-# Regex patterns for boilerplate removal
-PAGE_NUMBER_PATTERN: re.Pattern[str] = re.compile(
-    r"(?m)^\s*(?:Page\s+\d+(?:\s+of\s+\d+)?|-?\s*\d+\s*-?)\s*$"
-)
-CONFIDENTIAL_BANNER_PATTERN: re.Pattern[str] = re.compile(
-    r"(?m)^\s*CONFIDENTIAL\s*-\s*DO NOT DISTRIBUTE\s*$"
-)
-EXTRA_BANNER_PATTERN: re.Pattern[str] = re.compile(
-    r"(?m)^\s*(?:TOP SECRET|RESTRICTED|CLASSIFIED)\s*-\s*DO NOT DISTRIBUTE\s*$"
-)
-HTML_COMMENT_PATTERN: re.Pattern[str] = re.compile(r"<!--.*?-->", re.DOTALL)
-MULTIPLE_NEWLINES_PATTERN: re.Pattern[str] = re.compile(r"\n{3,}")
 
 # Regex patterns for structural markdown identification
 CODE_BLOCK_PATTERN: re.Pattern[str] = re.compile(
@@ -166,7 +152,7 @@ class DoclingPipeline:
 
     def __init__(
         self,
-        config_path: str = "config/settings.yaml",
+        config_path: str = get_default_config_path(),
         default_chunk_size: int = DEFAULT_CHUNK_SIZE,
         code_chunk_size: int = DEFAULT_CODE_CHUNK_SIZE,
         overlap: int = DEFAULT_CHUNK_OVERLAP,
@@ -401,47 +387,6 @@ class DoclingPipeline:
             return path.read_text(encoding="utf-8")
         except (UnicodeDecodeError, OSError, ValueError):
             return self._perform_ocr_fallback(path)
-
-    def clean_boilerplate(self, text: str) -> str:
-        """
-        Strip headers, footers, and page numbers while preserving markdown and code.
-
-        Strictly preserves:
-        - Markdown headers (#, ##, ###, etc.)
-        - Fenced code blocks (```...```) and formatting
-        - Markdown tables (| Col | ... |)
-        - Hex memory dumps (00000000  4d 5a ... |...|)
-
-        Args:
-            text: Raw input text.
-
-        Returns:
-            Cleaned text with boilerplate removed.
-        """
-        if not text:
-            return ""
-
-        # Protect fenced code blocks by isolating them during regex transformations
-        code_block_pattern = re.compile(r"(```[^\n]*\n.*?```)", re.DOTALL | re.MULTILINE)
-        segments = code_block_pattern.split(text)
-
-        cleaned_segments: list[str] = []
-        for index, segment in enumerate(segments):
-            # Odd segments represent fenced code blocks: preserve 100% verbatim
-            if index % 2 == 1:
-                cleaned_segments.append(segment)
-                continue
-
-            # Outside code blocks, apply aggressive boilerplate cleaning
-            cleaned = segment
-            cleaned = PAGE_NUMBER_PATTERN.sub("", cleaned)
-            cleaned = CONFIDENTIAL_BANNER_PATTERN.sub("", cleaned)
-            cleaned = EXTRA_BANNER_PATTERN.sub("", cleaned)
-            cleaned = HTML_COMMENT_PATTERN.sub("", cleaned)
-            cleaned = MULTIPLE_NEWLINES_PATTERN.sub("\n\n", cleaned)
-            cleaned_segments.append(cleaned)
-
-        return "".join(cleaned_segments).strip()
 
     def _partition_large_code_block(self, code_block: str, max_tokens: int) -> list[str]:
         """
@@ -700,7 +645,7 @@ class DoclingPipeline:
         Ingest a single document file into sanitized TextNodes.
 
         Extracts metadata, performs conditional standard or OCR extraction,
-        removes boilerplate, chunks content adaptively, and sanitizes node metadata.
+        chunks content adaptively, and sanitizes node metadata.
 
         Args:
             file_path: Path to the document.
@@ -716,7 +661,7 @@ class DoclingPipeline:
         if not raw_text.strip():
             return []
 
-        cleaned_text = self.clean_boilerplate(raw_text)
+        cleaned_text = raw_text
         if not cleaned_text.strip():
             return []
 
@@ -733,6 +678,9 @@ class DoclingPipeline:
             sanitize_node_metadata(node)
 
         return nodes
+
+    # Alias for pipeline compatibility
+    process_file = ingest_file
 
     def ingest_directory(
         self,
