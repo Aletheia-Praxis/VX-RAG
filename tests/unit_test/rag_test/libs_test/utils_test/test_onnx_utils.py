@@ -4,7 +4,8 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock, patch
 
-from src.rag.libs.utils.onnx_utils import DEFAULT_INTER_OP_THREADS, init_onnx_runtime
+from src.rag.libs.utils.onnx_utils import init_onnx_runtime
+from src.utils.config_loader import get_onnx_config
 
 
 class TestInitOnnxRuntime:
@@ -49,7 +50,7 @@ class TestInitOnnxRuntime:
             assert tokenizer is None
 
     def test_default_inter_op_threads_used(self) -> None:
-        """Test default inter-op threads parameter uses named constant."""
+        """Test default inter-op threads parameter uses configuration value."""
         mock_options = MagicMock()
 
         with (
@@ -63,4 +64,5 @@ class TestInitOnnxRuntime:
                 threads=6,
             )
 
-            assert mock_options.inter_op_num_threads == DEFAULT_INTER_OP_THREADS
+            expected_threads = int(get_onnx_config()["inter_op_threads"])
+            assert mock_options.inter_op_num_threads == expected_threads

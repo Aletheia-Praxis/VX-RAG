@@ -267,8 +267,8 @@ class TestMCPServerPersistDirWiring:
             patch("src.mcp.server.get_mcp_timeouts", return_value={"test_timeout": 456.0}),
         ):
             configure_server(config_path="config/settings.yaml", persist_dir="data/index")
-            assert mcp_srv.mcp_defaults.get("test_default") == 123
-            assert mcp_srv.mcp_timeouts.get("test_timeout") == 456.0
+            assert mcp_srv.mcp_defaults["test_default"] == 123
+            assert mcp_srv.mcp_timeouts["test_timeout"] == 456.0
 
     def test_cli_serve_stdio_subprocess_clean_stdout(self) -> None:
         """Verify cli serve with stdio transport in a fresh subprocess never pollutes stdout."""

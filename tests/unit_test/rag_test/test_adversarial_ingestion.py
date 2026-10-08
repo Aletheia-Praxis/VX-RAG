@@ -39,7 +39,6 @@ from PIL import Image
 
 from src.rag.exceptions import DocumentParsingError
 from src.rag.ingestion import (
-    MAX_CODE_CHUNK_SIZE,
     CorruptedDocumentError,
     DoclingPipeline,
     balance_code_fences,
@@ -309,12 +308,13 @@ class TestAdversarialChunkingBoundaries:
             + "\n}\n```"
         )
 
+        target_code_chunk_size = 512
         token_size = count_tokens(large_code_block)
-        assert token_size > MAX_CODE_CHUNK_SIZE, (
-            f"Test prerequisite failed: token size {token_size} must exceed {MAX_CODE_CHUNK_SIZE}"
+        assert token_size > target_code_chunk_size, (
+            f"Test prerequisite failed: token size {token_size} must exceed {target_code_chunk_size}"
         )
 
-        nodes = chunk_markdown(large_code_block, code_chunk_size=MAX_CODE_CHUNK_SIZE)
+        nodes = chunk_markdown(large_code_block, code_chunk_size=target_code_chunk_size)
         assert len(nodes) > 1, "Large code block must be partitioned into multiple sub-chunks"
 
         for idx, node in enumerate(nodes):
@@ -329,8 +329,8 @@ class TestAdversarialChunkingBoundaries:
             )
             # Sub-chunk token count should not exceed code chunk size by large margin
             chunk_tokens = count_tokens(chunk_text)
-            assert chunk_tokens <= MAX_CODE_CHUNK_SIZE + 50, (
-                f"Sub-chunk {idx} exceeded max code chunk budget: {chunk_tokens} > {MAX_CODE_CHUNK_SIZE}"
+            assert chunk_tokens <= target_code_chunk_size + 50, (
+                f"Sub-chunk {idx} exceeded max code chunk budget: {chunk_tokens} > {target_code_chunk_size}"
             )
 
     def test_empty_files_handling(self, tmp_path: Path) -> None:

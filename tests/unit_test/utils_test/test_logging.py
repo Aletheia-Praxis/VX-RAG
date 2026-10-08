@@ -15,8 +15,6 @@ from typing import TYPE_CHECKING, Any
 from unittest.mock import patch
 
 from src.utils.logging_config import (
-    DEFAULT_BACKUP_COUNT,
-    DEFAULT_MAX_BYTES,
     JSONFormatter,
     SafeRotatingFileHandler,
     StructuredLogger,
@@ -69,12 +67,15 @@ def test_logger_rotating_file_handler(tmp_path: Path) -> None:
     """Test that file handler creates RotatingFileHandler with single jsonl file."""
     log_dir = tmp_path / "logs"
     log_file = log_dir / "vx_rag.jsonl"
+    logging_cfg = load_logging_config()
+    default_max_bytes = int(logging_cfg["max_bytes"])
+    default_backup_count = int(logging_cfg["backup_count"])
     config: dict[str, Any] = {
         "log_level": "INFO",
         "log_format": "json",
         "log_file": str(log_file),
-        "max_bytes": DEFAULT_MAX_BYTES,
-        "backup_count": DEFAULT_BACKUP_COUNT,
+        "max_bytes": default_max_bytes,
+        "backup_count": default_backup_count,
     }
 
     logger = StructuredLogger("test_rotating_logger", config)
@@ -92,8 +93,8 @@ def test_logger_rotating_file_handler(tmp_path: Path) -> None:
     ]
     assert len(file_handlers) == 1
     handler = file_handlers[0]
-    assert handler.maxBytes == DEFAULT_MAX_BYTES
-    assert handler.backupCount == DEFAULT_BACKUP_COUNT
+    assert handler.maxBytes == default_max_bytes
+    assert handler.backupCount == default_backup_count
 
     # Check file content is valid JSON Lines
     content = log_file.read_text(encoding="utf-8").strip()
