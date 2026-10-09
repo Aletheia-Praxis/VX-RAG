@@ -24,15 +24,18 @@ from llama_index.storage.kvstore.duckdb import DuckDBKVStore
 os.environ["IS_TESTING"] = "1"
 
 from src.rag.orchestrator import (
-    DEFAULT_DOCSTORE_DB_NAME,
-    DEFAULT_INTERMEDIATE_NODES_DB_NAME,
-    DEFAULT_INTERMEDIATE_NODES_TABLE_NAME,
     RAGOrchestrator,
     _close_duckdb_kvstore,
     _create_duckdb_kvstore,
     load_intermediate_nodes,
     persist_intermediate_nodes,
 )
+from src.utils.config_loader import get_docstore_config
+
+_DOCSTORE_CONFIG: dict[str, Any] = get_docstore_config()
+DEFAULT_DOCSTORE_DB_NAME: str = str(_DOCSTORE_CONFIG["db_name"])
+DEFAULT_INTERMEDIATE_NODES_DB_NAME: str = str(_DOCSTORE_CONFIG["intermediate_nodes_db_name"])
+DEFAULT_INTERMEDIATE_NODES_TABLE_NAME: str = str(_DOCSTORE_CONFIG["intermediate_nodes_table_name"])
 
 if TYPE_CHECKING:
     from _pytest.capture import CaptureFixture  # noqa: F401

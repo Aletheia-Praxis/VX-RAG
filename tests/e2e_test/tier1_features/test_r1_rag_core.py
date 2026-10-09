@@ -32,20 +32,18 @@ class TestFeature1BGEEmbeddingIntegration:
 
     def test_bge_m3_embedding_dimension_contract(self) -> None:
         """Verify that BAAI/bge-m3 is configured for 1024 dimensions."""
-        from src.rag.orchestrator import (
-            _EMBEDDING_DIMENSION_BY_MODEL,
-            _FALLBACK_EMBEDDING_DIMENSION,
+        from src.utils.config_loader import (
+            get_embedding_dimension,
         )
 
         expected_dim = 1024
-        # Model must map to 1024 or fallback to 1024 dimension
-        model_dim = _EMBEDDING_DIMENSION_BY_MODEL.get("BAAI/bge-m3", _FALLBACK_EMBEDDING_DIMENSION)
+        model_dim = get_embedding_dimension("BAAI/bge-m3")
         assert model_dim == expected_dim, f"Expected 1024 dimensions for BGE-M3, found {model_dim}"
 
     def test_bge_embedding_device_contract(self, isolated_e2e_env: dict[str, Any]) -> None:
         """Verify embedding device configuration defaults strictly to CPU."""
         config_data = isolated_e2e_env["config_data"]
-        assert config_data.get("embedding_device") == "cpu", "Embedding model must execute on CPU"
+        assert config_data["embedding_device"] == "cpu", "Embedding model must execute on CPU"
 
     def test_bge_embedding_vector_generation(self) -> None:
         """Verify embedding generator produces 1024-dimensional dense vectors."""

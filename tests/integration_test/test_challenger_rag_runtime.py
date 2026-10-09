@@ -18,14 +18,23 @@ import subprocess
 import sys
 import time
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import pytest
 from llama_index.core import Settings
+from llama_index.core.embeddings import BaseEmbedding
 from llama_index.core.llms import MockLLM
 
 from src.mcp.server import mcp, query_lock
+from src.rag.libs.postprocessors import BGECrossEncoderReranker
 from src.rag.orchestrator import get_orchestrator, reset_orchestrator
+
+if TYPE_CHECKING:
+    from _pytest.capture import CaptureFixture  # noqa: F401
+    from _pytest.fixtures import FixtureRequest  # noqa: F401
+    from _pytest.logging import LogCaptureFixture  # noqa: F401
+    from _pytest.monkeypatch import MonkeyPatch  # noqa: F401
+    from pytest_mock.plugin import MockerFixture  # noqa: F401
 
 INDEX_DIR: Path = Path("data/index")
 MANIFEST_PATH: Path = INDEX_DIR / "manifest.json"
@@ -47,10 +56,62 @@ def compute_sha256(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
 
 
+class MockBGEEmbedding(BaseEmbedding):
+    """Deterministic mock embedding for BAAI/bge-m3 producing 1024-dim normalized vectors."""
+
+    def __init__(self, **kwargs: Any) -> None:
+        """Initialize mock embedding model."""
+        super().__init__(model_name="BAAI/bge-m3", **kwargs)
+
+    def _get_query_embedding(self, query: str) -> list[float]:
+        """Produce 1024-dimensional normalized float vector."""
+        return [1.0 / (1024.0**0.5)] * 1024
+
+    def _get_text_embedding(self, text: str) -> list[float]:
+        """Produce 1024-dimensional normalized float vector."""
+        return [1.0 / (1024.0**0.5)] * 1024
+
+    def _get_text_embeddings(self, texts: list[str]) -> list[list[float]]:
+        """Produce batch of 1024-dimensional normalized float vectors."""
+        return [[1.0 / (1024.0**0.5)] * 1024 for _ in texts]
+
+    async def _aget_query_embedding(self, query: str) -> list[float]:
+        """Produce asynchronous 1024-dimensional normalized float vector."""
+        return self._get_query_embedding(query)
+
+    async def _aget_text_embedding(self, text: str) -> list[float]:
+        """Produce asynchronous 1024-dimensional normalized float vector."""
+        return self._get_text_embedding(text)
+
+
+class MockBGERerankerModel:
+    """Mock cross encoder model for BAAI/bge-reranker-v2-m3."""
+
+    def predict(self, pairs: list[tuple[str, str]]) -> list[float]:
+        """Return descending logit scores for candidate pairs."""
+        return [10.0 - (float(i) * 0.5) for i in range(len(pairs))]
+
+    def rerank_pairs(self, pairs: list[tuple[str, str]]) -> list[float]:
+        """Return descending logit scores for candidate pairs."""
+        return self.predict(pairs)
+
+
 @pytest.fixture(autouse=True)
-def configure_mock_llm() -> None:
-    """Ensure MockLLM is configured to prevent OpenAI API key requirement during testing."""
+def configure_mock_llm(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Ensure MockLLM and BAAI/bge models are configured for testing without external weights."""
     Settings.llm = MockLLM()
+    mock_embed = MockBGEEmbedding()
+    monkeypatch.setattr("src.rag.orchestrator.FastEmbedEmbedding", lambda *a, **kw: mock_embed)
+
+    mock_model = MockBGERerankerModel()
+    real_reranker_init = BGECrossEncoderReranker.__init__
+
+    def _mocked_reranker_init(self: Any, *a: Any, **kw: Any) -> None:
+        kw["model"] = mock_model
+        real_reranker_init(self, *a, **kw)
+
+    monkeypatch.setattr("src.rag.orchestrator.BGECrossEncoderReranker.__init__", _mocked_reranker_init)
+    monkeypatch.setattr("src.rag.libs.postprocessors.BGECrossEncoderReranker.__init__", _mocked_reranker_init)
 
 
 def test_index_artifacts_manifest_and_hashes() -> None:
@@ -224,8 +285,37 @@ def test_cli_query_succeeds_without_openai_api_key_in_clean_env() -> None:
     env.pop("OPENAI_API_KEY", None)
     env["PYTHONPATH"] = "."
 
+    script = (
+        "import sys\n"
+        "from unittest.mock import patch\n"
+        "from llama_index.core.embeddings import BaseEmbedding\n"
+        "class MockBGE(BaseEmbedding):\n"
+        "    def _get_query_embedding(self, q):\n"
+        "        return [1.0 / (1024.0**0.5)] * 1024\n"
+        "    def _get_text_embedding(self, t):\n"
+        "        return [1.0 / (1024.0**0.5)] * 1024\n"
+        "    def _get_text_embeddings(self, ts):\n"
+        "        return [[1.0 / (1024.0**0.5)] * 1024 for _ in ts]\n"
+        "    async def _aget_query_embedding(self, q):\n"
+        "        return [1.0 / (1024.0**0.5)] * 1024\n"
+        "class MockModel:\n"
+        "    def predict(self, pairs):\n"
+        "        return [10.0 - float(i)*0.5 for i in range(len(pairs))]\n"
+        "    def rerank_pairs(self, pairs):\n"
+        "        return self.predict(pairs)\n"
+        "from src.rag.libs.postprocessors import BGECrossEncoderReranker\n"
+        "mock_reranker = BGECrossEncoderReranker(model_name='BAAI/bge-reranker-v2-m3', top_n=5, model=MockModel())\n"
+        "with (\n"
+        "    patch('src.rag.orchestrator.FastEmbedEmbedding', return_value=MockBGE(model_name='BAAI/bge-m3')),\n"
+        "    patch('src.rag.orchestrator.BGECrossEncoderReranker', return_value=mock_reranker),\n"
+        "):\n"
+        "    from src.cli import main\n"
+        "    sys.argv = ['cli.py', 'query', 'ransomware', '--persist-dir', 'data/index']\n"
+        "    main()\n"
+    )
+
     proc = subprocess.run(
-        [sys.executable, "-m", "src.cli", "query", "ransomware", "--persist-dir", "data/index"],
+        [sys.executable, "-c", script],
         capture_output=True,
         text=True,
         env=env,
@@ -246,7 +336,28 @@ def test_cli_serve_stdio_stdout_logging_clean() -> None:
     script = (
         "import sys\n"
         "from unittest.mock import patch\n"
-        "with patch('src.mcp.server.mcp.run'):\n"
+        "from llama_index.core.embeddings import BaseEmbedding\n"
+        "class MockBGE(BaseEmbedding):\n"
+        "    def _get_query_embedding(self, q):\n"
+        "        return [1.0 / (1024.0**0.5)] * 1024\n"
+        "    def _get_text_embedding(self, t):\n"
+        "        return [1.0 / (1024.0**0.5)] * 1024\n"
+        "    def _get_text_embeddings(self, ts):\n"
+        "        return [[1.0 / (1024.0**0.5)] * 1024 for _ in ts]\n"
+        "    async def _aget_query_embedding(self, q):\n"
+        "        return [1.0 / (1024.0**0.5)] * 1024\n"
+        "class MockModel:\n"
+        "    def predict(self, pairs):\n"
+        "        return [10.0 - float(i)*0.5 for i in range(len(pairs))]\n"
+        "    def rerank_pairs(self, pairs):\n"
+        "        return self.predict(pairs)\n"
+        "from src.rag.libs.postprocessors import BGECrossEncoderReranker\n"
+        "mock_reranker = BGECrossEncoderReranker(model_name='BAAI/bge-reranker-v2-m3', top_n=5, model=MockModel())\n"
+        "with (\n"
+        "    patch('src.mcp.server.mcp.run'),\n"
+        "    patch('src.rag.orchestrator.FastEmbedEmbedding', return_value=MockBGE(model_name='BAAI/bge-m3')),\n"
+        "    patch('src.rag.orchestrator.BGECrossEncoderReranker', return_value=mock_reranker),\n"
+        "):\n"
         "    from src.cli import main\n"
         "    sys.argv = ['cli.py', 'serve', '--transport', 'stdio', '--persist-dir', 'data/index']\n"
         "    main()\n"
@@ -261,4 +372,3 @@ def test_cli_serve_stdio_stdout_logging_clean() -> None:
     assert proc.returncode == 0
     assert proc.stdout == ""
     assert "Starting MCP server with transport: stdio" in proc.stderr
-

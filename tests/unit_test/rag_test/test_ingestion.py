@@ -23,11 +23,6 @@ from llama_index.core.schema import TextNode
 
 from src.rag.exceptions import DocumentParsingError
 from src.rag.ingestion import (
-    DEFAULT_CHUNK_OVERLAP,
-    DEFAULT_CHUNK_SIZE,
-    DEFAULT_CODE_CHUNK_SIZE,
-    MAX_CODE_CHUNK_SIZE,
-    MIN_CODE_CHUNK_SIZE,
     CorruptedDocumentError,
     DoclingPipeline,
     balance_code_fences,
@@ -39,6 +34,7 @@ from src.rag.ingestion import (
     ingest_file,
 )
 from src.rag.metadata import STRICT_METADATA_KEYS
+from src.utils.config_loader import get_ingestion_config
 
 if TYPE_CHECKING:
     from _pytest.capture import CaptureFixture  # noqa: F401
@@ -306,9 +302,11 @@ class TestMarkdownAwareChunking:
 
     def test_chunking_default_token_budget_1024(self) -> None:
         """Verify text chunks do not exceed 1024 tokens."""
-        assert DEFAULT_CHUNK_SIZE == 1024
-        assert DEFAULT_CODE_CHUNK_SIZE == 512
-        assert DEFAULT_CHUNK_OVERLAP == 128
+        cfg = get_ingestion_config()
+        default_pipeline = DoclingPipeline()
+        assert default_pipeline.default_chunk_size == cfg["default_chunk_size"] == 1024
+        assert default_pipeline.code_chunk_size == cfg["code_chunk_size"] == 512
+        assert default_pipeline.overlap == cfg["chunk_overlap"] == 128
         words = ["payload"] * 2500
         long_text = " ".join(words)
 
@@ -378,8 +376,6 @@ class TestTechnicalAdaptiveChunking:
 
     def test_code_block_adaptive_budget_window(self) -> None:
         """Verify code blocks adhere to 256 to 512 token budget window."""
-        assert MIN_CODE_CHUNK_SIZE == 256
-        assert MAX_CODE_CHUNK_SIZE == 512
         pipeline = DoclingPipeline()
         assert pipeline.code_chunk_size == 512
 
@@ -466,6 +462,36 @@ class TestTechnicalAdaptiveChunking:
         parts = broken.split(" ")
         assert len(parts) == 5
         assert all(len(p) <= 1000 for p in parts)
+
+    def test_break_unbroken_strings_uses_config_default(self) -> None:
+        """Verify break_unbroken_strings uses max_unbroken_string_length from config when None."""
+        long_string = "B" * 2500
+        broken = break_unbroken_strings(long_string)
+        parts = broken.split(" ")
+        assert len(parts) == 3
+        assert len(parts[0]) == 1000
+        assert len(parts[1]) == 1000
+        assert len(parts[2]) == 500
+
+    def test_break_unbroken_strings_non_positive_budget_raises(self) -> None:
+        """Verify non-positive max_chunk_chars raises ValueError."""
+        with pytest.raises(ValueError, match="strictly positive"):
+            break_unbroken_strings("sample text", max_chunk_chars=0)
+        with pytest.raises(ValueError, match="strictly positive"):
+            break_unbroken_strings("sample text", max_chunk_chars=-10)
+
+    def test_pipeline_invalid_max_unbroken_string_raises(self) -> None:
+        """Verify non-positive max_unbroken_string_length in pipeline raises ValueError."""
+        with pytest.raises(ValueError, match="max_unbroken_string_length"):
+            DoclingPipeline(max_unbroken_string_length=0)
+
+    def test_pipeline_invalid_overlap_ratios_raises(self) -> None:
+        """Verify invalid overlap ratios raise ValueError."""
+        with pytest.raises(ValueError, match="overlap_ratio"):
+            DoclingPipeline(overlap_ratio_min=0.20, overlap_ratio_max=0.10)
+        with pytest.raises(ValueError, match="overlap_ratio"):
+            DoclingPipeline(overlap_ratio_min=-0.1)
+
 
 
 class TestStrictMetadataAssignment:

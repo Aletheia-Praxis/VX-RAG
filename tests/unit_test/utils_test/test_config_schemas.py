@@ -375,8 +375,41 @@ class TestIngestionConfig:
     def test_default_config(self) -> None:
         """Test default values for IngestionConfig."""
         config = IngestionConfig()
+        assert config.default_chunk_size == 1024
+        assert config.code_chunk_size == 512
+        assert config.chunk_overlap == 128
+        assert config.overlap_ratio_min == 0.10
+        assert config.overlap_ratio_max == 0.15
+        assert config.max_unbroken_string_length == 1000
         assert config.enable_caching is True
         assert config.enable_metadata_extraction is False
         assert config.enable_embedding is True
         assert config.enable_vector_store is True
         assert config.enable_persistence is True
+
+    def test_chunk_size_alias(self) -> None:
+        """Test that chunk_size acts as an alias for default_chunk_size."""
+        config = IngestionConfig(chunk_size=2048, chunk_overlap=256)  # type: ignore[call-arg]
+        assert config.default_chunk_size == 2048
+        assert config.chunk_overlap == 256
+
+    def test_invalid_overlap_raises(self) -> None:
+        """Test that chunk_overlap >= default_chunk_size raises ValueError."""
+        with pytest.raises(ValueError, match="chunk_overlap"):
+            IngestionConfig(default_chunk_size=512, chunk_overlap=512)
+
+    def test_invalid_ratio_bounds_raises(self) -> None:
+        """Test that overlap_ratio_min > overlap_ratio_max raises ValueError."""
+        with pytest.raises(ValueError, match="overlap_ratio_min"):
+            IngestionConfig(overlap_ratio_min=0.20, overlap_ratio_max=0.10)
+
+    def test_null_ingestion_input(self) -> None:
+        """Test that null ingestion input defaults safely."""
+        config = IngestionConfig.model_validate(None)
+        assert config.default_chunk_size == 1024
+        assert config.chunk_overlap == 128
+
+        settings = VXRAGSettings(ingestion=None)
+        assert settings.ingestion.default_chunk_size == 1024
+        assert settings.ingestion.chunk_overlap == 128
+

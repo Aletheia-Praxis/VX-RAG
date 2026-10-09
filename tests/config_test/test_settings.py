@@ -21,6 +21,7 @@ from src.utils.config_loader import (
     get_embedding_config,
     get_embedding_dimension,
     get_embedding_dimensions,
+    get_ingestion_config,
     get_logging_config,
     get_mcp_config,
     get_metrics_config,
@@ -138,6 +139,14 @@ def test_config_loader_getters_test_env(monkeypatch: pytest.MonkeyPatch) -> None
 
     ca_cfg = get_context_assembler_config()
     assert "token_budget" in ca_cfg
+
+    ingestion_cfg = get_ingestion_config()
+    assert ingestion_cfg["default_chunk_size"] == 1024
+    assert ingestion_cfg["code_chunk_size"] == 512
+    assert ingestion_cfg["chunk_overlap"] == 128
+    assert ingestion_cfg["overlap_ratio_min"] == 0.10
+    assert ingestion_cfg["overlap_ratio_max"] == 0.15
+    assert ingestion_cfg["max_unbroken_string_length"] == 1000
 
     validated = get_validated_settings()
     assert isinstance(validated, VXRAGSettings)

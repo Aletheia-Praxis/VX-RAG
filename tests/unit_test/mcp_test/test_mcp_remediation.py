@@ -300,7 +300,7 @@ class TestMCPServerPersistDirWiring:
             "from unittest.mock import patch, MagicMock\n"
             "mock_orch = MagicMock()\n"
             "mock_orch.get_health_status.return_value = {'overall_status': 'healthy', 'initialized': True, 'indexes_loaded': True}\n"
-            "with patch('src.mcp.server.mcp.run'), patch('src.mcp.server.configure_server', return_value=mock_orch):\n"
+            "with patch('src.mcp.server.mcp.run'), patch('src.rag.orchestrator.get_orchestrator', return_value=mock_orch):\n"
             "    import runpy\n"
             "    runpy.run_module('src.mcp.server', run_name='__main__')\n"
         )

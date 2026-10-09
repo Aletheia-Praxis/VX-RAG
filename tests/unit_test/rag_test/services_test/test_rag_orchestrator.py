@@ -34,12 +34,13 @@ os.environ["IS_TESTING"] = "1"
 from src.rag.libs.postprocessors import BGECrossEncoderReranker
 from src.rag.libs.schemas.mcp_schemas import MCPContextPayload
 from src.rag.orchestrator import (
-    _EMBEDDING_DIMENSION_BY_MODEL,
-    _FALLBACK_EMBEDDING_DIMENSION,
     RAGOrchestrator,
     RobustQdrantVectorStore,
     get_orchestrator,
     reset_orchestrator,
+)
+from src.utils.config_loader import (
+    get_embedding_dimension,
 )
 
 if TYPE_CHECKING:
@@ -128,14 +129,14 @@ class TestRAGOrchestratorInitialization:
         assert orchestrator._reranker is None
         assert orchestrator.persist_dir == persist_dir
 
-    def test_fallback_embedding_dimension_mapping(self) -> None:
-        """Verify fallback embedding dimension is 1024."""
-        dim = _EMBEDDING_DIMENSION_BY_MODEL.get("non-existent-model", _FALLBACK_EMBEDDING_DIMENSION)
-        assert dim == 1024
+    def test_unconfigured_model_embedding_dimension_raises(self) -> None:
+        """Verify unconfigured embedding model dimension raises ValueError."""
+        with pytest.raises(ValueError, match="Embedding dimension not configured"):
+            get_embedding_dimension("non-existent-model")
 
     def test_bge_m3_embedding_dimension_mapping(self) -> None:
         """Verify BAAI/bge-m3 maps to 1024 dimensions."""
-        dim = _EMBEDDING_DIMENSION_BY_MODEL.get("BAAI/bge-m3", _FALLBACK_EMBEDDING_DIMENSION)
+        dim = get_embedding_dimension("BAAI/bge-m3")
         assert dim == 1024
 
     @patch("src.rag.orchestrator.FastEmbedEmbedding")
@@ -672,9 +673,10 @@ class TestQuerySearchAndHealthStatus:
 
         orch_module._orchestrator_instance = None
         try:
-            instance1 = get_orchestrator(config_path=temp_config_file, persist_dir=str(tmp_path / "singleton"))
-            instance2 = get_orchestrator(config_path=temp_config_file, persist_dir=str(tmp_path / "singleton"))
-            assert instance1 is instance2
+            with patch("src.rag.orchestrator.init_onnx_runtime", return_value=(MagicMock(), MagicMock())):
+                instance1 = get_orchestrator(config_path=temp_config_file, persist_dir=str(tmp_path / "singleton"))
+                instance2 = get_orchestrator(config_path=temp_config_file, persist_dir=str(tmp_path / "singleton"))
+                assert instance1 is instance2
         finally:
             reset_orchestrator()
 
