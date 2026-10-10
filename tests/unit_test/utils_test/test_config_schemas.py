@@ -409,7 +409,7 @@ class TestIngestionConfig:
         assert config.default_chunk_size == 1024
         assert config.chunk_overlap == 128
 
-        settings = VXRAGSettings(ingestion=None)
+        settings = VXRAGSettings.model_validate({"ingestion": None})
         assert settings.ingestion.default_chunk_size == 1024
         assert settings.ingestion.chunk_overlap == 128
 
