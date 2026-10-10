@@ -6,13 +6,28 @@ data_dir: "./tests/test_data"
 raw_data_dir: "./tests/test_data/raw"
 processed_data_dir: "./tests/test_data/processed"
 index_dir: "./tests/test_data/index"
+snapshots_dir: "./tests/test_data/snapshots"
 
 # Embedding configuration
-embedding_model: "all-MiniLM-L6-v2"
+embedding_model: "BAAI/bge-m3"
+embedding_provider: "flagembedding"
 embedding_device: "cpu"
 embedding_batch_size: 10
 embedding_cache_size: 1000
+threads: 12
 embedding_trust_remote_code: false
+
+# Embedding model dimensions
+embedding_dimensions:
+  "BAAI/bge-m3": 1024
+
+
+# Task Queue configuration
+task_queue:
+  max_concurrent_tasks: 2
+  max_completed_tasks: 100
+  max_failed_tasks: 50
+
 
 # Indexing configuration
 chunk_size: 1024
@@ -24,12 +39,16 @@ qdrant:
   collection_name: "test_vx_rag_collection"
   path: "./tests/test_data/index/qdrant"
   distance: "Cosine"
+  datatype: "FLOAT16"
+  enable_hybrid: true
 
 # Document store configuration
 docstore:
   store_type: "duckdb"
   db_name: "docstore.duckdb"
   table_name: "docstore"
+  intermediate_nodes_db_name: "intermediate_nodes.duckdb"
+  intermediate_nodes_table_name: "intermediate_nodes"
 
 # Adaptive chunking for technical content
 adaptive_chunking:
@@ -63,15 +82,10 @@ retriever:
   metadata_filters: []
   enable_hybrid: true
 
-# BM25 configuration
-bm25:
-  index_dir: "./tests/test_data/index/bm25"
-  similarity_top_k: 20
-  enable_persistence: true
-
 # Reranker configuration
 reranker:
-  model_name: "cross-encoder/ms-marco-MiniLM-L-6-v2"
+  model_name: "BAAI/bge-reranker-v2-m3"
+  provider: "flagembedding"
   top_k: 5
   device: "cpu"
   metadata_boost: 0.1
@@ -82,14 +96,34 @@ mcp:
   host: "127.0.0.1"
   port: 25191
   debug: true
-  query_timeout: 600.0
+  persist_dir: "./tests/test_data/index"
+  rate_limit:
+    max_concurrent: 2
+    queue_size: 10
+    default_timeout: 600.0
+  timeouts:
+    query_knowledge_base: 600.0
+    search_documents: 300.0
+    health_check: 30.0
+    system_context: 10.0
+  defaults:
+    top_k: 5
+    token_budget: 4096
+    search_top_k: 10
+    apply_redaction: true
 
 # Context Assembler configuration
 context_assembler:
-  token_budget: 2048
+  token_budget: 4096
   model_name: "gpt-3.5-turbo"
   max_items: null
   min_score: null
+
+# Router Query Engine configuration
+router:
+  selector_type: "pydantic"
+  use_multi_select: false
+  verbose: false
 
 # Duplicate detection configuration
 duplicate_detection:
@@ -100,6 +134,8 @@ duplicate_detection:
 logging:
   log_level: "DEBUG"  # More verbose logging for tests
   log_file: "./tests/test_logs/test_run.log"  # Separate log directory for tests
+  max_bytes: 10485760
+  backup_count: 5
   log_format: "json"
   log_structured_events: true
   log_metrics: false  # Disable metrics in tests to reduce noise
@@ -109,16 +145,16 @@ metrics_enabled: false
 metrics_log_interval: 300
 metrics_file: "test_metrics.log"
 
-# Boilerplate removal configuration
-boilerplate_removal:
-  enabled: true
-  aggressive_mode: true
-  position: "after_ocr"
-  patterns:
-    remove_html_comments: true
-    remove_blog_metadata: true
-    remove_footer_timestamps: true
-    remove_navigation: true
-    remove_social_sharing: true
-    preserve_code_blocks: true
-    preserve_markdown_structure: true
+# Ingestion Pipeline configuration
+ingestion:
+  default_chunk_size: 1024
+  code_chunk_size: 512
+  chunk_overlap: 128
+  overlap_ratio_min: 0.10
+  overlap_ratio_max: 0.15
+  max_unbroken_string_length: 1000
+  enable_caching: true
+  enable_metadata_extraction: false
+  enable_embedding: true
+  enable_vector_store: true
+  vector_store_kwargs: {}

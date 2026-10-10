@@ -9,10 +9,23 @@ snapshots_dir: "./data/snapshots"
 
 # Embedding configuration
 embedding_model: "BAAI/bge-m3"
+embedding_provider: "flagembedding"
 embedding_device: "cpu"     # Force CPU usage
 embedding_batch_size: 10    # Batch size for embedding generation
-embedding_cache_size: 1000  # Maximum number of cached embeddings
+embedding_cache_size: 100000  # Maximum number of cached embeddings
+threads: 12                 # CPU threads for Ryzen optimization
 embedding_trust_remote_code: false  # Security: don't trust remote code
+
+# Embedding model dimensions
+embedding_dimensions:
+  "BAAI/bge-m3": 1024
+
+# Task Queue configuration
+task_queue:
+  max_concurrent_tasks: 2
+  max_completed_tasks: 100
+  max_failed_tasks: 50
+
 
 # Indexing configuration
 # Default chunking parameters for general content
@@ -25,14 +38,16 @@ qdrant:
   collection_name: "vx_rag_collection"
   path: "./data/index/qdrant"
   distance: "Cosine"
+  datatype: "FLOAT16"
   enable_hybrid: true
-  sparse_model: "BAAI/bge-m3"
 
 # Document store configuration
 docstore:
   store_type: "duckdb"     # Document store backend: duckdb, simple
   db_name: "docstore.duckdb"  # DuckDB database file name
   table_name: "docstore"   # DuckDB key-value table name
+  intermediate_nodes_db_name: "intermediate_nodes.duckdb"
+  intermediate_nodes_table_name: "intermediate_nodes"
 
 # Adaptive chunking for technical content
 adaptive_chunking:
@@ -72,17 +87,11 @@ retriever:
   semantic_top_k: 20    # Number of documents to retrieve semantically
   hybrid_alpha: 0.5     # Weight for hybrid search (0.0 = sparse, 1.0 = dense)
   metadata_filters: []  # List of metadata filters to apply
-  enable_hybrid: true   # Enable hybrid search (requires BM25 index)
-
-# BM25 configuration
-bm25:
-  index_dir: "./data/index/bm25"  # Directory for BM25 index
-  similarity_top_k: 20            # Default for initial retrieval
-  enable_persistence: true        # Save/load BM25 index to/from disk
 
 # Reranker configuration
 reranker:
   model_name: "BAAI/bge-reranker-v2-m3"  # Cross-encoder model for reranking
+  provider: "flagembedding"              # Reranker provider (FlagEmbedding)
   top_k: 5             # Final number of documents after reranking
   device: "cpu"        # Device for reranking model
   metadata_boost: 0.1  # Boost factor for documents with matching metadata
@@ -93,6 +102,7 @@ mcp:
   host: "127.0.0.1"
   port: 25191  # The MCP server port is 2025, 29th day, 10th month (October), i.e. the date of creation of the repository.
   debug: true  # Enable debug mode
+  persist_dir: "data/index"
   
   # Rate limiting
   rate_limit:
@@ -110,13 +120,13 @@ mcp:
   # Tool default parameters
   defaults:
     top_k: 5               # Default number of results for knowledge base queries
-    token_budget: 4000     # Default token budget for context assembly
+    token_budget: 4096     # Default token budget for context assembly
     search_top_k: 10       # Default number of results for document search
     apply_redaction: true  # Enable sensitive data redaction in responses
 
 # Context Assembler configuration
 context_assembler:
-  token_budget: 2048  # Default token budget for context
+  token_budget: 4096  # Default token budget for context
   model_name: "gpt-3.5-turbo"  # Model name for token counting
   max_items: null  # Maximum number of context items (null = no limit)
   min_score: null  # Minimum relevance score (null = no limit)
@@ -147,42 +157,16 @@ metrics_enabled: true
 metrics_log_interval: 300    # Log metrics every 5 minutes (in seconds)
 metrics_file: "metrics.log"  # File to log metrics
 
-# PaddleOCR configuration
-paddle_ocr:
-  enabled: true                          # Enable PaddleOCR for image text extraction
-  lang: "en"                             # OCR language (en, ch, fr, german, korean, japan)
-  use_gpu: false                         # Use GPU acceleration (requires CUDA)
-  use_angle_cls: true                    # Enable text angle classification
-  show_log: false                        # Show PaddleOCR logs
-  det_model_dir: null                    # Path to custom detection model (null = default)
-  rec_model_dir: null                    # Path to custom recognition model (null = default)
-  cls_model_dir: null                    # Path to custom classification model (null = default)
-  use_space_char: true                   # Recognize space characters
-  enable_mkldnn: false                   # Enable MKLDNN acceleration
-  cpu_threads: 4                         # Number of CPU threads for inference
-  min_confidence: 0.5                    # Minimum confidence threshold for OCR results
-  save_extracted_images: true            # Save extracted images to disk
-  extracted_images_dir: "./data/extracted_images"  # Directory for extracted images
-  replace_image_placeholders: true       # Replace <!-- image --> markers with extracted text
-
 # Ingestion Pipeline configuration
 ingestion:
+  default_chunk_size: 1024                # Target token size for general text chunks
+  code_chunk_size: 512                    # Target token window for code chunks
+  chunk_overlap: 128                      # Tokens to overlap between adjacent chunks
+  overlap_ratio_min: 0.10                 # Minimum overlap ratio (10%)
+  overlap_ratio_max: 0.15                 # Maximum overlap ratio (15%)
+  max_unbroken_string_length: 1000        # Maximum continuous string length before safe splitting
   enable_caching: true                    # Enable pipeline caching
   enable_metadata_extraction: false       # Enable title/metadata extraction
   enable_embedding: true                  # Enable embedding generation
   enable_vector_store: true               # Enable vector store integration
   vector_store_kwargs: {}                 # Additional vector store parameters
-
-# Boilerplate removal configuration
-boilerplate_removal:
-  enabled: true                        # Enable aggressive boilerplate removal
-  aggressive_mode: true                # Use aggressive patterns (recommended for blog posts)
-  position: "after_ocr"                # Apply after OCR but before normalization
-  patterns:
-    remove_html_comments: true         # Remove <!-- image --> and similar
-    remove_blog_metadata: true         # Remove blog URLs, author footers
-    remove_footer_timestamps: true     # Remove date footers
-    remove_navigation: true            # Remove breadcrumbs and nav elements
-    remove_social_sharing: true        # Remove social media elements
-    preserve_code_blocks: true         # Always preserve ```code``` blocks
-    preserve_markdown_structure: true  # Always preserve ## headers and lists
