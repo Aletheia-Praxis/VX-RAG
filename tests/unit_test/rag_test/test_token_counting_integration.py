@@ -1,3 +1,5 @@
+from collections.abc import Generator
+
 import pytest
 from llama_index.core import Settings
 
@@ -9,14 +11,14 @@ from src.rag.libs.utils.token_counter import LlamaIndexTokenCounter
 
 
 @pytest.fixture(autouse=True)
-def clear_callback_manager():
+def clear_callback_manager() -> Generator[None, None, None]:
     # Ensure a clean global callback manager before each test
-    Settings.callback_manager = None
+    Settings.callback_manager = None  # type: ignore[assignment]
     yield
-    Settings.callback_manager = None
+    Settings.callback_manager = None  # type: ignore[assignment]
 
 
-def test_get_and_ensure_global_token_counter():
+def test_get_and_ensure_global_token_counter() -> None:
     assert get_global_token_counter() is None
     handler = ensure_global_token_counter(model_name="gpt-3.5-turbo", verbose=False)
     assert handler is not None
@@ -25,16 +27,16 @@ def test_get_and_ensure_global_token_counter():
     assert found is handler
 
 
-def test_llamaindex_token_counter_uses_global_handler():
+def test_llamaindex_token_counter_uses_global_handler() -> None:
     # Create global handler
     global_handler = ensure_global_token_counter(model_name="gpt-3.5-turbo", verbose=False)
 
     counter = LlamaIndexTokenCounter(model_name="gpt-3.5-turbo", verbose=False)
     assert counter.token_counter is global_handler
-    assert hasattr(counter.token_counter, 'total_embedding_token_count')
+    assert hasattr(counter.token_counter, "total_embedding_token_count")
 
 
-def test_ensure_global_token_counter_idempotent():
+def test_ensure_global_token_counter_idempotent() -> None:
     # Ensure global token counter registers only once
     handler1 = ensure_global_token_counter(model_name="gpt-3.5-turbo", verbose=False)
     # After the first ensure, Settings.callback_manager must exist
@@ -46,18 +48,18 @@ def test_ensure_global_token_counter_idempotent():
     assert len(Settings.callback_manager.handlers) == initial_len
 
 
-def test_tokenbudgeter_uses_global_counter():
+def test_tokenbudgeter_uses_global_counter() -> None:
     from src.rag.libs.utils.token_utils import TokenBudgeter
 
     # Ensure global registered
     global_handler = ensure_global_token_counter(model_name="gpt-3.5-turbo", verbose=False)
     tb = TokenBudgeter(model_name="gpt-3.5-turbo", verbose=False)
-    assert hasattr(tb, 'get_stats')
+    assert hasattr(tb, "get_stats")
     stats = tb.get_stats()
-    assert stats['total_embedding_tokens'] == global_handler.total_embedding_token_count
+    assert stats["total_embedding_tokens"] == global_handler.total_embedding_token_count
 
 
-def test_budget_and_assemble_uses_global_handler():
+def test_budget_and_assemble_uses_global_handler() -> None:
     """Ensure budget_and_assemble uses the global TokenCountingHandler via TokenBudgeter."""
     from src.rag.libs.utils.token_utils import budget_and_assemble
 
@@ -66,13 +68,13 @@ def test_budget_and_assemble_uses_global_handler():
 
     # Prepare a couple of sample documents with text and scores
     docs = [
-        {'id': '1', 'text': 'Hello world', 'score': 0.9, 'metadata': {}},
-        {'id': '2', 'text': 'Another document', 'score': 0.8, 'metadata': {}},
+        {"id": "1", "text": "Hello world", "score": 0.9, "metadata": {}},
+        {"id": "2", "text": "Another document", "score": 0.8, "metadata": {}},
     ]
 
     payload = budget_and_assemble(results=docs, token_budget=2048, model_name="gpt-3.5-turbo")
 
     # Confirm payload structure and that the global handler is still the same instance
     assert isinstance(payload, dict)
-    assert 'context' in payload
+    assert "context" in payload
     assert get_global_token_counter() is global_handler

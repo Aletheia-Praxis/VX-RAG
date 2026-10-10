@@ -139,7 +139,7 @@ class TestRAGOrchestratorInitialization:
         dim = get_embedding_dimension("BAAI/bge-m3")
         assert dim == 1024
 
-    @patch("src.rag.orchestrator.FastEmbedEmbedding")
+    @patch("src.rag.orchestrator.BGEM3Embedding")
     @patch("src.rag.orchestrator.BGECrossEncoderReranker")
     def test_initialize_services_configures_bge_models(
         self,
@@ -152,7 +152,7 @@ class TestRAGOrchestratorInitialization:
 
         Args:
             mock_reranker_cls: Mocked BGECrossEncoderReranker class.
-            mock_hf_embed: Mocked FastEmbedEmbedding class.
+            mock_hf_embed: Mocked BGEM3Embedding class.
             temp_config_file: Path to temporary config YAML.
             tmp_path: Temporary directory fixture.
         """
@@ -472,7 +472,7 @@ class TestManifestAndSnapshotPersistence:
 class TestBGECrossEncoderReranker:
     """Test suite for BGECrossEncoderReranker postprocessor."""
 
-    @patch("src.rag.libs.postprocessors.FastEmbedCrossEncoder")
+    @patch("FlagEmbedding.FlagReranker")
     def test_reranker_reordering_and_sigmoid_normalization(
         self,
         mock_cross_encoder_cls: MagicMock,
@@ -486,7 +486,7 @@ class TestBGECrossEncoderReranker:
 
         mock_model = MagicMock()
         # Raw logits: relevant snippet gets +3.0, irrelevant gets -3.0
-        mock_model.predict.return_value = [ -3.0, 3.0 ]
+        mock_model.compute_score.return_value = [0.0474, 0.9526]
         mock_cross_encoder_cls.return_value = mock_model
 
         reranker = BGECrossEncoderReranker(
@@ -514,7 +514,7 @@ class TestBGECrossEncoderReranker:
         assert 0.0 <= (reranked[1].score or 0.0) <= 1.0
         assert (reranked[0].score or 0.0) > (reranked[1].score or 0.0)
 
-    @patch("src.rag.libs.postprocessors.FastEmbedCrossEncoder")
+    @patch("FlagEmbedding.FlagReranker")
     def test_reranker_fallback_on_inference_error(
         self,
         mock_cross_encoder_cls: MagicMock,
@@ -527,7 +527,7 @@ class TestBGECrossEncoderReranker:
         from llama_index.core import QueryBundle
 
         mock_model = MagicMock()
-        mock_model.predict.side_effect = RuntimeError("Inference engine failure")
+        mock_model.compute_score.side_effect = RuntimeError("Inference engine failure")
         mock_cross_encoder_cls.return_value = mock_model
 
         reranker = BGECrossEncoderReranker(
@@ -673,7 +673,7 @@ class TestQuerySearchAndHealthStatus:
 
         orch_module._orchestrator_instance = None
         try:
-            with patch("src.rag.orchestrator.init_onnx_runtime", return_value=(MagicMock(), MagicMock())):
+            with patch("src.rag.orchestrator.BGEM3Embedding", return_value=MagicMock(spec=BaseEmbedding)):
                 instance1 = get_orchestrator(config_path=temp_config_file, persist_dir=str(tmp_path / "singleton"))
                 instance2 = get_orchestrator(config_path=temp_config_file, persist_dir=str(tmp_path / "singleton"))
                 assert instance1 is instance2

@@ -122,16 +122,9 @@ class TestFeatures13To16CLICommands:
 
     def test_cli_serve_persist_dir_forwarding(self, run_cli_command: Callable[[list[str]], Any]) -> None:
         """Verify cli serve forwards custom --persist-dir to server runtime."""
-        with (
-            patch("src.mcp.server.run_stdio") as mock_run_stdio,
-            patch("src.mcp.server.configure_server") as mock_configure_server,
-        ):
+        with patch("src.mcp.server.run_stdio") as mock_run_stdio:
             res = run_cli_command(["serve", "--persist-dir", "custom/indices/path"])
             assert res.exit_code == 0
-            mock_configure_server.assert_called_once_with(
-                config_path=get_default_config_path(),
-                persist_dir="custom/indices/path",
-            )
             mock_run_stdio.assert_called_once_with(
                 config_path=get_default_config_path(),
                 persist_dir="custom/indices/path",

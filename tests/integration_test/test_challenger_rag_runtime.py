@@ -83,6 +83,10 @@ class MockBGEEmbedding(BaseEmbedding):
         """Produce asynchronous 1024-dimensional normalized float vector."""
         return self._get_text_embedding(text)
 
+    def encode_sparse(self, texts: list[str]) -> tuple[list[list[int]], list[list[float]]]:
+        """Produce sparse token frequency vectors matching vocabulary in index."""
+        return [[4, 5, 6] for _ in texts], [[1.0, 1.0, 1.0] for _ in texts]
+
 
 class MockBGERerankerModel:
     """Mock cross encoder model for BAAI/bge-reranker-v2-m3."""
@@ -99,9 +103,10 @@ class MockBGERerankerModel:
 @pytest.fixture(autouse=True)
 def configure_mock_llm(monkeypatch: pytest.MonkeyPatch) -> None:
     """Ensure MockLLM and BAAI/bge models are configured for testing without external weights."""
+    reset_orchestrator()
     Settings.llm = MockLLM()
     mock_embed = MockBGEEmbedding()
-    monkeypatch.setattr("src.rag.orchestrator.FastEmbedEmbedding", lambda *a, **kw: mock_embed)
+    monkeypatch.setattr("src.rag.orchestrator.BGEM3Embedding", lambda *a, **kw: mock_embed)
 
     mock_model = MockBGERerankerModel()
     real_reranker_init = BGECrossEncoderReranker.__init__
@@ -162,8 +167,9 @@ def test_vector_store_and_bm25_structures_in_memory() -> None:
     assert client is not None, "Qdrant client is missing"
     collection_name = vector_store.collection_name
     collection_info = client.get_collection(collection_name)
-    assert collection_info is not None, "Qdrant collection is missing"
-    assert collection_info.points_count > 0, f"Expected > 0 points, got {collection_info.points_count}"
+    assert collection_info.points_count is not None and collection_info.points_count > 0, (
+        f"Expected > 0 points, got {collection_info.points_count}"
+    )
 
 
 def test_query_execution_and_score_normalization() -> None:
@@ -283,6 +289,7 @@ def test_cli_query_succeeds_without_openai_api_key_in_clean_env() -> None:
 
     env = dict(os.environ)
     env.pop("OPENAI_API_KEY", None)
+    env.pop("VX_RAG_CONFIG_PATH", None)
     env["PYTHONPATH"] = "."
 
     script = (
@@ -306,7 +313,7 @@ def test_cli_query_succeeds_without_openai_api_key_in_clean_env() -> None:
         "from src.rag.libs.postprocessors import BGECrossEncoderReranker\n"
         "mock_reranker = BGECrossEncoderReranker(model_name='BAAI/bge-reranker-v2-m3', top_n=5, model=MockModel())\n"
         "with (\n"
-        "    patch('src.rag.orchestrator.FastEmbedEmbedding', return_value=MockBGE(model_name='BAAI/bge-m3')),\n"
+        "    patch('src.rag.orchestrator.BGEM3Embedding', return_value=MockBGE(model_name='BAAI/bge-m3')),\n"
         "    patch('src.rag.orchestrator.BGECrossEncoderReranker', return_value=mock_reranker),\n"
         "):\n"
         "    from src.cli import main\n"
@@ -355,18 +362,21 @@ def test_cli_serve_stdio_stdout_logging_clean() -> None:
         "mock_reranker = BGECrossEncoderReranker(model_name='BAAI/bge-reranker-v2-m3', top_n=5, model=MockModel())\n"
         "with (\n"
         "    patch('src.mcp.server.mcp.run'),\n"
-        "    patch('src.rag.orchestrator.FastEmbedEmbedding', return_value=MockBGE(model_name='BAAI/bge-m3')),\n"
+        "    patch('src.rag.orchestrator.BGEM3Embedding', return_value=MockBGE(model_name='BAAI/bge-m3')),\n"
         "    patch('src.rag.orchestrator.BGECrossEncoderReranker', return_value=mock_reranker),\n"
         "):\n"
         "    from src.cli import main\n"
         "    sys.argv = ['cli.py', 'serve', '--transport', 'stdio', '--persist-dir', 'data/index']\n"
         "    main()\n"
     )
+    env = dict(os.environ)
+    env.pop("VX_RAG_CONFIG_PATH", None)
     proc = subprocess.run(
         [sys.executable, "-c", script],
         capture_output=True,
         text=True,
         timeout=30,
+        env=env,
         check=False,
     )
     assert proc.returncode == 0

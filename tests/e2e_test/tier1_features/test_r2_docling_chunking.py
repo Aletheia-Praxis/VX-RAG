@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import re
 from pathlib import Path
+from typing import Any, cast
 
 import pytest
 
@@ -62,8 +63,9 @@ class TestFeature6DoclingStandardExtraction:
                 {"type": "paragraph", "text": "Details regarding memory unpacking."},
             ],
         }
-        assert document_tree["children"][0]["text"] == "Emotet Loader"
-        assert document_tree["children"][1]["text"] == "Details regarding memory unpacking."
+        children = cast(list[dict[str, Any]], document_tree["children"])
+        assert children[0]["text"] == "Emotet Loader"
+        assert children[1]["text"] == "Details regarding memory unpacking."
 
     def test_docling_standard_extraction_corrupted_file_error(self, tmp_path: Path) -> None:
         """Verify extraction raises an error when processing a completely corrupted file."""

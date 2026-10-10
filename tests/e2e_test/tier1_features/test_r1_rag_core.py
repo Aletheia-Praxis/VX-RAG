@@ -191,6 +191,7 @@ class TestFeature3QdrantIncrementalAppends:
             vectors_config=VectorParams(size=dimension, distance=Distance.COSINE),
         )
         col_info = client.get_collection("test_col")
+        assert isinstance(col_info.config.params.vectors, VectorParams)
         assert col_info.config.params.vectors.size == dimension
         assert col_info.points_count == 0
 

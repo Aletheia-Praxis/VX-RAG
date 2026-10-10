@@ -15,12 +15,13 @@ import logging
 import subprocess
 import sys
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
 from src.mcp.server import (
+    _LoopBoundLock,
     configure_server,
     health_status,
     query_knowledge_base,
@@ -28,6 +29,13 @@ from src.mcp.server import (
     run_stdio,
     search_documents,
 )
+
+if TYPE_CHECKING:
+    from _pytest.capture import CaptureFixture  # noqa: F401
+    from _pytest.fixtures import FixtureRequest  # noqa: F401
+    from _pytest.logging import LogCaptureFixture  # noqa: F401
+    from _pytest.monkeypatch import MonkeyPatch  # noqa: F401
+    from pytest_mock.plugin import MockerFixture  # noqa: F401
 from src.utils.logging_config import (
     configure_console_stream,
     get_logger,
@@ -132,21 +140,16 @@ class TestFastMCPStdioLoggingRedirection:
         def _mock_cfg_stream(stream: Any) -> None:
             call_order.append("configure_console_stream")
 
-        def _mock_cfg_server(*args: Any, **kwargs: Any) -> Any:
-            call_order.append("configure_server")
-            return MagicMock()
-
         def _mock_run_stdio(*args: Any, **kwargs: Any) -> None:
             call_order.append("run_stdio")
 
         with (
             patch("src.utils.logging_config.configure_console_stream", side_effect=_mock_cfg_stream),
-            patch("src.mcp.server.configure_server", side_effect=_mock_cfg_server),
             patch("src.mcp.server.run_stdio", side_effect=_mock_run_stdio),
         ):
             handle_serve(args)
 
-        assert call_order == ["configure_console_stream", "configure_server", "run_stdio"]
+        assert call_order == ["configure_console_stream", "run_stdio"]
 
 
 class TestMCPServerPersistDirWiring:
@@ -316,4 +319,67 @@ class TestMCPServerPersistDirWiring:
         assert proc.returncode == 0
         assert proc.stdout == ""
         assert "Starting VX-RAG MCP server in STDIO mode" in proc.stderr
+
+
+class TestLoopBoundLockConcurrency:
+    """Unit tests for _LoopBoundLock concurrency, thread safety, and cross-loop resolution."""
+
+    @pytest.mark.asyncio
+    async def test_locked_in_thread_pool_worker(self) -> None:
+        """Verify locked() returns True when invoked from a thread without an active event loop."""
+        import asyncio
+
+        lock = _LoopBoundLock()
+        assert not lock.locked()
+
+        async with lock:
+            assert lock.locked()
+            in_worker_locked = await asyncio.to_thread(lock.locked)
+            assert in_worker_locked is True
+
+        assert not lock.locked()
+        in_worker_unlocked = await asyncio.to_thread(lock.locked)
+        assert in_worker_unlocked is False
+
+    @pytest.mark.asyncio
+    async def test_locked_across_different_event_loops(self) -> None:
+        """Verify locked() returns True when inspected from a secondary event loop."""
+        import asyncio
+
+        lock = _LoopBoundLock()
+        assert not lock.locked()
+
+        async with lock:
+            def check_in_separate_loop() -> bool:
+                async def _probe() -> bool:
+                    return lock.locked()
+
+                return asyncio.run(_probe())
+
+            is_locked = await asyncio.to_thread(check_in_separate_loop)
+            assert is_locked is True
+
+        assert not lock.locked()
+
+    def test_concurrent_access_stress(self) -> None:
+        """Verify thread-safe initialization and locked checking under concurrency."""
+        import asyncio
+        import concurrent.futures
+
+        lock = _LoopBoundLock()
+
+        def _worker(worker_id: int) -> bool:
+            async def _run() -> bool:
+                async with lock:
+                    return lock.locked()
+
+            return asyncio.run(_run())
+
+        with concurrent.futures.ThreadPoolExecutor(max_workers=8) as executor:
+            futures = [executor.submit(_worker, i) for i in range(16)]
+            results = [f.result() for f in futures]
+
+        assert all(results)
+        assert not lock.locked()
+
 

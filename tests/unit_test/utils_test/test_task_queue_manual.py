@@ -26,7 +26,7 @@ async def async_task(value: int, delay: float = 0.1) -> int:
     return result
 
 
-async def main():
+async def main() -> None:
     """Test TaskQueue with both sync and async tasks."""
     print("=== TaskQueue Manual Test ===\n")
     

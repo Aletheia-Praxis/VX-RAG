@@ -14,6 +14,7 @@ from src.utils.config_loader import (
     get_chunk_size,
     get_default_config_path,
     get_embedding_dimensions,
+    get_ingestion_config,
     get_onnx_config,
     get_validated_settings,
     load_settings,
@@ -370,3 +371,27 @@ class TestConfigValidationIntegration:
         path = get_default_config_path()
         assert isinstance(path, str)
         assert len(path) > 0
+
+    def test_get_ingestion_config(self, tmp_path: Path) -> None:
+        """Test get_ingestion_config retrieves ingestion parameters."""
+        cfg_data = {
+            "ingestion": {
+                "default_chunk_size": 2048,
+                "code_chunk_size": 256,
+                "chunk_overlap": 200,
+                "overlap_ratio_min": 0.12,
+                "overlap_ratio_max": 0.18,
+                "max_unbroken_string_length": 800,
+            }
+        }
+        cfg_file = tmp_path / "ingestion_settings.yaml"
+        with open(cfg_file, "w", encoding="utf-8") as f:
+            yaml.dump(cfg_data, f)
+
+        ing_cfg = get_ingestion_config(str(cfg_file))
+        assert ing_cfg["default_chunk_size"] == 2048
+        assert ing_cfg["code_chunk_size"] == 256
+        assert ing_cfg["chunk_overlap"] == 200
+        assert ing_cfg["overlap_ratio_min"] == 0.12
+        assert ing_cfg["overlap_ratio_max"] == 0.18
+        assert ing_cfg["max_unbroken_string_length"] == 800
